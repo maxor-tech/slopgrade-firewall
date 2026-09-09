@@ -1,0 +1,46 @@
+name: "slopGrade Firewall"
+description: "Deterministic tenant-isolation leak detection for CI — $0, zero source egress, zero secrets (GitHub OIDC). Advisory free for every public repo; the blocking gate is free for open-source."
+author: "Maxor Global LLC"
+branding: { icon: "shield", color: "green" }
+inputs:
+  firewall-mode:
+    description: "advisory (default — reports leaks, never blocks) | gate (blocks on a hard cross-tenant leak, if the repo is entitled) | off"
+    required: false
+    default: "advisory"
+  strict:
+    description: "fail CLOSED (exit 1) when no server verdict is available in gate mode, so the control cannot silently self-disable on an outage. Default false (fail open — a network/server incident never breaks the build)."
+    required: false
+    default: "false"
+  sarif-file:
+    description: "if set, write a SARIF report of the leaks to this path (upload it with github/codeql-action/upload-sarif so findings appear in the PR diff + code-scanning tab). Default empty (disabled)."
+    required: false
+    default: ""
+runs:
+  using: "composite"
+  steps:
+    # SHA-pinned — we tell consumers to pin our SHA, so we pin our own dependencies too. A mutable @v4 tag would let
+    # a compromised tag run arbitrary code in every consumer's runner with their source checked out. (= actions/setup-node v4)
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      if: ${{ inputs.firewall-mode != 'off' }}
+      with: { node-version: "22" }
+    - name: slopgrade-firewall
+      if: ${{ inputs.firewall-mode != 'off' }}
+      shell: bash
+      env:
+        FW_MODE: ${{ inputs.firewall-mode }}
+        FW_STRICT: ${{ inputs.strict }}
+        FW_SARIF: ${{ inputs.sarif-file }}
+        FW_CLI: ${{ github.action_path }}/isolation-gate.mjs
+      run: |
+        set -euo pipefail
+        # The firewall scans the whole checked-out tree (GITHUB_WORKSPACE = the calling repo). The structural
+        # fingerprint is computed LOCALLY (file contents never leave) and posted to the server brain, which
+        # classifies + measures. --gate is passed only in 'gate' mode; the server gates the real block via
+        # entitlement (public || paid add-on), so 'gate' on a non-entitled repo stays advisory. Fails OPEN by
+        # default (a missing OIDC token, timeout, or server error never breaks the build); --strict fails closed.
+        ARGS=""
+        [ "${FW_MODE}" = "gate" ] && ARGS="${ARGS} --gate"
+        [ "${FW_STRICT}" = "true" ] && ARGS="${ARGS} --strict"
+        [ -n "${FW_SARIF}" ] && ARGS="${ARGS} --sarif ${FW_SARIF}"
+        # shellcheck disable=SC2086
+        node "$FW_CLI" $ARGS
