@@ -1,7 +1,7 @@
 {
   "name": "slopgrade-firewall",
   "version": "0.5.0",
-  "description": "Deterministic security-leak detection for CI — the open-source client of the slopGrade Firewall. Free tier: the 10 highest-severity classes (SQLi, command injection, XSS, SSRF, XXE, insecure deserialization, path traversal, hardcoded secrets, broken crypto, CORS). $0, zero source egress, zero secrets (GitHub OIDC).",
+  "description": "Deterministic security-leak detection for CI — the open-source client of the slopGrade Firewall. Free tier: the 10 highest-severity classes (SQLi, command injection, XSS, SSRF, XXE, insecure deserialization, path traversal, hardcoded secrets, broken crypto, CORS). $0, no source-code egress (only a structural fingerprint is posted for classification), zero secrets (GitHub OIDC).",
   "type": "module",
   "license": "MIT",
   "author": "Maxor Global LLC",

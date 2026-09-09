@@ -15,11 +15,11 @@ const HIGH = [
   // excluded by requiring the call to NOT carry a Safe loader on the same line. A real sink also LOADS something, so
   // the parens must hold a non-empty argument (`\(\s*[^\s)]`): this drops a security scanner's own reminder PROSE
   // that names the API with empty parens — `yaml.load() / yaml.unsafe_load() execute arbitrary Python` — as a false
-  // HIGH (holistic FP audit 2026-09-08: anthropics_claude-code security-guidance patterns.py). Zero TP loss: a bare
+  // HIGH (a real-code false positive: security-guidance prose that names the API with no argument). Zero TP loss: a bare
   // `yaml.load()` with no stream is a TypeError, never a real deserialization sink.
   // The safe-Loader lookahead scans the whole LINE (`[^\n]*`), not just to the first `)` — otherwise a nested paren
-  // in the first arg hides the loader: `yaml.load(path.read_text(...), Loader=yaml.CSafeLoader)` (mlflow, 5000-repo
-  // audit) stopped the old `[^)]*Loader` scan at read_text's `)` and false-fired. The redundant `(?![^)]*safe)`
+  // in the first arg hides the loader: `yaml.load(path.read_text(...), Loader=yaml.CSafeLoader)` (a real-code
+  // sample) stopped the old `[^)]*Loader` scan at read_text's `)` and false-fired. The redundant `(?![^)]*safe)`
   // lookahead was dropped (SafeLoader is already caught by the Loader lookahead, and `[^)]*safe` matched "unsafe").
   ["py-yaml-unsafe", /\byaml\.unsafe_load\s*\(\s*[^\s)]|\byaml\.load\s*\(\s*(?![^\n]*(?:Safe|CSafe|Base|Full)?Loader)[^\s)]/],
   // Java — the classic gadget sinks. The bare `.readObject()` (a 2-line ObjectInputStream, receiver on another

@@ -12,7 +12,8 @@
 // FREE-tier scope: the 10 highest-severity classes (SQLi, command injection, XSS, SSRF, XXE, insecure
 // deserialization, path traversal, hardcoded secrets, broken crypto, CORS reflected-origin) across JS/TS/Python
 // plus Go/.NET. The interprocedural taint engine + the other 73 classes + the calibrated suppression + the
-// cross-repo intelligence are the hosted product (slopgrade.ai). This client runs 100% locally.
+// cross-repo intelligence are the hosted product (slopgrade.ai). This client extracts locally; only the
+// structural fingerprint (no code) is posted for classification — your source never leaves the runner.
 import { pathToFileURL } from "node:url";
 import { writeFileSync, readFileSync } from "node:fs";
 import { walk } from "./src/extract.mjs";

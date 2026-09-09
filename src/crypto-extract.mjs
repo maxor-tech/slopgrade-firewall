@@ -12,11 +12,11 @@
 const HIGH = [
   // DES / 3DES (single-DES strength) / RC4 / RC2 — named across ecosystems. The DES token must be in a USE context
   // (a constructor/call/keyspec/getInstance/provider), NOT a bare mention: `import …symmetric.DES`,
-  // `algorithm.startsWith("DES")` and an error string `"…is not a DES algorithm"` are NOT uses of DES (real-code
-  // known FP, hutool KeyUtil/SecureUtil 2026-09-07). So the bare `\bDES\b` alternative was replaced by use-forms.
+  // `algorithm.startsWith("DES")` and an error string `"…is not a DES algorithm"` are NOT uses of DES (a real-code
+  // false positive: a name check / error string, not a call). So the bare `\bDES\b` alternative was replaced by use-forms.
   ["des-cipher",   /\bdes\.NewCipher\b|Cipher\.getInstance\(\s*["'](?:DESede|DES)(?:\/|["'])|OpenSSL::Cipher(?:::|\.new\(\s*['"])(?:DES|des)|DESCryptoServiceProvider|TripleDESCryptoServiceProvider|MCRYPT_(?:3?DES|TRIPLEDES)|['"]des-(?:ede-)?(?:cbc|ecb)['"]|\bnew\s+(?:DESede|TripleDES|DES)\b|\b(?:DESede|TripleDES|3DES|DES)\s*(?:\.\s*new\b|\()|\balgorithms\s*\.\s*(?:TripleDES|DES)\b|\bDESK(?:ey)?Spec\b|\bcreateCipher(?:iv)?\s*\(\s*["']des\b|\bDES3\s*(?:\.\s*new\b|\()/],
-  // RC4 / RC2 — like DES above, the bare `\bRC4\b`/`\bRC2\b` was a real-code FP (5000-repo audit 2026-09-08): it
-  // matched "RC2"/"RC4" as RADIO-CONTROL channels/servos (ArduPilot/ESP32), a `/** RC4 */` doc comment, and a
+  // RC4 / RC2 — like DES above, the bare `\bRC4\b`/`\bRC2\b` was a real-code false positive: it
+  // matched "RC2"/"RC4" as radio-control channels/servos, a `/** RC4 */` doc comment, and a
   // `case 0x…:/* RC2 */` archive/runtime format table. A real cipher always appears via an API call or a lower-case
   // quoted cipher name — never a bare/upper-case word — so the bare alternative is dropped.
   ["rc4-cipher",   /\brc4\.NewCipher\b|\bARC4\b|Cipher\.getInstance\(\s*["']RC4|OpenSSL::Cipher(?:::|\.new\(\s*['"])(?:RC4|rc4)|MCRYPT_ARCFOUR|\bcreateCipher(?:iv)?\s*\(\s*["']rc4\b|['"](?:rc4|arcfour)['"]/],
@@ -40,7 +40,7 @@ const SEC_WINDOW = 4; // lines above + below the hit to inspect
 const isComment = (l) => /^\s*(\/\/|\*|#|--|;|<!--)/.test(l);
 // An import/using/package line NAMES a crypto type, it never USES it (the real use fires on a later line). Java
 // `import a.b.DES;` / `from Crypto.Cipher import DES` / C# `using X.DES;` are documentation of a dependency, not a
-// weak-crypto call (real-code known FP: hutool `import …DESKeySpec;`). Skipped like a comment.
+// weak-crypto call (a real-code false positive: an `import …DESKeySpec;` names the type, does not use it). Skipped like a comment.
 const isImport = (l) => /^\s*(?:import\s+[\w.]|from\s+[\w.]+\s+import\s|using\s+[\w.]+\s*;|package\s+[\w.]+\s*;)/.test(l);
 
 /** Scan one file → [{line, kind, high, secCtx}]. Source line NEVER leaves this function. */

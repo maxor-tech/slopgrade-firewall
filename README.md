@@ -1,8 +1,9 @@
 # slopGrade Firewall — CI security-leak detection
 
 The **open-source client** of the [slopGrade Firewall](https://www.slopgrade.ai). It runs in your CI,
-detects high-severity security leaks in the diff, and — 100% locally — never sends your source anywhere.
-This repository is the exact code that runs in your runner: **audit every line before you pin it.**
+detects high-severity security leaks in the diff. **Your source code and file contents never leave your runner** —
+only a structural fingerprint (table/column names + `{file, line, kind}` locations, no code) is posted for
+classification. This repository is the exact code that runs in your runner: **audit every line before you pin it.**
 
 ## Add it to your repo
 
@@ -46,7 +47,7 @@ Across JavaScript/TypeScript, Python, **Go** and **.NET**:
 | Broken / weak crypto | CWE-327 | md5 · sha1 · ECB on secrets |
 | CORS reflected-origin | CWE-942 | cross-origin data leak |
 
-## How it works — zero source egress
+## How it works — no source-code egress
 
 1. **Local, in your runner** — the client walks your tree and builds a **structural fingerprint**: file paths and
    `{file, line, kind}` per finding. **Your source code, and the contents of your files, never leave the machine.**
