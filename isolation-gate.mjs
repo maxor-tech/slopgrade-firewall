@@ -46,8 +46,8 @@ import { buildWrapperRegistries, resolveImportedWrappers } from "./src/taint-int
 import { firewallVerdict } from "./src/gate-verdict.mjs";
 import { postFindingComments, postSummaryComment } from "./src/pr-suggest.mjs";
 import {
-  resolveOrigin, classifyEnv, validVerdict, sanitizeLogLine, sanitizeFingerprint, parseLeak, buildSarif, errMsg,
-  CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
+  resolveOrigin, classifyEnv, validVerdict, sanitizeLogLine, sanitizeFingerprint, sanitizePackFingerprints,
+  parseLeak, buildSarif, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
 } from "./src/client-lib.mjs";
 
 const CODE_EXTS = /\.(py|ts|tsx|js|jsx|mjs|cjs|sql|rb|go|php|prisma|java|cs|rs|c|cc|cpp|h|hpp|kt|scala|ex|exs)$/;
@@ -176,8 +176,12 @@ export async function main(argv = [], env = process.env) {
     corsFingerprint, goCorsFingerprint, dotnetCorsFingerprint,
     xxeFingerprint, deserFingerprint, secretFingerprint, cryptoFingerprint,
   };
+  // Egress boundary: rebuild the pack fingerprints by whitelist (the twin of sanitizeFingerprint above), so what
+  // leaves the runner is PROVABLE — a future extractor bug can't grow a source-bearing hit field. This is exactly
+  // what --print-payload shows AND what is POSTed, so the audit and the wire agree byte-for-byte.
+  const wirePacks = sanitizePackFingerprints(packFingerprints);
 
-  if (printPayload) { console.log(JSON.stringify({ fingerprint, ...packFingerprints }, null, 2)); return 0; }
+  if (printPayload) { console.log(JSON.stringify({ fingerprint, ...wirePacks }, null, 2)); return 0; }
 
   // 2. EXFILTRATION guard — a custom origin would mint a token for an attacker audience. Run DRY unless opted in.
   const { origin, blocked } = resolveOrigin(env);
@@ -210,7 +214,7 @@ export async function main(argv = [], env = process.env) {
   catch (e) { ghWarn(`OIDC unavailable (${errMsg(e)}).`); return noVerdict(); }
   if (!oidcToken) return noVerdict();
 
-  const body = JSON.stringify({ oidcToken, sha, fingerprint, ...packFingerprints, clientVersion: CLIENT_VERSION, fingerprintVersion: FINGERPRINT_VERSION });
+  const body = JSON.stringify({ oidcToken, sha, fingerprint, ...wirePacks, clientVersion: CLIENT_VERSION, fingerprintVersion: FINGERPRINT_VERSION });
   if (Buffer.byteLength(body, "utf8") > MAX_PAYLOAD_BYTES) {
     ghWarn(`fingerprint exceeds ${Math.round(MAX_PAYLOAD_BYTES / 1024 / 1024)}MB — skipping upload for this run.`);
     return noVerdict();

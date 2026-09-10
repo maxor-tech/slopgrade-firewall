@@ -102,6 +102,32 @@ export function sanitizeFingerprint(fp) {
   };
 }
 
+/**
+ * The pack-fingerprint egress boundary — the twin of sanitizeFingerprint for the 22 detector packs. Each extractor
+ * already emits only {file} + hits of {line, kind} (+ the scalar tags entropy/placeholder/high/secCtx/srcCtx), never
+ * source. But that guarantee lived in each extractor; this rebuilds every pack by WHITELIST at the POST boundary, so
+ * a future extractor bug can never grow a source-bearing hit field that rides to the server untouched. Any key not in
+ * the allowlist is dropped; identifiers are bounded; scalars are coerced. Same posture as sanitizeFingerprint: what
+ * leaves the runner is provable, not merely trusted.
+ */
+const packHit = (h) => {
+  const o = { line: Number(h?.line) || 0, kind: ident(h?.kind) };
+  if (h?.entropy != null) o.entropy = Number(h.entropy) || 0;      // secrets: Shannon bits/char (a scalar, not a value)
+  if (h?.placeholder != null) o.placeholder = !!h.placeholder;
+  if (h?.high != null) o.high = !!h.high;                          // deser/crypto: severity + context booleans
+  if (h?.secCtx != null) o.secCtx = !!h.secCtx;
+  if (h?.srcCtx != null) o.srcCtx = !!h.srcCtx;
+  return o;
+};
+export function sanitizePackFingerprints(packs) {
+  const clean = {};
+  for (const [name, pack] of Object.entries(packs && typeof packs === "object" ? packs : {})) {
+    const files = Array.isArray(pack?.files) ? pack.files : [];
+    clean[ident(name)] = { files: files.map((f) => ({ file: ident(f?.file), hits: (Array.isArray(f?.hits) ? f.hits : []).map(packHit) })) };
+  }
+  return clean;
+}
+
 /** Parse a verdict leak line ("path:line  [table]  reason") into {file, line, message}; {file:null} if unparseable. */
 export function parseLeak(s) {
   const m = /^(.+?):(\d+)\s+(.*)$/.exec(String(s).trim());

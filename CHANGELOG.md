@@ -17,6 +17,13 @@ Feed + default-gate release — the firewall now reports like a reviewer and def
   secrets…) blocks the check on its own. The count is server-paywalled to 0 unless the repo is entitled, so the
   free tier is never blocked by it. Defaults to 0 — an older server response (no field) is unchanged.
 
+### Security
+- **Detector fingerprints now egress by whitelist** (`sanitizePackFingerprints`), matching the cross-tenant
+  fingerprint. Every pack hit is rebuilt at the POST boundary to only `{file, line, kind}` plus the known scalar
+  tags (`entropy`, `placeholder`, `high`, `secCtx`, `srcCtx`) — any other field is dropped before it can leave the
+  runner, so a future extractor bug can never grow a source-bearing field that rides to the server. `--print-payload`
+  shows exactly what is POSTed, byte-for-byte.
+
 ### Changed
 - **`firewall-mode` default is now `gate`** (was `advisory`). A non-entitled repo in gate mode still stays
   advisory (the paywall fails open), so the default flip never blocks a free repo; it does surface the gate for

@@ -16,15 +16,17 @@ jobs:
     permissions:
       contents: read
       id-token: write            # zero secret: GitHub proves your repo by OIDC (no PAT, nothing to store)
+      pull-requests: write       # optional: post the inline finding feed on the PR (omit to skip the feed)
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - uses: maxor-tech/slopgrade-firewall@<sha>   # pin the commit SHA (a tag can be re-pointed; a SHA cannot)
         with:
-          firewall-mode: "advisory"   # default: report leaks, never block
-          # firewall-mode: "gate"     # block on a hard leak (free for public repos)
-          # firewall-mode: "off"      # disable
-          # strict: "true"            # with gate: fail the build if no verdict is available (default: fail open)
+          # firewall-mode: "gate"      # DEFAULT — block on a hard leak or a blocking finding (public repos are gated
+          #                              free on cross-tenant leaks; a non-entitled repo stays advisory, never blocked)
+          # firewall-mode: "advisory"  # opt into report-only: report leaks, never block
+          # firewall-mode: "off"       # disable
+          # strict: "true"             # with gate: fail the build if no verdict is available (default: fail open)
           # sarif-file: "firewall.sarif"   # also write SARIF, then upload it to see leaks on the PR diff
 ```
 
@@ -55,9 +57,14 @@ Across JavaScript/TypeScript, Python, **Go** and **.NET**:
 2. **Server verdict** — the fingerprint is posted to `https://app.slopgrade.ai/api/ci/isolation`, which classifies
    and measures, then returns the verdict. The classification heuristics run **server-side** and are intentionally
    **not** in this repository.
-3. **Exit** — `advisory` always exits 0 (reports only). `gate` blocks (exit 1) **only** on a `reliable` verdict with
-   a hard leak, **and** only if the repo is entitled. This decision is the pure, tested
-   [`firewallVerdict`](./src/gate-verdict.mjs).
+3. **Feed** — when the run is on a PR and the workflow grants `pull-requests: write`, every finding is posted as an
+   **inline review comment** on its exact `file:line`, plus one summary comment updated in place (deduped, so a re-run
+   updates instead of spamming). It posts with your **own** `GITHUB_TOKEN`, to your own PR — findings never reach
+   slopGrade. Omit the permission to skip the feed.
+4. **Exit** — `advisory` always exits 0 (reports only). `gate` (the default) blocks (exit 1) **only** on a `reliable`
+   cross-tenant hard leak in an entitled repo, **or** a blocking (critical/high) detector finding. A non-entitled repo
+   in `gate` mode stays advisory — the paywall fails open, so a free repo is never blocked. The whole decision is the
+   pure, tested [`firewallVerdict`](./src/gate-verdict.mjs).
 
 Detectors run **intra-function**. Cross-function / cross-file dataflow, the other security classes, and the
 calibrated false-positive suppression are part of the hosted product — see **[slopgrade.ai](https://www.slopgrade.ai)**.
