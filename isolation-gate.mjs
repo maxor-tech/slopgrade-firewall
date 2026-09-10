@@ -44,6 +44,7 @@ import { extractCryptoFingerprint } from "./src/crypto-extract.mjs";
 // OSS shim: the interprocedural pass is stubbed (returns empty) → the taint detectors run INTRA-function only.
 import { buildWrapperRegistries, resolveImportedWrappers } from "./src/taint-interproc.mjs";
 import { firewallVerdict } from "./src/gate-verdict.mjs";
+import { postFindingComments, postSummaryComment } from "./src/pr-suggest.mjs";
 import {
   resolveOrigin, classifyEnv, validVerdict, sanitizeLogLine, sanitizeFingerprint, parseLeak, buildSarif, errMsg,
   CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
@@ -227,15 +228,35 @@ export async function main(argv = [], env = process.env) {
   for (const l of (Array.isArray(v.leaks) ? v.leaks : []).slice(0, 10)) line(`    - ${l}`);
   if (v.hiddenLeaks > 0) line(`    ... +${v.hiddenLeaks} more leak(s) hidden — see them all and block them in CI: ${origin}/ci`);
 
+  // A leak/finding location is "file:line" — parse once for annotations + the inline feed.
+  const parseLoc = (t) => { const m = /^(.*):(\d+)$/.exec(String(t ?? "")); return m ? { file: m[1], line: Number(m[2]) } : { file: null, line: 1 }; };
+  const feed = []; // normalized {file,line,rule,detail,severity} for the inline PR comment feed (CodeRabbit-style)
+
   for (const p of (Array.isArray(v.leaks) ? v.leaks : []).map(parseLeak)) {
-    if (p.file) console.log(`::error file=${p.file},line=${p.line} title=slopGrade Firewall::${p.message}`);
+    if (p.file) { console.log(`::error file=${p.file},line=${p.line} title=slopGrade Firewall::${p.message}`); feed.push({ file: p.file, line: p.line, rule: "cross-tenant", detail: p.message, severity: "high" }); }
   }
   for (const [labelName, block] of [["access control", v.accessControl], ["db safety", v.dbSafety], ["supply chain", v.supplyChain], ["secrets", v.secrets], ["container", v.container], ["ci/cd", v.cicd]]) {
     if (block && block.count > 0) {
       line(`\nslopGrade Firewall — ${labelName}: ${block.count} finding(s)`);
+      // `table` is "file:line" for the file-based packs → parse it so annotations + the feed land on the RIGHT line.
+      for (const f of (Array.isArray(block.findings) ? block.findings : [])) {
+        const loc = parseLoc(f.table);
+        if (loc.file) { console.log(`::error file=${loc.file},line=${loc.line} title=slopGrade Firewall::[${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(f.detail)}`); feed.push({ file: loc.file, line: loc.line, rule: f.rule, detail: f.detail, severity: f.severity }); }
+      }
       for (const f of (Array.isArray(block.findings) ? block.findings : []).slice(0, 10)) line(`    - [${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(f.detail)}`);
       if (block.hidden > 0) line(`    ... +${block.hidden} more hidden — enable the gate to see them all: ${origin}/ci`);
     }
+  }
+
+  // The inline finding FEED (CodeRabbit-style) — one review comment per finding at its file:line + a deduped summary,
+  // when this is a PR with a writable token. Fail-open + dedup so a re-run updates instead of spamming (pr-suggest.mjs).
+  if (feed.length) {
+    const deps = { readEvent: () => { try { return JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8")); } catch { return null; } }, log: (m) => line(m), warn: (m) => ghWarn(m) };
+    const blocking = feed.filter((f) => f.severity === "high" || f.severity === "critical").length;
+    const summary = `## 🛡 slopGrade Firewall\n\n**${blocking}** blocking (critical/high) · ${feed.length - blocking} advisory · ${feed.length} finding(s) located.\n\nBlocking findings fail the check when the gate is enabled on this repo. See all findings + enable the gate: ${origin}/ci`;
+    const postedFeed = await postFindingComments(env, feed, deps);
+    const summaryState = await postSummaryComment(env, summary, deps);
+    if (postedFeed || summaryState !== "skipped") line(`\nslopGrade Firewall — feed: ${postedFeed} inline comment(s) posted, summary ${summaryState}.`);
   }
 
   if (sarifPath) {
@@ -248,10 +269,15 @@ export async function main(argv = [], env = process.env) {
     catch (e) { ghWarn(`could not write SARIF to ${sanitizeLogLine(String(sarifPath))} (${errMsg(e)}).`); }
   }
 
-  // 6. Exit decision — the PURE, tested free/paid boundary. Blocks ONLY on --gate + entitled + reliable + hard leaks.
-  const decision = firewallVerdict({ gateMode, reliable: v.reliable, hardLeaks: v.hardLeaks, gateEntitled: v.gateEntitled });
+  // 6. Exit decision — the PURE, tested free/paid boundary. Blocks on --gate + EITHER a reliable+entitled cross-tenant
+  // hard leak OR >=1 blocking detector finding (packBlocking, critical|high — already server-paywalled to 0 unless
+  // entitled). The build-block message NAMES the real reason(s).
+  const decision = firewallVerdict({ gateMode, reliable: v.reliable, hardLeaks: v.hardLeaks, gateEntitled: v.gateEntitled, packBlocking: v.packBlocking });
   if (decision.kind === "gate-blocked") {
-    console.log(`::error title=slopGrade Firewall::${v.hardLeaks} hard cross-tenant leak(s) — build blocked.`);
+    const reasons = [];
+    if (v.reliable && v.hardLeaks > 0 && v.gateEntitled) reasons.push(`${v.hardLeaks} hard cross-tenant leak(s)`);
+    if (Number(v.packBlocking) > 0) reasons.push(`${v.packBlocking} blocking security finding(s) (injection/crypto/secrets…)`);
+    console.log(`::error title=slopGrade Firewall::${reasons.join(" + ") || `${v.hardLeaks} hard cross-tenant leak(s)`} — build blocked.`);
     return 1;
   }
   if (decision.kind === "gate-unpaid") {

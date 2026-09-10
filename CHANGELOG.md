@@ -3,6 +3,26 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.6.0] — 2026-09-10
+
+Feed + default-gate release — the firewall now reports like a reviewer and defaults to blocking.
+
+### Added
+- **Inline PR comment feed**: every finding (cross-tenant leak *and* detector-pack finding) posts as an inline
+  review comment on the exact `file:line`, plus a single summary comment updated in place. The feed is deduped
+  (one marker per location) and capped at 30 comments. It posts only when the caller grants
+  `permissions: pull-requests: write` and uses the caller's OWN `GITHUB_TOKEN` — findings post to the caller's PR
+  and never reach slopGrade. No-op off-PR.
+- **`packBlocking`** exit source: in gate mode, a blocking detector finding (critical|high — injection / crypto /
+  secrets…) blocks the check on its own. The count is server-paywalled to 0 unless the repo is entitled, so the
+  free tier is never blocked by it. Defaults to 0 — an older server response (no field) is unchanged.
+
+### Changed
+- **`firewall-mode` default is now `gate`** (was `advisory`). A non-entitled repo in gate mode still stays
+  advisory (the paywall fails open), so the default flip never blocks a free repo; it does surface the gate for
+  entitled repos without an explicit opt-in. Set `firewall-mode: advisory` to restore report-only behavior.
+- The block message now names the reason (the cross-tenant leak count and/or the blocking security-finding count).
+
 ## [0.5.0] — 2026-09-08
 
 First public release of the open-source client — the **free tier**: the 10 highest-severity classes, run 100%
