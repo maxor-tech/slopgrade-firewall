@@ -7,7 +7,7 @@
 //   2. TAINT (dataflow, new)          — intra-function: `cmd = "convert " + request.args['f']` … `os.system(cmd)`,
 //      or `f = request.args['f']` … `os.system("convert " + f)`. A var becomes tainted from a user source (or by
 //      combining one with string-building); a hit fires when it reaches a SHELL sink. Python + Node taint here;
-//      PHP/Java/Ruby keep direct-only (next layer). Precision (the moat, ~0 FP): subprocess only fires with
+//      PHP/Java/Ruby keep direct-only (next layer). Precision (low FP): subprocess only fires with
 //      shell=True (a list-arg / shell=False call never shell-parses the value); `.exec` is scoped to child_process
 //      (never a bare regexp.exec); taint clears on a function boundary, a shlex.quote/escape/sanitize call, or a
 //      non-tainting reassignment.

@@ -1,0 +1,19 @@
+name: test
+on:
+  push:
+    branches: [main]
+  pull_request: {}
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Unit tests (zero deps — node:test only)
+        run: node --test src/__tests__/*.test.mjs
+      - name: Payload audit is honest (--print-payload exits 0, no server call)
+        run: node isolation-gate.mjs --print-payload > /dev/null

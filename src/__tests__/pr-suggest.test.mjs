@@ -30,10 +30,10 @@ test("buildReviewComments maps only verified single-line fixes to {path,line,sid
 test("resolvePrContext returns null off-PR and the {owner,name,number,headSha} on a PR event", () => {
   assert.equal(resolvePrContext({ GITHUB_REPOSITORY: "o/r", GITHUB_EVENT_NAME: "push" }, () => ({})), null, "push event -> null");
   assert.equal(resolvePrContext({ GITHUB_EVENT_NAME: "pull_request" }, () => ({})), null, "no repo -> null");
-  const env = { GITHUB_REPOSITORY: "maxor-tech/slopgrade-ci", GITHUB_EVENT_NAME: "pull_request" };
+  const env = { GITHUB_REPOSITORY: "acme/webapp", GITHUB_EVENT_NAME: "pull_request" };
   assert.equal(resolvePrContext(env, () => ({ pull_request: { number: 7 } })), null, "missing head.sha -> null");
   const ctx = resolvePrContext(env, () => ({ pull_request: { number: 7, head: { sha: "abc123" } } }));
-  assert.deepEqual(ctx, { owner: "maxor-tech", name: "slopgrade-ci", number: 7, headSha: "abc123" });
+  assert.deepEqual(ctx, { owner: "acme", name: "webapp", number: 7, headSha: "abc123" });
   assert.equal(resolvePrContext(env, () => { throw new Error("bad json"); }), null, "unreadable event payload -> null (never throws)");
 });
 

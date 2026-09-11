@@ -24,6 +24,10 @@ This repository is the **open-source client** that runs in your CI. Its security
 - **Fail-open by design:** a network/server/OIDC failure never breaks your build (exit 0). `--strict` fails closed.
 - **Endpoint is fixed** to `https://app.slopgrade.ai`; a custom `SLOPGRADE_ORIGIN` runs dry unless
   `SLOPGRADE_ALLOW_CUSTOM_ORIGIN=1` is set and the origin is https.
+- **The PR feed uses your own token, safely:** when the workflow grants `pull-requests: write`, findings post to
+  your own PR with your own `GITHUB_TOKEN` (never to slopGrade). The client only *reads* the checked-out tree with
+  regexes and never executes scanned content, so a malicious PR cannot achieve code execution through it — but as a
+  general rule, do not add other steps that check out and run untrusted PR head under `pull_request_target`.
 
 The hosted analysis service (the classification engine) is out of scope for this repository; report issues with it
 to the same address.

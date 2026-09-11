@@ -9,19 +9,19 @@ import {
   classifyDml, normKey, lineOf, ADMIN_CTX, supabaseChains,
 } from "./extract.mjs";
 
-// Capture *_id AND ownership columns (owner / owned_by). Sans ça, une query scopée par `owner` — ex. un store
-// SQLite local dont la PK est (owner, …) — a des whereIdCols VIDES → le brain la lit « LIST/BULK sans AUCUN scope »
-// = faux hard-leak (mesuré 2026-09-07 : odysseus, un client email mono-user, faux-bloqué). `owner` n'est PAS une clé
-// TENANT (CANDIDATE_KEY ne le matche pas) → la query tombe en by-id CONDITIONNEL (non bloquant), pas « scoped » ni
-// « hard ». Volontairement PAS de `*_key` générique : `api_key`/`cache_key` masqueraient un vrai leak (recall).
+// Capture *_id AND ownership columns (owner / owned_by). Without this, a query scoped by `owner` — e.g. a local
+// store whose PK is (owner, …) — has EMPTY whereIdCols → gets read as "LIST/BULK with NO scope at all" = a false
+// hard-leak. `owner` is NOT a TENANT key (CANDIDATE_KEY does not match it) → the query falls to CONDITIONAL by-id
+// (non-blocking), neither "scoped" nor "hard". Deliberately NO generic `*_key`: `api_key`/`cache_key` would mask a
+// real leak (recall).
 //
 // SCOPE_FRAG — a WHERE that INTERPOLATES a runtime-composed SQL fragment: `f"… AND {owner_clause}"`, `%(tenant_filter)s`.
-// The query IS scoped but static extraction can't see through the variable → empty whereIdCols → false hard-leak
-// (measured odysseus routes/email_routes.py:2739). Recognized by NAME: an interpolation prefix `{`/`%` FOLLOWED by an
+// The query IS scoped but static extraction can't see through the variable → empty whereIdCols → a false hard-leak.
+// Recognized by NAME: an interpolation prefix `{`/`%` FOLLOWED by an
 // identifier <ownership/tenant-stem>…<clause|filter|where|scope|cond|predicate>. The mandatory prefix excludes a real
 // literal column (`WHERE user_scope = 1` has no `{`), the suffix excludes a display interpolation (`{user_name}`).
 // RECALL-SAFE: it only yields a by-id marker (never a CANDIDATE_KEY) → can move hard→by-id (conditional, non-blocking)
-// but NEVER "tenant-scoped", so no genuine unscoped bulk read is masked. Sync with lib/tenant-isolation/fingerprint.mjs.
+// but NEVER "tenant-scoped", so no genuine unscoped bulk read is masked.
 const SCOPE_FRAG = /[{%][({]?\s*((?:owner|owned_by|tenant|org|account|user|workspace|customer|team)_?[a-z_]*(?:clause|filter|where|scope|cond|predicate))/gi;
 const idColsOf = (text) => [...new Set(
   (text.match(/\b([a-z_]*_?id|owner|owned_by)\b/gi) ?? [])
@@ -51,14 +51,14 @@ export function buildFingerprint(files, root = "") {
     signals.schemaPath += (t.match(/SET\s+search_path|set_tenant_schema|search_path\s*(TO|=)/gi) ?? []).length;
     signals.rlsPolicy += (t.match(/ENABLE\s+ROW\s+LEVEL\s+SECURITY|CREATE\s+POLICY/gi) ?? []).length;
     // `\.rls\b` targeted a real Supabase client `.rls(...)` call — but also matched a DOTTED CONFIG KEY
-    // `"proxy.rls.maxPoliciesPerCollection"` (milvus, a C++/Go vector DB with its own "rls" config namespace)
-    // → 11 false signals → milvus false-classified "Postgres multi-tenant RLS" → 13 false hard-leaks. Require a
+    // like `"proxy.rls.maxPoliciesPerCollection"` (a non-Postgres system with its own "rls" config namespace)
+    // → false signals → false-classified as "Postgres multi-tenant RLS" → false hard-leaks. Require a
     // real method call `.rls(` (followed by a paren), never a dotted path segment `.rls.` / `.rls_x`.
     signals.rlsSupabase += (t.match(/auth\.uid\(\)|internal_org_id|\.rls\s*\(/gi) ?? []).length;
     const execStrings = extractCallStrings(t, "execute");
     const sqlBlob = t + "\n" + execStrings.map((c) => c.text).join("\n;\n");
     // A raw `CREATE TABLE` DDL literal INSIDE a UI component (.tsx/.jsx/.vue/.svelte) is a DOC sample (a marketing /
-    // RLS-guide page — e.g. supabase apps/www/.../RLSSection.tsx shows `create table members (…)`), never a runtime
+    // RLS-guide page that shows `create table members (…)` as an illustration), never a runtime
     // schema: real schemas live in .sql/.prisma/migrations. So we do NOT derive tableCols from it (else `members`
     // becomes a false tenant table → false hard-leak). A .tsx's real queries (.from()/prisma) are still extracted
     // below. RECALL-SAFE: no real multi-tenant schema is ever defined via CREATE TABLE in a .tsx.

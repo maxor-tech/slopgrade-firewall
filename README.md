@@ -1,6 +1,6 @@
 # slopGrade Firewall — CI security-leak detection
 
-The **open-source client** of the [slopGrade Firewall](https://www.slopgrade.ai). It runs in your CI,
+The **open-source client** of the [slopGrade Firewall](https://www.slopgrade.ai/firewall). It runs in your CI,
 detects high-severity security leaks in the diff. **Your source code and file contents never leave your runner** —
 only a structural fingerprint (table/column names + `{file, line, kind}` locations, no code) is posted for
 classification. This repository is the exact code that runs in your runner: **audit every line before you pin it.**
@@ -67,7 +67,7 @@ Across JavaScript/TypeScript, Python, **Go** and **.NET**:
    pure, tested [`firewallVerdict`](./src/gate-verdict.mjs).
 
 Detectors run **intra-function**. Cross-function / cross-file dataflow, the other security classes, and the
-calibrated false-positive suppression are part of the hosted product — see **[slopgrade.ai](https://www.slopgrade.ai)**.
+calibrated (corpus-tuned) false-positive suppression are part of the hosted product — see **[slopgrade.ai/firewall](https://www.slopgrade.ai/firewall)**.
 
 ## Fail-open, always
 
@@ -84,6 +84,24 @@ would rather the control not silently self-disable, `strict: "true"` fails **clo
 - **Endpoint is fixed.** A custom `SLOPGRADE_ORIGIN` is refused (the run goes dry) unless you explicitly set
   `SLOPGRADE_ALLOW_CUSTOM_ORIGIN=1` for a self-hosted server.
 - **$0 · local · deterministic.** Zero npm dependencies (only `node:*`). Pin the **SHA** to freeze the exact code.
+
+## Free vs hosted
+
+The free tier is a real, standalone control — 10 classes, intra-function, zero-egress, and it never blocks a free
+repo. The **hosted** [slopGrade Firewall](https://www.slopgrade.ai/firewall) adds what a local client cannot:
+
+| | Free (this repo) | Hosted |
+|---|---|---|
+| Detection classes | the 10 highest-severity | the full detector catalog |
+| Dataflow | intra-function | cross-function + cross-file (interprocedural taint) |
+| False-positive suppression | commodity context checks | calibrated on a large private corpus |
+| **Private** repos | **advisory only** — you see every leak, can't block it | **blocking gate** |
+| **Public** repos | blocking gate, free | blocking gate, free |
+| Verified auto-fix + inline PR feed | — | ✓ |
+
+On a **private** repo the free tier runs advisory-only: you see every leak but can't enforce it. Blocking on private
+repos is **$8–29/repo/mo** (volume pricing) — **14-day free trial, no card**. Users unlimited; billed per repo,
+never per seat. → **[slopgrade.ai/firewall](https://www.slopgrade.ai/firewall)**
 
 ## Development
 

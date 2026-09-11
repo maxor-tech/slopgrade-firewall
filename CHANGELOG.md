@@ -3,6 +3,23 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.6.1] — 2026-09-11
+
+Pre-publish hardening. No behavior change to detection or the exit boundary; the test suite is unchanged and green.
+
+### Security
+- **The composite action passes argv as an array** (`action.yml`), never a word-split string — a consumer who wires
+  an untrusted value into `sarif-file` can no longer shell-inject in their own runner.
+
+### Changed
+- **Docs/comment hygiene for public release**: internal calibration-corpus references were removed from source
+  comments. The free/paid boundary is now stated in the README ("Free vs hosted" + a price anchor), and the
+  gate-unpaid CLI nudge names the price and the 14-day, no-card trial.
+
+### Packaging
+- `files` now ships `SECURITY.md` + `CHANGELOG.md`. Added a CI workflow (`node --test` on Node 22) and a
+  `CONTRIBUTING.md`.
+
 ## [0.6.0] — 2026-09-10
 
 Feed + default-gate release — the firewall now reports like a reviewer and defaults to blocking.

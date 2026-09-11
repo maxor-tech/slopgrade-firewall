@@ -5,7 +5,7 @@ import { readdirSync, lstatSync } from "node:fs";
 // cross-tenant read — scanning it produces false-positive "leaks" that would wrongly block a build in gate mode.
 // Test-file exclusion is standard for every security/lint scanner; it is a commodity path check, not a rule.
 // `examples?/samples?/demo/sandbox/playground/cookbook` are excluded for the SAME reason as tests — sample/demo apps
-// bundled in a repo (esp. platform monorepos: supabase examples/edge-functions, examples/realtime/…) are not the
+// bundled in a repo (common in platform monorepos: bundled example / edge-function / realtime apps) are not the
 // product's production tenant surface; their migrations/queries are illustrative, never a customer's build.
 const DEFAULT_EXCL = /(node_modules|\/dist\/|\/build\/|\.min\.|\.venv|__pycache__|\/\.git\/|\.next|\.(test|spec|stories)\.[a-z]+$|_(test|spec)\.[a-z]+$|[._-](examples?|samples?)\.[a-z]+$|(^|\/)(tests?|specs?|__tests__|__mocks__|e2e|fixtures?|mocks?|testdata|examples?|samples?|demos?|sandbox|playground|cookbook)\/|(^|\/)test_[^/]*\.py$|(^|\/)conftest\.py$)/i;
 
@@ -38,8 +38,8 @@ export const lineOf = (src, idx) => src.slice(0, idx).split("\n").length;
 // the WHERE" false positive.
 //
 // IMPLICIT (Python/C) CONCATENATION: `execute(f"SELECT … " f"WHERE owner=? …")` — Python glues ADJACENT string
-// literals. Reading only the first fragment truncated the WHERE → empty whereIdCols → false hard-leak (measured
-// odysseus routes/email_routes.py:397). We now read ALL adjacent literals (separated only by whitespace, `\`
+// literals. Reading only the first fragment truncated the WHERE → empty whereIdCols → a false hard-leak.
+// We now read ALL adjacent literals (separated only by whitespace, `\`
 // line-continuations, and `#`/`//` comments) and concatenate them. RECALL-SAFE: it only ever REVEALS MORE of the
 // true query — a `,`/`)`/`+`/identifier between two literals ends the concat (2nd argument, not more of the SQL).
 export function extractCallStrings(src, callName) {
@@ -107,7 +107,7 @@ export function extractCreateTables(src) {
 }
 
 // Prisma ORM adapter: `model User { organizationId String }` → { table, cols }. The dominant real-world case
-// (cal.com, documenso…) — the schema is NOT CREATE TABLE. camelCase fields are kept as-is.
+// for many Node/TS stacks — the schema is NOT CREATE TABLE. camelCase fields are kept as-is.
 export function extractPrismaModels(src) {
   const out = [];
   const re = /(?:^|\n)\s*model\s+(\w+)\s*\{/g;
@@ -126,7 +126,7 @@ export function extractPrismaModels(src) {
 }
 
 // Prisma QUERY extractor: `prisma.booking.findMany({ where: { userId } })`. Returns the model + the complete
-// argument body (paren-balanced). Covers the dominant stack (cal.com/documenso/formbricks).
+// argument body (paren-balanced). Covers the dominant Prisma/TS stack.
 export function extractPrismaQueries(src) {
   const out = [];
   const re = /\b(?:prisma|db|tx|prismaClient)\b(?:\.[a-z]\w*)*\s*\.\s*([a-z]\w*)\s*\.\s*(findMany|findFirst|findUnique|findUniqueOrThrow|findFirstOrThrow|update|updateMany|delete|deleteMany|upsert|count|aggregate|groupBy)\s*\(/gi;
@@ -146,7 +146,7 @@ export const normKey = (s) => s.replace(/_/g, "").toLowerCase();
 // ADMIN/system context (by path) — an unscoped query is expected here (service-role, migration, backfill, ETL
 // export/import, management commands, background jobs), so it is excluded from leaks. Commodity: this is a context
 // heuristic on the file PATH, not a secret classification rule.
-// `[\/_]cli\/`: a CLI package is named `cli/` OR `<app>_cli/` (e.g. hermes_cli/) — operator code (hand-run commands),
+// `[\/_]cli\/`: a CLI package is named `cli/` OR `<app>_cli/` — operator code (hand-run commands),
 // same as /commands/ /console/ /management/ already exempted; an unscoped access there is expected, not a tenant
 // leak. Completes the existing CLI exemption which missed the `_cli/` naming variant.
 export const ADMIN_CTX = /service.?role|admin_only|is_superadmin|migrat|seed|backfill|repair|auto_migrate|startup|export|import_|_import|dumpdata|loaddata|\baudit|\/management\/|\/commands?\/|\/tasks?\/|\/jobs?\/|\/workers?\/|\/console\/|\/rake\/|[\/_]cli\//i;

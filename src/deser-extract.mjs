@@ -1,6 +1,6 @@
 // Insecure deserialization (CWE-502 / OWASP A08) — LANGUAGE-AGNOSTIC client fingerprint. Mirror of
 // crypto-extract: emit {file, line, kind, high, srcCtx} — NEVER the source line. The SUPPRESSION DECISION
-// (which kinds fire, and gated kinds only near an untrusted source) is the moat, server-side (deser-brain.mjs).
+// (which kinds fire, and gated kinds only near an untrusted source) is hosted server-side, not shipped in this client.
 //
 // Two tiers, like weak-crypto's HIGH vs gated:
 //   • HIGH — an RCE-gadget API with (near-)no safe use: BinaryFormatter, ObjectInputStream.readObject, XMLDecoder,

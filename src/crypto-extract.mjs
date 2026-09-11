@@ -1,7 +1,7 @@
 // Weak-crypto (CWE-327 broken/risky algorithm · CWE-328 weak hash) — LANGUAGE-AGNOSTIC client fingerprint.
 // Mirror of transport-extract: emit {file, line, kind, severityHint, secCtx} — NEVER the source line. The
-// SUPPRESSION DECISION (which kinds fire, MD5/SHA1 only in a security context) is the moat, server-side
-// (crypto-brain.mjs). No-egress: only line numbers + a fixed kind id + two booleans leave the client.
+// SUPPRESSION DECISION (which kinds fire, MD5/SHA1 only in a security context) is hosted server-side and
+// not shipped in this client. No-egress: only line numbers + a fixed kind id + two booleans leave the client.
 //
 // Two tiers, exactly like transport's HIGH vs opt-in-gated:
 //   • HIGH kinds (DES/3DES/RC4/RC2/ECB-mode/mcrypt) — a BROKEN cipher with no legitimate modern use → always fire.
@@ -33,7 +33,7 @@ const HASH = [
 // safe inside HMAC (HMAC-SHA1 is fine — it does not rely on collision resistance) and for checksums/ETags/cache
 // keys. So a weak hash fires ONLY when a password keyword sits within SEC_WINDOW lines (secCtx=true) AND no
 // SAFE marker (HMAC / a proper KDF / a signer digest_method) is nearby. This precision-over-recall choice keeps
-// the FP rate ~0 (the moat); broad recall is carried by the HIGH tier (DES/RC4/RC2/ECB, which have no safe use).
+// the FP rate low; broad recall is carried by the HIGH tier (DES/RC4/RC2/ECB, which have no safe use).
 const PW_CTX = /password|passwd|\bpwd\b|user_?pass|pass_?(?:word|hash|phrase)/i;
 const SAFE_CTX = /\bhmac\b|digest_?method|digestmod|\bbcrypt\b|\bscrypt\b|argon2?|pbkdf|createHmac|OpenSSL::HMAC|Mac\.getInstance|itsdangerous/i;
 const SEC_WINDOW = 4; // lines above + below the hit to inspect

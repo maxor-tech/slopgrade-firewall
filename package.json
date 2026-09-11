@@ -1,6 +1,6 @@
 {
   "name": "slopgrade-firewall",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Deterministic security-leak detection for CI — the open-source client of the slopGrade Firewall. Free tier: the 10 highest-severity classes (SQLi, command injection, XSS, SSRF, XXE, insecure deserialization, path traversal, hardcoded secrets, broken crypto, CORS). $0, no source-code egress (only a structural fingerprint is posted for classification), zero secrets (GitHub OIDC).",
   "type": "module",
   "license": "MIT",
@@ -10,6 +10,6 @@
   "bin": { "slopgrade-firewall": "./isolation-gate.mjs" },
   "engines": { "node": ">=22" },
   "scripts": { "test": "node --test src/__tests__/*.test.mjs" },
-  "files": ["isolation-gate.mjs", "src/", "action.yml", "LICENSE", "README.md"],
+  "files": ["isolation-gate.mjs", "src/", "!src/__tests__", "action.yml", "LICENSE", "README.md", "SECURITY.md", "CHANGELOG.md"],
   "keywords": ["ci", "github-actions", "security", "sast", "sqli", "xss", "ssrf", "secrets", "deterministic", "oidc"]
 }

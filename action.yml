@@ -41,9 +41,10 @@ runs:
         # classifies + measures. --gate is passed only in 'gate' mode; the server gates the real block via
         # entitlement (public || paid add-on), so 'gate' on a non-entitled repo stays advisory. Fails OPEN by
         # default (a missing OIDC token, timeout, or server error never breaks the build); --strict fails closed.
-        ARGS=""
-        [ "${FW_MODE}" = "gate" ] && ARGS="${ARGS} --gate"
-        [ "${FW_STRICT}" = "true" ] && ARGS="${ARGS} --strict"
-        [ -n "${FW_SARIF}" ] && ARGS="${ARGS} --sarif ${FW_SARIF}"
-        # shellcheck disable=SC2086
-        node "$FW_CLI" $ARGS
+        # Build argv as an ARRAY (never a word-split string): a consumer who wires an untrusted value into
+        # sarif-file (e.g. a PR title) can then never shell-inject in their own runner — each arg is passed intact.
+        ARGS=()
+        [ "${FW_MODE}" = "gate" ] && ARGS+=(--gate)
+        [ "${FW_STRICT}" = "true" ] && ARGS+=(--strict)
+        [ -n "${FW_SARIF}" ] && ARGS+=(--sarif "${FW_SARIF}")
+        node "$FW_CLI" "${ARGS[@]}"

@@ -11,7 +11,7 @@
 //
 // FREE-tier scope: the 10 highest-severity classes (SQLi, command injection, XSS, SSRF, XXE, insecure
 // deserialization, path traversal, hardcoded secrets, broken crypto, CORS reflected-origin) across JS/TS/Python
-// plus Go/.NET. The interprocedural taint engine + the other 73 classes + the calibrated suppression + the
+// plus Go/.NET. The interprocedural taint engine + the rest of the detector-class catalog + the calibrated suppression + the
 // cross-repo intelligence are the hosted product (slopgrade.ai). This client extracts locally; only the
 // structural fingerprint (no code) is posted for classification — your source never leaves the runner.
 import { pathToFileURL } from "node:url";
@@ -285,7 +285,7 @@ export async function main(argv = [], env = process.env) {
     return 1;
   }
   if (decision.kind === "gate-unpaid") {
-    line(`\nslopGrade Firewall: ${v.hardLeaks} hard leak(s) found, but this repo is ADVISORY (no paid gate) — non-blocking. Enable the gate to block: ${origin}/ci`);
+    line(`\nslopGrade Firewall: ${v.hardLeaks} hard leak(s) found, but this repo is ADVISORY (no paid gate) — non-blocking. Enable the gate to block ($8–29/repo/mo · 14-day free trial, no card): ${origin}/ci`);
     return 0;
   }
   line(`\nslopGrade Firewall: ${gateMode ? "no blocking hard leaks." : "advisory (non-blocking)."}`);
