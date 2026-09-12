@@ -1,75 +1,75 @@
-// SHIM — OSS édition. API-compatible avec le moteur inter-procédural du produit
-// hébergé, mais SANS la passe interprocédurale/cross-file : chaque
-// fonction retourne un résultat "vide" de la bonne forme, si bien que les détecteurs
-// phares (sqli/cmdi/xss/ssrf/pathtraversal) tournent en mode INTRA-FONCTION uniquement
-// (via taint-core.mjs, qui reste OSS). C'est le "shallow but working" du tier gratuit :
-//   • findSinkWrappers → Map vide      ⇒ la branche inter-proc du détecteur est sautée
-//   • interprocHit     → false         ⇒ aucun hit inter-proc/cross-file
-//   • buildWrapperRegistries → {}      ⇒ aucun registre cross-file construit par le harnais
-//   • resolveImportedWrappers → Map vide ⇒ la branche cross-file du détecteur est sautée
+// SHIM — OSS edition. API-compatible with the hosted product's inter-procedural
+// engine, but WITHOUT the interprocedural/cross-file pass: every function returns
+// an "empty" result of the correct shape, so the flagship detectors
+// (sqli/cmdi/xss/ssrf/pathtraversal) run in INTRA-FUNCTION mode only
+// (via taint-core.mjs, which stays OSS). This is the free tier's "shallow but working":
+//   • findSinkWrappers → empty Map     ⇒ the detector's inter-proc branch is skipped
+//   • interprocHit     → false         ⇒ no inter-proc/cross-file hit
+//   • buildWrapperRegistries → {}      ⇒ no cross-file registry is built by the harness
+//   • resolveImportedWrappers → empty Map ⇒ the detector's cross-file branch is skipped
 //
-// La détection cross-fonction + cross-fichier (le craft) est la valeur payante : l'édition
-// hébergée passe les MÊMES détecteurs à travers le vrai taint-interproc. Aucun seuil,
-// aucun corpus, aucune méthode de calibration n'est présent ici.
+// Cross-function + cross-file detection (the craft) is the paid value: the hosted
+// edition runs the SAME detectors through the real taint-interproc. No thresholds,
+// no corpus, no calibration method is present here.
 //
-// Les helpers de parsing (parseParams/splitArgs/splitFunctions/resolveModuleSpec/
-// parseImports) sont fournis en implémentations minimales : ils ne servent, dans la suite
-// OSS, qu'à alimenter la passe inter-proc — désactivée ici — donc leur sortie n'est jamais
-// consommée. Ils gardent une signature honnête plutôt qu'un throw, pour que tout import
-// existant résolve sans erreur.
+// The parsing helpers (parseParams/splitArgs/splitFunctions/resolveModuleSpec/
+// parseImports) are provided as minimal implementations: in the OSS build they only
+// feed the inter-proc pass — disabled here — so their output is never consumed. They
+// keep an honest signature rather than throwing, so any existing import resolves
+// without error.
 
-/** @returns {string[]} noms de paramètres (best-effort, non utilisé par la passe OSS). */
+/** @returns {string[]} parameter names (best-effort, unused by the OSS pass). */
 export function parseParams(s) {
   if (typeof s !== "string" || !s.trim()) return [];
   return s.split(",").map((p) => p.trim().split(/[:\s=]/)[0]).filter(Boolean);
 }
 
-/** @returns {string[]} arguments d'appel (best-effort, non utilisé par la passe OSS). */
+/** @returns {string[]} call arguments (best-effort, unused by the OSS pass). */
 export function splitArgs(s) {
   if (typeof s !== "string" || !s.trim()) return [];
   return s.split(",").map((a) => a.trim()).filter(Boolean);
 }
 
-/** @returns {Array} aucune fonction extraite (pas de passe inter-proc en OSS). */
+/** @returns {Array} no functions extracted (no inter-proc pass in OSS). */
 export function splitFunctions(_lines) {
   return [];
 }
 
-/** Wrappers de sink locaux — OSS : aucun ⇒ la branche inter-proc du détecteur est inerte.
+/** Local sink wrappers — OSS: none ⇒ the detector's inter-proc branch is inert.
  *  @returns {Map<string, Set<number>>} */
 export function findSinkWrappers(_lines, _cfg) {
   return new Map();
 }
 
-/** Hit inter-proc/cross-file — OSS : jamais (intra-fonction seulement).
+/** Inter-proc/cross-file hit — OSS: never (intra-function only).
  *  @returns {boolean} */
 export function interprocHit(_line, _wrappers, _argIsDangerous) {
   return false;
 }
 
-/** @returns {string|null} résolution de module — OSS : non résolu (pas de cross-file). */
+/** @returns {string|null} module resolution — OSS: unresolved (no cross-file). */
 export function resolveModuleSpec(_fromFile, _spec, _lang) {
   return null;
 }
 
-/** @returns {Array<{spec:string, names:string[]}>} imports — OSS : ignorés. */
+/** @returns {Array<{spec:string, names:string[]}>} imports — OSS: ignored. */
 export function parseImports(_text) {
   return [];
 }
 
-/** @returns {Map<string, Map<string, Set<number>>>} registre — OSS : vide. */
+/** @returns {Map<string, Map<string, Set<number>>>} registry — OSS: empty. */
 export function buildWrapperRegistry(_files, _cfg) {
   return new Map();
 }
 
-/** @returns {Record<string, Map<string, Map<string, Set<number>>>>} registres par gate — OSS : {}.
- *  resolveImportedWrappers tolère un registre absent/undefined et rend une Map vide. */
+/** @returns {Record<string, Map<string, Map<string, Set<number>>>>} per-gate registries — OSS: {}.
+ *  resolveImportedWrappers tolerates an absent/undefined registry and returns an empty Map. */
 export function buildWrapperRegistries(_files, _cfgs) {
   return {};
 }
 
-/** @returns {Map<string, Set<number>>} wrappers importés résolus — OSS : toujours vide,
- *  quel que soit le registre (y compris undefined venant de buildWrapperRegistries → {}). */
+/** @returns {Map<string, Set<number>>} resolved imported wrappers — OSS: always empty,
+ *  whatever the registry (including undefined coming from buildWrapperRegistries → {}). */
 export function resolveImportedWrappers(_text, _fromFile, _registry) {
   return new Map();
 }

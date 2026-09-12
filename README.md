@@ -34,20 +34,21 @@ Or run it directly: `node isolation-gate.mjs --print-payload` (audit exactly wha
 
 ## What it detects (free tier — the 10 highest-severity classes)
 
-Across JavaScript/TypeScript, Python, **Go** and **.NET**:
+All ten classes run across **JavaScript/TypeScript** and **Python**. **Go** and **.NET** cover the six
+marked ✓ (the four unmarked — XXE, insecure deserialization, hardcoded secrets, broken crypto — are JS/TS + Python only):
 
-| Class | CWE | |
-|---|---|---|
-| SQL injection | CWE-89 | RCE / data exfiltration |
-| Command injection | CWE-78 | remote code execution |
-| Cross-site scripting (XSS) | CWE-79 | session theft |
-| Server-side request forgery (SSRF) | CWE-918 | incl. cloud-metadata theft |
-| XML external entity (XXE) | CWE-611 | file read + SSRF |
-| Insecure deserialization | CWE-502 | RCE |
-| Path traversal | CWE-22 | file disclosure |
-| Hardcoded secrets | CWE-798 | credential leak (the value never leaves this client) |
-| Broken / weak crypto | CWE-327 | md5 · sha1 · ECB on secrets |
-| CORS reflected-origin | CWE-942 | cross-origin data leak |
+| Class | CWE | | Go / .NET |
+|---|---|---|---|
+| SQL injection | CWE-89 | RCE / data exfiltration | ✓ |
+| Command injection | CWE-78 | remote code execution | ✓ |
+| Cross-site scripting (XSS) | CWE-79 | session theft | ✓ |
+| Server-side request forgery (SSRF) | CWE-918 | incl. cloud-metadata theft | ✓ |
+| XML external entity (XXE) | CWE-611 | file read + SSRF | |
+| Insecure deserialization | CWE-502 | RCE | |
+| Path traversal | CWE-22 | file disclosure | ✓ |
+| Hardcoded secrets | CWE-798 | credential leak (the value never leaves this client) | |
+| Broken / weak crypto | CWE-327 | md5 · sha1 · ECB on secrets | |
+| CORS reflected-origin | CWE-942 | cross-origin data leak | ✓ |
 
 ## How it works — no source-code egress
 

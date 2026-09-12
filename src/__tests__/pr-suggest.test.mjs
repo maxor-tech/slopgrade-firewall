@@ -76,7 +76,7 @@ test("postSuggestions: a thrown fetch (network) is caught per-comment and never 
   assert.match(warnings[0], /ECONNRESET/);
 });
 
-// ── The finding FEED (all findings, not just fixable) — Jeff 2026-09-10 « un feed comme coderabbit » ──────────────
+// ── The finding FEED (all findings, not just the fixable ones) ──────────────
 test("findingCommentBody: severity icon + rule + detail + dedup marker, and NOT a ```suggestion``` block", () => {
   const b = findingCommentBody({ rule: "hardcoded-secret", detail: "an AWS key at a.py:5", severity: "high" });
   assert.match(b, /slopGrade Firewall/);
