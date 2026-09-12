@@ -1,5 +1,5 @@
-// Vérifie le carve OSS : le shim taint-interproc désactive la passe inter-procédurale
-// (vide/false) TOUT EN gardant la détection intra-fonction (taint-core) opérationnelle.
+// Verifies the OSS carve: the taint-interproc shim disables the inter-procedural pass
+// (empty/false) WHILE keeping intra-function detection (taint-core) operational.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -8,17 +8,17 @@ import {
 } from "../taint-interproc.mjs";
 import { extractSqliFingerprint } from "../sqli-extract.mjs";
 
-test("shim: findSinkWrappers rend une Map vide (branche inter-proc inerte)", () => {
+test("shim: findSinkWrappers returns an empty Map (inter-proc branch inert)", () => {
   const w = findSinkWrappers(["function run(q){ db.execute(q); }"], { sinkTest: () => true });
   assert.ok(w instanceof Map);
   assert.equal(w.size, 0);
 });
 
-test("shim: interprocHit rend toujours false", () => {
+test("shim: interprocHit always returns false", () => {
   assert.equal(interprocHit("run(userQuery)", new Map(), () => true), false);
 });
 
-test("shim: buildWrapperRegistries rend {} et resolveImportedWrappers une Map vide", () => {
+test("shim: buildWrapperRegistries returns {} and resolveImportedWrappers an empty Map", () => {
   const regs = buildWrapperRegistries([{ path: "a.js", text: "x" }], { sqli: {} });
   assert.deepEqual(regs, {});
   const r = resolveImportedWrappers("import x", "a.js", regs.sqli /* undefined */);
@@ -26,12 +26,12 @@ test("shim: buildWrapperRegistries rend {} et resolveImportedWrappers une Map vi
   assert.equal(r.size, 0);
 });
 
-test("shim: helpers ne throwent pas et rendent la forme vide", () => {
+test("shim: helpers do not throw and return the empty shape", () => {
   assert.ok(buildWrapperRegistry([], {}) instanceof Map);
   assert.deepEqual(splitFunctions(["a", "b"]), []);
 });
 
-test("intégration: SQLi INTRA-fonction détectée MALGRÉ le shim (taint-core OSS)", () => {
+test("integration: INTRA-function SQLi detected DESPITE the shim (taint-core OSS)", () => {
   const src = [
     "function handler(req, res) {",
     "  const q = \"SELECT * FROM users WHERE id = \" + req.query.id;",
@@ -39,13 +39,13 @@ test("intégration: SQLi INTRA-fonction détectée MALGRÉ le shim (taint-core O
     "}",
   ].join("\n");
   const { hits } = extractSqliFingerprint(src, "handler.js");
-  assert.ok(hits.length >= 1, `attendu >=1 hit intra-fonction, obtenu ${JSON.stringify(hits)}`);
-  // Le hit vient de la passe intra (taint-core), pas de l'inter-proc (désactivée par le shim).
+  assert.ok(hits.length >= 1, `expected >=1 intra-function hit, got ${JSON.stringify(hits)}`);
+  // The hit comes from the intra pass (taint-core), not inter-proc (disabled by the shim).
   assert.ok(hits.some((h) => h.kind !== "taint-interproc" && h.kind !== "taint-xfile"),
-    `attendu un hit non-interproc, obtenu ${JSON.stringify(hits)}`);
+    `expected a non-interproc hit, got ${JSON.stringify(hits)}`);
 });
 
-test("intégration: une requête CONSTANTE (sans user data) ne fire pas", () => {
+test("integration: a CONSTANT query (no user data) does not fire", () => {
   const src = [
     "function safe() {",
     "  const q = \"SELECT * FROM users WHERE id = 1\";",
@@ -53,5 +53,5 @@ test("intégration: une requête CONSTANTE (sans user data) ne fire pas", () => 
     "}",
   ].join("\n");
   const { hits } = extractSqliFingerprint(src, "safe.js");
-  assert.equal(hits.length, 0, `attendu 0 hit sur requête constante, obtenu ${JSON.stringify(hits)}`);
+  assert.equal(hits.length, 0, `expected 0 hits on a constant query, got ${JSON.stringify(hits)}`);
 });

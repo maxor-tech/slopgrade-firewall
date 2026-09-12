@@ -78,9 +78,9 @@ export async function postSuggestions(env, fixes, { fetchImpl = fetch, readEvent
   return posted;
 }
 
-// ── The finding FEED (CodeRabbit-style) — one inline review comment per finding, not just the fixable ones ─────────
-// Jeff 2026-09-10: « ça prend un feed comme coderabbit ». Every finding (cross-tenant leak + the 125 code-detector
-// packs) becomes a plain review comment at its file:line — what + why, no ```suggestion``` (that's the fix surface).
+// ── The finding FEED — one inline review comment per finding, not just the fixable ones ─────────
+// Every finding (cross-tenant leak + the code-detector packs) becomes a plain review comment at its
+// file:line — what + why, no ```suggestion``` (that's the fix surface).
 // Zero-egress-to-slopGrade: posts to the consumer's OWN PR with their OWN token, source GitHub already has.
 
 // A hidden marker so re-runs UPDATE the picture instead of spamming: we skip a (path,line) that already carries ours.
