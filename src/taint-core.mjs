@@ -41,11 +41,15 @@ export function runTaintPass(lines, cfg) {
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (l.length > 4000 || isComment(l)) continue;   // minified blob / a sink named in a comment is not live code
-    if (boundary.test(l)) taint.clear();
 
     // 1. Sink check — the consumer decides which tainted var reaching what sink counts (one hit per line).
+    //    BEFORE the boundary reset : a sink line that also carries an inline callback (`exec(cmd, (e, out) => …)`)
+    //    matches the `=>` boundary, and clearing first made every such sink invisible (release audit 2026-09-13,
+    //    B-P1-6). The sink on this line still sees the taint of the enclosing function ; the reset applies to what
+    //    FOLLOWS the new scope opener.
     let fired = false;
     cfg.checkSinks(l, taint, (kind) => { if (!fired) { out.push({ line: i + 1, kind }); fired = true; } });
+    if (boundary.test(l)) taint.clear();
 
     // 2. Sanitizer sweep — a validation/escaping line clears every tainted var it references.
     if (cfg.sanitizer && cfg.sanitizer.test(l)) {

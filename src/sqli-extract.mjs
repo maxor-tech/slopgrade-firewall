@@ -18,11 +18,27 @@ const REQ = "request\\s*\\.\\s*(?:args|form|values|GET|POST|json|data)|req(?:ues
 // A SQL-executing sink.
 const SINK = "execute|executemany|executescript|query|raw|exec|executeQuery|executeUpdate|prepareStatement|mysqli_query|mysql_query|pg_query|pg_exec|find_by_sql";
 
+const SQL_KW = "SELECT|INSERT|UPDATE|DELETE|WHERE|FROM|VALUES|ORDER\\s+BY|UNION|--";
+// A SQL string literal in EITHER quote style, matched per quote so the OTHER quote may appear inside it. Release audit
+// 2026-09-13 (B-P1-6) : the textbook `db.query("SELECT … WHERE name = '" + req.query.name + "'")` never fired because
+// the old mixed class `["'][^"']*["']` mis-closed on the embedded single quote (the same trap the java-sql rule below
+// already documents). A SQL string that quotes a value is exactly the shape that gets concatenated.
+const SQL_LIT = `(?:"[^"]*(?:${SQL_KW})[^"]*"|'[^']*(?:${SQL_KW})[^']*')`;
+
 const DIRECT_PATTERNS = [
-  ["fstring-sql", new RegExp(`\\b(?:${SINK})\\s*\\(\\s*f["'][^"']*\\{[^}]*(?:${REQ})`)],
+  // per-quote (a SQL f-string routinely embeds the other quote : f"… name = '{x}'") — same trap as SQL_LIT above.
+  ["fstring-sql", new RegExp(`\\b(?:${SINK})\\s*\\(\\s*(?:f"[^"]*\\{[^}]*(?:${REQ})|f'[^']*\\{[^}]*(?:${REQ}))`)],
   ["interp-sql", new RegExp(`\\b(?:${SINK}|where|find_by_sql)\\s*\\(\\s*(?:["'][^"']*#\\{[^}]*(?:${REQ})|\`[^\`]*\\$\\{[^}]*(?:${REQ}))`)],
-  ["concat-sql", new RegExp(`\\b(?:${SINK})\\s*\\(\\s*[^;]*["'][^"']*(?:SELECT|INSERT|UPDATE|DELETE|WHERE|FROM|VALUES|ORDER\\s+BY|UNION|--)[^"']*["']\\s*(?:\\+|\\.|%)\\s*[^;]*(?:${REQ})`)],
+  ["concat-sql", new RegExp(`\\b(?:${SINK})\\s*\\(\\s*[^;]*${SQL_LIT}\\s*(?:\\+|\\.|%)\\s*[^;]*(?:${REQ})`)],
   ["php-inline-sql", new RegExp(`\\b(?:mysqli_query|mysql_query|pg_query|pg_exec|->\\s*query|->\\s*exec(?:ute)?)\\s*\\([^;]*["'][^"']*\\$_(?:GET|POST|REQUEST|COOKIE)`)],
+  // Java (JDBC Statement + JPA/Hibernate) — a SQL/JPQL string concatenated with an HttpServletRequest accessor at a
+  // query sink. The base concat-sql above covers Python/Node/PHP/Ruby sources only; Java's request.getParameter /
+  // getHeader and the createQuery/createNativeQuery (JPA/Hibernate) + executeQuery/executeUpdate (JDBC) sinks are
+  // Java-specific and were missed. 0-FP: a SQL/JPQL string literal + `+` concat + a CONCRETE request accessor on the
+  // sink statement — a bound setParameter/`?` placeholder keeps the request value off the concatenation, so never fires.
+  // Java strings are double-quoted and SQL routinely embeds single quotes ("… name = '"), so match a double-quoted
+  // literal only (`"[^"]*"`) — a mixed ["'] class would mis-close on the embedded single quote.
+  ["java-sql", new RegExp(`\\b(?:createQuery|createNativeQuery|createSQLQuery|executeQuery|executeUpdate|executeLargeUpdate|prepareStatement)\\s*\\(\\s*[^;]*"[^"]*(?:SELECT|INSERT|UPDATE|DELETE|WHERE|FROM|ORDER\\s+BY|UNION)[^"]*"\\s*\\+\\s*[^;]*\\b(?:request|req|httpRequest)\\s*\\.\\s*get(?:Parameter|ParameterValues|Header|QueryString|PathInfo)\\b`)],
 ];
 
 import { runTaintPass, mentions } from "./taint-core.mjs";
@@ -38,10 +54,25 @@ const SQL_STRING = /["'`][^"'`]*\b(?:SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM|D
 const SQL_SANITIZE = /\b(?:parameteriz\w*|escape\w*|quote\w*|sanitiz\w*|bind_?param\w*|prepared?|mogrify|sql\.Identifier|quote_ident|placeholder)\b/i;
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const sink = (v) => new RegExp(`\\b(?:${SINK})\\s*\\(\\s*${esc(v)}\\s*[),]`);
+// A sink CALL on the line (any argument shape) — used with `interpolated` below for the one-step user-var build.
+const SINK_CALL = new RegExp(`\\b(?:${SINK})\\s*\\(`);
+// Is the (user-tainted) var `v` built INTO a string literal on this line — f"…{v}", `…${v}`, "…#{v}", "…" + v,
+// "…" % v, "…".format(v), v + "…" ? The DISCRIMINATOR vs a bound parameter (`"… %s", (v,)` / `"… $1", [v]`) : a bound
+// value sits after a `,`, never glued to the literal by an operator or inside a placeholder. Release audit B-P1-6 :
+// `name = request.args.get(..)` then `cur.execute(f"… '{name}'")` — the value was "user"-tainted but the sink check
+// only fired on "sql"-tainted vars, so the one-step build at the sink itself was invisible.
+const interpolated = (v, l) => {
+  const V = esc(v);
+  return new RegExp(`f"[^"]*\\{[^}]*\\b${V}\\b[^}]*\\}|f'[^']*\\{[^}]*\\b${V}\\b[^}]*\\}`).test(l)   // per-quote, see SQL_LIT
+    || new RegExp(`\`[^\`]*\\$\\{[^}]*\\b${V}\\b[^}]*\\}`).test(l)
+    || new RegExp(`"[^"]*#\\{[^}]*\\b${V}\\b|'[^']*#\\{[^}]*\\b${V}\\b`).test(l)
+    || new RegExp(`["'\`]\\s*(?:\\+|%|\\.format\\s*\\()\\s*\\(?\\s*\\b${V}\\b`).test(l)
+    || new RegExp(`\\b${V}\\b\\s*\\+\\s*["'\`]`).test(l);
+};
 // A cheap file-level gate: no execute-family token ⇒ no possible SQL sink ⇒ skip the inter-procedural pass.
 const HAS_SINK = new RegExp(`\\b(?:${SINK})\\b`);
 const sqliSinkTest = (l, v) => sink(v).test(l);
-/** The SQLi wrapper config — shared by the walker's cross-file registry build. */
+/** The SQLi wrapper config — shared by the walker's cross-file registry build and the calibration harness. */
 export const sqliWrapperCfg = { sinkTest: sqliSinkTest, sanitizer: SQL_SANITIZE, sourceTest: REQ_RE, hasSink: HAS_SINK };
 
 /**
@@ -59,6 +90,11 @@ function taintPass(lines, text, importedWrappers) {
     sanitizer: SQL_SANITIZE,
     checkSinks(l, taint, emit) {
       for (const [v, tag] of taint) if (tag === "sql" && sink(v).test(l)) { emit("taint-sql"); return; }
+      // One-step build AT the sink : a raw user value interpolated into a SQL literal inside the execute call
+      // (f-string / template / concat / % / .format). A bound parameter after a `,` does not match `interpolated`.
+      if (SINK_CALL.test(l) && SQL_STRING.test(l)) {
+        for (const [v, tag] of taint) if (tag === "user" && interpolated(v, l)) { emit("taint-sql"); return; }
+      }
       // Inter-procedural: a user-built query string (inline) OR a sql-tainted var at a flowing arg of a LOCAL query-runner.
       if (wrappers.size && interprocHit(l, wrappers, dangerous(taint))) { emit("taint-interproc"); return; }
       // Cross-file: same, into a query-runner IMPORTED from another module.
