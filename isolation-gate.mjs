@@ -47,7 +47,7 @@ import { firewallVerdict } from "./src/gate-verdict.mjs";
 import { postFindingComments, postSummaryComment } from "./src/pr-suggest.mjs";
 import {
   resolveOrigin, classifyEnv, validVerdict, sanitizeLogLine, sanitizeFingerprint, sanitizePackFingerprints,
-  parseLeak, buildSarif, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
+  parseLeak, buildSarif, collectPackBlocks, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
 } from "./src/client-lib.mjs";
 
 const CODE_EXTS = /\.(py|ts|tsx|js|jsx|mjs|cjs|sql|rb|go|php|prisma|java|cs|rs|c|cc|cpp|h|hpp|kt|scala|ex|exs)$/;
@@ -186,8 +186,9 @@ export async function main(argv = [], env = process.env) {
   // 2. EXFILTRATION guard — a custom origin would mint a token for an attacker audience. Run DRY unless opted in.
   const { origin, blocked } = resolveOrigin(env);
   if (blocked) {
+    // A dry run is a NO-VERDICT path: --strict must fail closed here too (it promised "exit 1 when no verdict").
     ghWarn(`custom SLOPGRADE_ORIGIN (${origin}) — running DRY: no token minted, nothing uploaded. Set SLOPGRADE_ALLOW_CUSTOM_ORIGIN=1 to allow.`);
-    return 0;
+    return noVerdict();
   }
 
   // 3. Environment — distinguish the three cases (the #1 support ticket is a forgotten id-token permission).
@@ -236,20 +237,28 @@ export async function main(argv = [], env = process.env) {
   const parseLoc = (t) => { const m = /^(.*):(\d+)$/.exec(String(t ?? "")); return m ? { file: m[1], line: Number(m[2]) } : { file: null, line: 1 }; };
   const feed = []; // normalized {file,line,rule,detail,severity} for the inline PR comment feed (CodeRabbit-style)
 
+  // `file=` is a workflow-command argument: sanitize it like every other server string (no `,`/`::` spoof).
+  const wfFile = (f) => sanitizeLogLine(f).replace(/[,:]/g, "_");
   for (const p of (Array.isArray(v.leaks) ? v.leaks : []).map(parseLeak)) {
-    if (p.file) { console.log(`::error file=${p.file},line=${p.line} title=slopGrade Firewall::${p.message}`); feed.push({ file: p.file, line: p.line, rule: "cross-tenant", detail: p.message, severity: "high" }); }
+    if (p.file) { console.log(`::error file=${wfFile(p.file)},line=${p.line} title=slopGrade Firewall::${p.message}`); feed.push({ file: p.file, line: p.line, pack: "cross-tenant", rule: "cross-tenant", detail: p.message, severity: "high" }); }
   }
-  for (const [labelName, block] of [["access control", v.accessControl], ["db safety", v.dbSafety], ["supply chain", v.supplyChain], ["secrets", v.secrets], ["container", v.container], ["ci/cd", v.cicd]]) {
-    if (block && block.count > 0) {
-      line(`\nslopGrade Firewall — ${labelName}: ${block.count} finding(s)`);
-      // `table` is "file:line" for the file-based packs → parse it so annotations + the feed land on the RIGHT line.
-      for (const f of (Array.isArray(block.findings) ? block.findings : [])) {
-        const loc = parseLoc(f.table);
-        if (loc.file) { console.log(`::error file=${loc.file},line=${loc.line} title=slopGrade Firewall::[${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(f.detail)}`); feed.push({ file: loc.file, line: loc.line, rule: f.rule, detail: f.detail, severity: f.severity }); }
-      }
-      for (const f of (Array.isArray(block.findings) ? block.findings : []).slice(0, 10)) line(`    - [${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(f.detail)}`);
-      if (block.hidden > 0) line(`    ... +${block.hidden} more hidden — enable the gate to see them all: ${origin}/ci`);
+  // Every detector pack the server returned — DATA-DRIVEN (collectPackBlocks), never a hardcoded key list: a pack
+  // missing from a static list would be silently dropped from the log, the feed and the SARIF (release-audit B-P0-2).
+  for (const { key, label, block } of collectPackBlocks(v)) {
+    line(`\nslopGrade Firewall — ${label}: ${block.count} finding(s)`);
+    const findings = Array.isArray(block.findings) ? block.findings : [];
+    // `table` is "file:line" for the file-based packs → parse it so annotations + the feed land on the RIGHT line.
+    for (const f of findings) {
+      const loc = parseLoc(f.table);
+      // The free tier withholds the rule name + detail (rule "gated", empty detail): say so, and say where to unlock,
+      // instead of printing an empty annotation.
+      const detail = f.detail && String(f.detail).trim()
+        ? String(f.detail)
+        : `${label} finding here — the exact rule and the remaining findings are unlocked with the gate: ${origin}/ci`;
+      if (loc.file) { console.log(`::error file=${wfFile(loc.file)},line=${loc.line} title=slopGrade Firewall::[${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(detail)}`); feed.push({ file: loc.file, line: loc.line, pack: key, rule: f.rule, detail, severity: f.severity }); }
     }
+    for (const f of findings.slice(0, 10)) line(`    - ${sanitizeLogLine(f.table ?? "")}  [${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(f.detail && String(f.detail).trim() ? f.detail : "(detail withheld on the free tier)")}`);
+    if (block.hidden > 0) line(`    ... +${block.hidden} more hidden — enable the gate to see them all: ${origin}/ci`);
   }
 
   // The inline finding FEED (CodeRabbit-style) — one review comment per finding at its file:line + a deduped summary,

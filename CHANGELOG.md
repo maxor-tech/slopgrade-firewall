@@ -3,6 +3,28 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.6.2] — 2026-09-13
+
+Release-audit fixes (independent-repo install probe, 2026-09-13). No change to what leaves the runner.
+
+### Fixed
+- **All detector classes are now rendered.** The report loop iterated a hardcoded list of six legacy pack keys and
+  silently dropped the server's `sqli / cmdi / xss / ssrf / xxe / insecureDeser / pathTraversal / weakCrypto / cors`
+  blocks from the CI log, the inline PR feed and the SARIF — only `secrets` ever showed. The loop is now data-driven
+  (`collectPackBlocks`: every pack object with a `count`), with one SARIF rule per pack (`buildSarif` `findings`).
+- **Free-tier sample is no longer an empty annotation.** A withheld finding (rule `gated`, empty detail) now prints the
+  class, the location and where to unlock, instead of `##[error][gated] `.
+- **`--strict` fails closed on a blocked custom origin** (`SLOPGRADE_ORIGIN` without the opt-in is a no-verdict path).
+- `CLIENT_VERSION` was stuck at `0.6.0`; it now tracks `package.json` (pinned by a test).
+- `vendor/` is excluded from the scan (Go/PHP vendored deps, or a vendored copy of this client, no longer
+  self-fingerprint).
+- Workflow-command `file=` arguments are sanitized like every other server string.
+
+### Changed
+- README workflow: the job is named `slop` (the check name that « Protect main » in the app requires — a different job
+  name left the protected branch waiting on a check that never runs) ; the free-vs-hosted table now states what the
+  free tier actually shows (count + one located sample per class).
+
 ## [0.6.1] — 2026-09-11
 
 Pre-publish hardening. No behavior change to detection or the exit boundary; the test suite is unchanged and green.

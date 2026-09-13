@@ -2,7 +2,7 @@
 // unit-tested (the CLI in isolation-gate.mjs is a thin adapter around these + the network). Zero dependencies.
 
 export const DEFAULT_ORIGIN = "https://app.slopgrade.ai";
-export const CLIENT_VERSION = "0.6.0";
+export const CLIENT_VERSION = "0.6.2"; // keep in lock-step with package.json (pinned by client-lib.test.mjs)
 export const FINGERPRINT_VERSION = 1;
 export const MAX_PAYLOAD_BYTES = 8 * 1024 * 1024; // 8MB hard cap on the POST body (clear error, not an opaque 413)
 
@@ -52,6 +52,48 @@ export function validVerdict(v) {
   if (v.conformancePct != null && !Number.isFinite(v.conformancePct)) return false; // rejects NaN (renders "NaN%")
   if (v.leaks != null && !Array.isArray(v.leaks)) return false;
   return true;
+}
+
+/**
+ * Human labels for the detector packs the server can return. The verdict carries one object per pack, keyed by the
+ * server's pack id; a key missing here still renders (see packLabel) — the label map is cosmetic, the ITERATION is
+ * data-driven (collectPackBlocks). Release-audit 2026-09-13 : the previous client iterated a hardcoded list of six
+ * legacy keys and silently dropped 9 of the 10 free-tier classes (sqli/cmdi/xss/ssrf/xxe/deser/pathTraversal/
+ * crypto/cors) from the log, the PR feed and the SARIF — a paying repo was blocked without being shown where.
+ */
+export const PACK_LABELS = Object.freeze({
+  accessControl: "access control", dbSafety: "db safety", supplyChain: "supply chain", secrets: "hardcoded secrets",
+  container: "container", cicd: "ci/cd", transport: "transport security",
+  sqli: "SQL injection", goSqli: "SQL injection (Go)", dotnetSqli: "SQL injection (.NET)",
+  cmdi: "command injection", goCmdi: "command injection (Go)", dotnetCmdi: "command injection (.NET)",
+  xss: "cross-site scripting", goXss: "cross-site scripting (Go)", dotnetXss: "cross-site scripting (.NET)",
+  ssrf: "server-side request forgery", goSsrf: "server-side request forgery (Go)", dotnetSsrf: "server-side request forgery (.NET)",
+  pathTraversal: "path traversal", goPathTraversal: "path traversal (Go)", dotnetPathTraversal: "path traversal (.NET)",
+  cors: "CORS reflected origin", goCors: "CORS reflected origin (Go)", dotnetCors: "CORS reflected origin (.NET)",
+  xxe: "XML external entity", insecureDeser: "insecure deserialization", weakCrypto: "weak crypto",
+});
+
+/** Label for a pack key — the map above, else the camelCase key split into words (never throws, never empty). */
+export function packLabel(key) {
+  const k = String(key ?? "");
+  return PACK_LABELS[k] ?? (k.replace(/([A-Z])/g, " $1").trim().toLowerCase() || "finding");
+}
+
+/**
+ * Every detector-pack block in a server verdict — data-driven, so a pack the server adds tomorrow renders today.
+ * A pack block is an object carrying a numeric `count` (+ optional findings[] / hidden / blocking). Scalars, arrays
+ * and the tenant-verdict fields are skipped. Only blocks with count > 0 are returned (nothing to show otherwise).
+ * @returns {Array<{ key: string, label: string, block: { count: number, findings?: any[], hidden?: number } }>}
+ */
+export function collectPackBlocks(v) {
+  const out = [];
+  if (!v || typeof v !== "object") return out;
+  for (const [key, block] of Object.entries(v)) {
+    if (!block || typeof block !== "object" || Array.isArray(block)) continue;
+    if (typeof block.count !== "number" || !Number.isFinite(block.count) || block.count <= 0) continue;
+    out.push({ key, label: packLabel(key), block });
+  }
+  return out;
 }
 
 /**
@@ -135,12 +177,22 @@ export function parseLeak(s) {
   return { file: m[1], line: Number(m[2]), message: sanitizeLogLine(m[3] || "cross-tenant isolation leak") };
 }
 
+/** SARIF level for a detector severity: critical/high → error, medium → warning, anything else → note. */
+export function sarifLevel(severity) {
+  const s = String(severity ?? "").toLowerCase();
+  if (s === "critical" || s === "high") return "error";
+  if (s === "medium") return "warning";
+  return "note";
+}
+
 /**
- * Build a SARIF 2.1.0 report from the verdict's leaks so findings land in the PR "Files changed" diff and the
- * code-scanning tab (upload with github/codeql-action/upload-sarif). Only leaks with a parseable path:line become
- * results; a leak with an unmappable path is skipped (a wrong-path annotation is worse than none).
+ * Build a SARIF 2.1.0 report so findings land in the PR "Files changed" diff and the code-scanning tab (upload with
+ * github/codeql-action/upload-sarif). Two sources: the cross-tenant `leaks` (strings "path:line  reason") and the
+ * detector-pack `findings` (the normalized feed rows {file, line, pack, rule, detail, severity}) — one SARIF rule per
+ * pack key, so every free-tier class is visible in code scanning, not only the cross-tenant rule. Only entries with
+ * a parseable path become results; an unmappable path is skipped (a wrong-path annotation is worse than none).
  */
-export function buildSarif(leaks, { version = CLIENT_VERSION } = {}) {
+export function buildSarif(leaks, { version = CLIENT_VERSION, findings = [] } = {}) {
   const results = (Array.isArray(leaks) ? leaks : [])
     .map(parseLeak)
     .filter((l) => l.file)
@@ -150,6 +202,30 @@ export function buildSarif(leaks, { version = CLIENT_VERSION } = {}) {
       message: { text: l.message },
       locations: [{ physicalLocation: { artifactLocation: { uri: l.file }, region: { startLine: Math.max(1, l.line) } } }],
     }));
+  const rules = [{
+    id: "cross-tenant-isolation-leak",
+    name: "CrossTenantIsolationLeak",
+    shortDescription: { text: "Unscoped read/write on a tenant-scoped table (cross-tenant data exposure)." },
+  }];
+  const seenPacks = new Set();
+  for (const f of Array.isArray(findings) ? findings : []) {
+    if (!f || typeof f.file !== "string" || !f.file) continue;
+    const pack = ident(f.pack || f.rule || "finding");
+    if (!seenPacks.has(pack)) {
+      seenPacks.add(pack);
+      rules.push({
+        id: pack,
+        name: pack.replace(/(^|[^a-zA-Z0-9])([a-z])/g, (_, __, c) => c.toUpperCase()).replace(/[^a-zA-Z0-9]/g, "") || "Finding",
+        shortDescription: { text: `${packLabel(pack)} — slopGrade Firewall detector pack.` },
+      });
+    }
+    results.push({
+      ruleId: pack,
+      level: sarifLevel(f.severity),
+      message: { text: sanitizeLogLine(f.detail || `${packLabel(pack)} finding`) },
+      locations: [{ physicalLocation: { artifactLocation: { uri: f.file }, region: { startLine: Math.max(1, Number(f.line) || 1) } } }],
+    });
+  }
   return {
     $schema: "https://json.schemastore.org/sarif-2.1.0.json",
     version: "2.1.0",
@@ -158,11 +234,7 @@ export function buildSarif(leaks, { version = CLIENT_VERSION } = {}) {
         name: "slopGrade Firewall",
         informationUri: "https://www.slopgrade.ai",
         version,
-        rules: [{
-          id: "cross-tenant-isolation-leak",
-          name: "CrossTenantIsolationLeak",
-          shortDescription: { text: "Unscoped read/write on a tenant-scoped table (cross-tenant data exposure)." },
-        }],
+        rules,
       } },
       results,
     }],

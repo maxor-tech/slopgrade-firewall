@@ -8,10 +8,11 @@ classification. This repository is the exact code that runs in your runner: **au
 ## Add it to your repo
 
 ```yaml
-# .github/workflows/firewall.yml
+# .github/workflows/slop-gate.yml
+name: slop-gate
 on: { pull_request: {} }
 jobs:
-  firewall:
+  slop:                          # keep this job name: "Protect main" in app.slopgrade.ai requires the check named `slop`
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -96,13 +97,15 @@ repo. The **hosted** [slopGrade Firewall](https://www.slopgrade.ai/firewall) add
 | Detection classes | the 10 highest-severity | the full detector catalog |
 | Dataflow | intra-function | cross-function + cross-file (interprocedural taint) |
 | False-positive suppression | commodity context checks | calibrated on a large private corpus |
-| **Private** repos | **advisory only** — you see every leak, can't block it | **blocking gate** |
-| **Public** repos | blocking gate, free | blocking gate, free |
-| Verified auto-fix + inline PR feed | — | ✓ |
+| Findings shown | per class : the **count** + **one located sample** (`file:line`, rule name withheld) | every finding, rule name + detail |
+| **Private** repos | **advisory only** — never blocked | **blocking gate** |
+| **Public** repos | cross-tenant gate blocks, free ; detector classes advisory (count + sample) | blocking gate on every class |
+| Verified auto-fix + inline PR feed | feed : the located sample per class | full feed + verified auto-fix |
 
-On a **private** repo the free tier runs advisory-only: you see every leak but can't enforce it. Blocking on private
-repos is **$8–29/repo/mo** (volume pricing) — **14-day free trial, no card**. Users unlimited; billed per repo,
-never per seat. → **[slopgrade.ai/firewall](https://www.slopgrade.ai/firewall)**
+On a **private** repo the free tier runs advisory-only: for each class you see how many findings there are and one
+located sample, and the build is never blocked. The full list, the rule names and the block are the hosted gate:
+**$8–29/repo/mo** (volume pricing) — **14-day free trial, no card**. Users unlimited; billed per repo, never per
+seat. → **[slopgrade.ai/firewall](https://www.slopgrade.ai/firewall)**
 
 ## Development
 

@@ -3,7 +3,66 @@
 // assert the DROP of an unknown field as much as the passthrough of the known ones.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { sanitizePackFingerprints } from "../client-lib.mjs";
+import { readFileSync } from "node:fs";
+import { sanitizePackFingerprints, collectPackBlocks, packLabel, buildSarif, sarifLevel, CLIENT_VERSION } from "../client-lib.mjs";
+
+// ── release-audit B-P0-2 : the report must be DATA-DRIVEN over the server's pack keys, never a hardcoded list ──
+test("collectPackBlocks returns every pack object with count>0, in server order, skipping scalars/arrays/tenant fields", () => {
+  const verdict = {
+    ok: true, pattern: "none", hardLeaks: 0, reliable: false, gateEntitled: false, leaks: [], gateLevel: "none",
+    sqli: { count: 2, hidden: 1, blocking: 0, findings: [{ rule: "gated", table: "a.js:10", detail: "", severity: "high" }] },
+    secrets: { count: 1, hidden: 0, blocking: 0, findings: [] },
+    xss: { count: 0, hidden: 0, blocking: 0, findings: [] },   // empty → not rendered
+    brandNewPack: { count: 3, findings: [] },                    // unknown to the label map → still rendered
+    fixableCount: 0, packBlocking: 0,                            // scalars → skipped
+  };
+  const blocks = collectPackBlocks(verdict);
+  assert.deepEqual(blocks.map((b) => b.key), ["sqli", "secrets", "brandNewPack"]);
+  assert.equal(blocks[0].label, "SQL injection");
+  assert.equal(blocks[1].label, "hardcoded secrets");
+  assert.equal(blocks[2].label, "brand new pack");           // camelCase split, never the raw key, never empty
+  assert.equal(blocks[0].block.hidden, 1);
+  assert.deepEqual(collectPackBlocks(null), []);
+  assert.deepEqual(collectPackBlocks("x"), []);
+});
+
+test("packLabel covers the 10 free-tier classes + go/dotnet variants and degrades gracefully", () => {
+  for (const k of ["sqli", "cmdi", "xss", "ssrf", "xxe", "insecureDeser", "pathTraversal", "secrets", "weakCrypto", "cors", "goSqli", "dotnetCors"]) {
+    assert.notEqual(packLabel(k), k, `${k} must have a human label`);
+  }
+  assert.equal(packLabel(undefined), "finding");
+  assert.equal(packLabel(""), "finding");
+});
+
+test("buildSarif emits one rule per pack + one result per located pack finding, with severity→level mapping", () => {
+  const sarif = buildSarif(["src/db.ts:12  [orders]  unscoped SELECT"], {
+    version: "9.9.9",
+    findings: [
+      { file: "a.js", line: 10, pack: "sqli", rule: "gated", detail: "", severity: "high" },
+      { file: "a.js", line: 20, pack: "sqli", rule: "gated", detail: "second", severity: "critical" },
+      { file: "b.py", line: 3, pack: "weakCrypto", rule: "md5", detail: "md5 on a secret", severity: "medium" },
+      { file: "", line: 1, pack: "xss", rule: "r", detail: "no file → skipped", severity: "high" },
+    ],
+  });
+  const run = sarif.runs[0];
+  assert.equal(run.tool.driver.version, "9.9.9");
+  assert.deepEqual(run.tool.driver.rules.map((r) => r.id), ["cross-tenant-isolation-leak", "sqli", "weakCrypto"]);
+  assert.equal(run.results.length, 4);                                  // 1 leak + 3 located findings (the file-less one skipped)
+  assert.equal(run.results[0].ruleId, "cross-tenant-isolation-leak");
+  assert.equal(run.results[1].ruleId, "sqli");
+  assert.equal(run.results[1].level, "error");
+  assert.equal(run.results[1].message.text, "SQL injection finding");   // empty detail → labelled, never an empty message
+  assert.equal(run.results[1].locations[0].physicalLocation.region.startLine, 10);
+  assert.equal(run.results[3].ruleId, "weakCrypto");
+  assert.equal(run.results[3].level, "warning");
+  assert.equal(sarifLevel("low"), "note");
+  assert.equal(sarifLevel(undefined), "note");
+});
+
+test("CLIENT_VERSION tracks package.json (release-audit B-P3-1 : telemetry was stuck at 0.6.0)", () => {
+  const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+  assert.equal(CLIENT_VERSION, pkg.version);
+});
 
 test("drops any non-whitelisted hit field (a source-bearing 'snippet' never egresses)", () => {
   const dirty = { sqliFingerprint: { files: [{ file: "app/db.js", hits: [
