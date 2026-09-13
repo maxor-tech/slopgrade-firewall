@@ -4,7 +4,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { main } from "../../isolation-gate.mjs";
+
+// The walk excludes `__tests__/` (so CI_ENV's workspace scans nothing — fast, deterministic). The pro tests need a
+// workspace with real files to extract from : a throwaway dir with one code file and one non-code file.
+function proWorkspace() {
+  const ws = mkdtempSync(join(tmpdir(), "sg-fw-pro-"));
+  writeFileSync(join(ws, "app.mjs"), "export const x = 1;\n", "utf8");
+  writeFileSync(join(ws, "NOTES.md"), "# notes\n", "utf8");
+  return ws;
+}
 
 const CI_ENV = {
   GITHUB_ACTIONS: "true",
@@ -14,7 +27,10 @@ const CI_ENV = {
   GITHUB_WORKSPACE: fileURLToPath(new URL("./", import.meta.url)), // scan only this tests dir (fast, deterministic)
 };
 
-function withStubbedNetwork(verdict, fn) {
+// Default : the pro-extractors call answers 402 (a FREE repo) — the shape every non-paying run sees.
+const PRO_FREE = { ok: false, status: 402, json: async () => ({ error: "plan-required", gateLevel: "none" }) };
+
+function withStubbedNetwork(verdict, fn, pro = PRO_FREE) {
   const realFetch = globalThis.fetch;
   const realLog = console.log;
   const calls = [];
@@ -22,11 +38,28 @@ function withStubbedNetwork(verdict, fn) {
   globalThis.fetch = async (url, opts) => {
     calls.push({ url: String(url), opts });
     if (String(url).startsWith("https://oidc.example/")) return { ok: true, status: 200, json: async () => ({ value: "eyJ.oidc.token" }) };
+    if (String(url).endsWith("/api/ci/pro-extractors")) return pro;
     return { ok: true, status: 200, json: async () => verdict };
   };
   console.log = (...a) => out.push(a.join(" "));
   return fn({ calls, out }).finally(() => { globalThis.fetch = realFetch; console.log = realLog; });
 }
+
+// A tiny PRO bundle, the exact module shape the server ships (PRO_VERSION / PRO_WALK_EXTS / PRO_PACKS). Its file pack
+// deliberately emits a source-bearing `snippet` : the egress boundary must drop it before the POST.
+const PRO_BUNDLE = [
+  'export const PRO_VERSION = "test-1";',
+  "export const PRO_WALK_EXTS = /\\.(mjs|md|sql)$/i;",
+  "export const PRO_PACKS = [",
+  '  { fpField: "demoProFingerprint", mode: "file", match: /\\.mjs$/i, run: (t, f) => ({ file: f, hits: [{ line: 1, kind: "demo", snippet: "SHOULD-NEVER-LEAVE" }] }) },',
+  '  { fpField: "demoSqlFingerprint", mode: "sql", match: /\\.sql$/i, run: (sql) => ({ tableCols: { "public.t": ["id"] }, policies: [], grants: [], rlsOn: [] }) },',
+  "];",
+].join("\n");
+const sha = (s) => createHash("sha256").update(s).digest("hex");
+const proResponse = (overrides = {}) => ({
+  ok: true, status: 200,
+  json: async () => ({ ok: true, gateLevel: "paid", version: "test-1", sha256: sha(PRO_BUNDLE), packs: ["demoProFingerprint", "demoSqlFingerprint"], bundle: PRO_BUNDLE, ...overrides }),
+});
 
 const VERDICT = {
   ok: true, pattern: "none", tenantKey: null, conformancePct: null, hardLeaks: 0, byId: 0, reliable: false,
@@ -54,8 +87,90 @@ test("renders EVERY pack the server returns (sqli/cmdi/weakCrypto/secrets), not 
     assert.match(text, /::error file=src\/ping\.py,line=9 title=slopGrade Firewall::\[gated\] command injection finding here/);
     assert.doesNotMatch(text, /::error file=[^\n]*::\[gated\] $/m);        // the B-P1-5 empty annotation is gone
     assert.match(text, /\+1 more hidden/);
-    assert.equal(calls.length, 2);                                           // 1 OIDC mint + 1 POST, nothing else
-    assert.match(calls[1].url, /^https:\/\/app\.slopgrade\.ai\/api\/ci\/isolation$/);
+    assert.equal(calls.length, 3);                                           // 1 OIDC mint + 1 pro ask (402) + 1 POST, nothing else
+    assert.match(calls[1].url, /^https:\/\/app\.slopgrade\.ai\/api\/ci\/pro-extractors$/);
+    assert.match(calls[2].url, /^https:\/\/app\.slopgrade\.ai\/api\/ci\/isolation$/);
+    // the coverage line prints on every run : a free repo names its 22 packs and the files it walked (B-P1-7)
+    assert.match(text, /slopGrade Firewall: 22 detector packs \(free tier\) · \d+ files scanned\./);
+    const body = JSON.parse(calls[2].opts.body);
+    assert.equal(body.demoProFingerprint, undefined);
+    assert.equal(body.proVersion, undefined);
+  });
+});
+
+// ── release-audit B-P1-7 : a PAID repo runs the closed-source extractors in the runner ──
+test("PAID repo : the pro bundle is fetched, verified, run locally, sanitized, and its fingerprints ride in the POST", async () => {
+  await withStubbedNetwork(VERDICT, async ({ calls, out }) => {
+    const code = await main(["--gate"], { ...CI_ENV, GITHUB_WORKSPACE: proWorkspace() });
+    assert.equal(code, 0);
+    assert.equal(calls.length, 3);
+    const body = JSON.parse(calls[2].opts.body);
+    // `snippet` dropped at the egress boundary ; NOTES.md walked by the pro set but not matched by the pack
+    assert.deepEqual(body.demoProFingerprint, { files: [{ file: "app.mjs", hits: [{ line: 1, kind: "demo" }] }] });
+    assert.equal(body.demoSqlFingerprint, undefined);                          // no .sql in the walked dir → the sql pack emits nothing
+    assert.equal(body.proVersion, "test-1");
+    assert.doesNotMatch(calls[2].opts.body, /SHOULD-NEVER-LEAVE/);
+    assert.equal(body.sqliFingerprint !== undefined, true);                     // the free packs are still there
+    assert.match(out.join("\n"), /slopGrade Firewall: 24 detector packs \(paid · pro extractors test-1\) · 1 files scanned\./);
+  }, proResponse());
+});
+
+test("a pro bundle whose sha256 does not match is REJECTED : nothing evaluated, the run keeps its free packs", async () => {
+  await withStubbedNetwork(VERDICT, async ({ calls, out }) => {
+    const code = await main(["--gate"], CI_ENV);
+    assert.equal(code, 0);
+    const text = out.join("\n");
+    assert.match(text, /pro extractors rejected \(hash mismatch\)/);
+    assert.match(text, /22 detector packs \(free tier — pro extractors rejected\)/);
+    assert.equal(JSON.parse(calls[2].opts.body).demoProFingerprint, undefined);
+  }, proResponse({ sha256: sha("something else") }));
+});
+
+test("a 5xx / unreachable pro endpoint never costs the verdict (fail-open to the free packs)", async () => {
+  await withStubbedNetwork(VERDICT, async ({ calls, out }) => {
+    const code = await main(["--gate"], CI_ENV);
+    assert.equal(code, 0);
+    assert.match(out.join("\n"), /pro extractors refused \(HTTP 503\)/);
+    assert.equal(calls.length, 3);                                             // the isolation POST still happened
+  }, { ok: false, status: 503, json: async () => ({ error: "bundle-unavailable" }) });
+});
+
+test("--print-payload inside CI prints EXACTLY the wire payload, pro packs included, and never POSTs", async () => {
+  await withStubbedNetwork(VERDICT, async ({ calls, out }) => {
+    const code = await main(["--print-payload"], { ...CI_ENV, GITHUB_WORKSPACE: proWorkspace() });
+    assert.equal(code, 0);
+    assert.equal(calls.length, 2);                                             // OIDC + pro ask ; NO isolation POST
+    const payload = JSON.parse(out[out.length - 1]);
+    assert.ok(payload.fingerprint && payload.sqliFingerprint, "free payload present");
+    assert.deepEqual(payload.demoProFingerprint, { files: [{ file: "app.mjs", hits: [{ line: 1, kind: "demo" }] }] }, "pro packs in the printed payload, sanitized");
+    assert.doesNotMatch(out[out.length - 1], /SHOULD-NEVER-LEAVE/);
+  }, proResponse());
+});
+
+test("--print-payload outside CI prints the free payload and contacts nothing (unchanged)", async () => {
+  await withStubbedNetwork(VERDICT, async ({ calls, out }) => {
+    const code = await main(["--print-payload"], { GITHUB_WORKSPACE: CI_ENV.GITHUB_WORKSPACE });
+    assert.equal(code, 0);
+    assert.equal(calls.length, 0);
+    const payload = JSON.parse(out[out.length - 1]);
+    assert.ok(payload.fingerprint && payload.sqliFingerprint);
+    assert.equal(payload.demoProFingerprint, undefined);
+  }, proResponse());
+});
+
+test("a pack in the server's calibration window (advisory:true) annotates as a WARNING and never counts as blocking in the feed", async () => {
+  const paid = { ...VERDICT, gateEntitled: true, gateLevel: "paid", packBlocking: 0,
+    iac: { count: 2, hidden: 0, blocking: 0, advisory: true, findings: [
+      { rule: "aws-sg-open-world", table: "infra/main.tf:3", detail: "security group open to 0.0.0.0/0 on all ports", severity: "high" },
+      { rule: "aws-sg-open-world", table: "infra/db.tf:9", detail: "security group open to 0.0.0.0/0 on all ports", severity: "high" },
+    ] } };
+  await withStubbedNetwork(paid, async ({ out }) => {
+    const code = await main(["--gate"], CI_ENV);
+    assert.equal(code, 0);                                                     // reported, never blocked
+    const text = out.join("\n");
+    assert.match(text, /iac: 2 finding\(s\) \(advisory — calibration window\)/);
+    assert.match(text, /::warning file=infra\/main\.tf,line=3 title=slopGrade Firewall::\[aws-sg-open-world\]/);
+    assert.doesNotMatch(text, /::error file=infra\//);
   });
 });
 

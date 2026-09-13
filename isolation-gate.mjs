@@ -14,8 +14,14 @@
 // plus Go/.NET. The interprocedural taint engine + the rest of the detector-class catalog + the calibrated suppression + the
 // cross-repo intelligence are the hosted product (slopgrade.ai). This client extracts locally; only the
 // structural fingerprint (no code) is posted for classification — your source never leaves the runner.
+//   • PAID repos (client ≥ 0.7.0): the closed-source extractors for the rest of the catalogue are fetched from
+//     /api/ci/pro-extractors (OIDC-proved entitlement), sha256-verified, and run HERE — same zero-egress contract,
+//     a second egress boundary (sanitizeProFingerprints), fail-open to the free packs (loadProPacks below).
 import { pathToFileURL } from "node:url";
 import { writeFileSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { walk } from "./src/extract.mjs";
 import { buildFingerprint } from "./src/fingerprint.mjs";
 // The 10 flagship classes (base + go/dotnet variants where they exist).
@@ -48,6 +54,7 @@ import { postFindingComments, postSummaryComment } from "./src/pr-suggest.mjs";
 import {
   resolveOrigin, classifyEnv, validVerdict, sanitizeLogLine, sanitizeFingerprint, sanitizePackFingerprints,
   parseLeak, buildSarif, collectPackBlocks, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
+  validProBundleResponse, runProPacks, sanitizeProFingerprints, FREE_PACK_COUNT,
 } from "./src/client-lib.mjs";
 
 const CODE_EXTS = /\.(py|ts|tsx|js|jsx|mjs|cjs|sql|rb|go|php|prisma|java|cs|rs|c|cc|cpp|h|hpp|kt|scala|ex|exs)$/;
@@ -89,7 +96,41 @@ async function postVerdict(origin, body) {
   return null;
 }
 
-const HELP = `slopGrade Firewall — CI leak detection (free tier: 10 flagship classes)
+/**
+ * PRO extractors — the paid half of the catalogue (client ≥ 0.7.0). The server judges ~120 detector packs ; this
+ * client ships the extractors for 22. A repo that proves (OIDC) it is paid-entitled receives the closed-source
+ * extractors for the rest from /api/ci/pro-extractors and runs them HERE, in the runner — the source still never
+ * leaves, only fingerprints do (sanitizeProFingerprints is the egress boundary, `--print-payload` shows exactly it).
+ * fetch → verify (bounded, sha256) → load from a temp file → run over the pro walk set → sanitize. Every failure path
+ * degrades to the free packs with a warning — a pro hiccup never costs the verdict. A free repo gets 402, silently.
+ */
+async function loadProPacks(origin, oidcToken, root, rel) {
+  const none = (note) => ({ wire: {}, packCount: 0, version: null, note });
+  let res;
+  try {
+    res = await timedFetch(`${origin}/api/ci/pro-extractors`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ oidcToken }) });
+  } catch (e) { ghWarn(`pro extractors unreachable (${errMsg(e)}) — running the ${FREE_PACK_COUNT} free packs.`); return none(" (free tier — pro extractors unreachable)"); }
+  if (res.status === 402) return none(" (free tier)");
+  if (!res.ok) { ghWarn(`pro extractors refused (HTTP ${res.status}) — running the ${FREE_PACK_COUNT} free packs.`); return none(" (free tier — pro extractors refused)"); }
+  let j;
+  try { j = await res.json(); } catch { ghWarn("pro extractors: malformed response — running the free packs."); return none(" (free tier — pro extractors malformed)"); }
+  const check = validProBundleResponse(j, (s) => createHash("sha256").update(s).digest("hex"));
+  if (!check.ok) { ghWarn(`pro extractors rejected (${check.reason}) — running the ${FREE_PACK_COUNT} free packs.`); return none(" (free tier — pro extractors rejected)"); }
+  let mod;
+  try {
+    const file = join(tmpdir(), `slopgrade-pro-${j.sha256.slice(0, 16)}.mjs`);
+    writeFileSync(file, j.bundle, "utf8");
+    mod = await import(pathToFileURL(file).href);
+  } catch (e) { ghWarn(`pro extractors failed to load (${errMsg(e)}) — running the free packs.`); return none(" (free tier — pro extractors failed to load)"); }
+  const packs = Array.isArray(mod?.PRO_PACKS) ? mod.PRO_PACKS : [];
+  // The pro walk set adds the infra formats (yaml/tf/json/Dockerfile…) the free CODE_EXTS walk never reads.
+  const proFiles = mod?.PRO_WALK_EXTS instanceof RegExp ? walk(root, mod.PRO_WALK_EXTS) : walk(root, CODE_EXTS);
+  const { wire, errors } = runProPacks(packs, proFiles, { read: (f) => readFileSync(f, "utf8"), rel });
+  if (errors > 0) ghWarn(`${errors} pro extractor call(s) threw and were skipped.`);
+  return { wire: sanitizeProFingerprints(wire), packCount: packs.length, version: String(j.version), note: ` (paid · pro extractors ${sanitizeLogLine(String(j.version), 40)})` };
+}
+
+const HELP = `slopGrade Firewall — CI leak detection (free tier: 10 flagship classes · paid repos: the full catalogue, extracted in your runner)
 Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <path>] [--help]
   --gate           block (exit 1) on a reliable hard leak in an entitled repo (default: advisory, never blocks)
   --strict         with --gate, fail CLOSED (exit 1) when no server verdict is available (default: fail open)
@@ -113,6 +154,7 @@ export async function main(argv = [], env = process.env) {
   // 1. LOCAL — the structural fingerprint (file contents never leave). Wrapped so a crafted repo (symlink cycle)
   //    that makes extraction throw routes through noVerdict(), NOT the entrypoint catch (which fails OPEN).
   let fingerprint;
+  let files = [];
   let sqliFingerprint, goSqliFingerprint, dotnetSqliFingerprint;
   let cmdiFingerprint, goCmdiFingerprint, dotnetCmdiFingerprint;
   let xssFingerprint, goXssFingerprint, dotnetXssFingerprint;
@@ -122,7 +164,7 @@ export async function main(argv = [], env = process.env) {
   let xxeFingerprint, deserFingerprint, secretFingerprint, cryptoFingerprint;
   const rel = (f) => { const nf = f.replace(/\\/g, "/"), nr = root.replace(/\\/g, "/").replace(/\/+$/, ""); return nf.startsWith(nr + "/") ? nf.slice(nr.length + 1) : nf.split("/").slice(-2).join("/"); };
   try {
-    const files = walk(root, CODE_EXTS);
+    files = walk(root, CODE_EXTS);
     fingerprint = sanitizeFingerprint(buildFingerprint(files, root));
     sqliFingerprint = { files: [] }; goSqliFingerprint = { files: [] }; dotnetSqliFingerprint = { files: [] };
     cmdiFingerprint = { files: [] }; goCmdiFingerprint = { files: [] }; dotnetCmdiFingerprint = { files: [] };
@@ -181,18 +223,21 @@ export async function main(argv = [], env = process.env) {
   // what --print-payload shows AND what is POSTed, so the audit and the wire agree byte-for-byte.
   const wirePacks = sanitizePackFingerprints(packFingerprints);
 
-  if (printPayload) { console.log(JSON.stringify({ fingerprint, ...wirePacks }, null, 2)); return 0; }
-
   // 2. EXFILTRATION guard — a custom origin would mint a token for an attacker audience. Run DRY unless opted in.
   const { origin, blocked } = resolveOrigin(env);
+  // 3. Environment — distinguish the three cases (the #1 support ticket is a forgotten id-token permission).
+  const envState = classifyEnv(env);
+  const sha = env.GITHUB_SHA || "";
+  // --print-payload : outside a server-reachable context it prints the free payload and exits WITHOUT contacting the
+  // server (as always). Inside CI it also asks for the pro extractors first (a paid repo runs ~100 more packs), so the
+  // printed payload stays byte-for-byte what the POST would carry — the audit promise holds on the paid tier too.
+  const serverReachable = !blocked && envState === "ci-ready" && !!sha;
+  if (printPayload && !serverReachable) { console.log(JSON.stringify({ fingerprint, ...wirePacks }, null, 2)); return 0; }
   if (blocked) {
     // A dry run is a NO-VERDICT path: --strict must fail closed here too (it promised "exit 1 when no verdict").
     ghWarn(`custom SLOPGRADE_ORIGIN (${origin}) — running DRY: no token minted, nothing uploaded. Set SLOPGRADE_ALLOW_CUSTOM_ORIGIN=1 to allow.`);
     return noVerdict();
   }
-
-  // 3. Environment — distinguish the three cases (the #1 support ticket is a forgotten id-token permission).
-  const envState = classifyEnv(env);
   if (envState === "no-ci") {
     line(`slopGrade Firewall: outside GitHub CI — local fingerprint only (${fingerprint.queries.length} queries), no server verdict.`);
     return 0;
@@ -206,16 +251,25 @@ export async function main(argv = [], env = process.env) {
     line("");
     return noVerdict();
   }
-  const sha = env.GITHUB_SHA || "";
   if (!sha) { ghWarn("GITHUB_SHA missing — cannot request a verdict."); return noVerdict(); }
 
-  // 4. Mint OIDC + POST (both time-bounded; body size-capped).
+  // 4. Mint OIDC (time-bounded).
   let oidcToken;
   try { oidcToken = await mintOidc(env, origin); }
   catch (e) { ghWarn(`OIDC unavailable (${errMsg(e)}).`); return noVerdict(); }
   if (!oidcToken) return noVerdict();
 
-  const body = JSON.stringify({ oidcToken, sha, fingerprint, ...wirePacks, clientVersion: CLIENT_VERSION, fingerprintVersion: FINGERPRINT_VERSION });
+  // 4b. PRO extractors — a PAID repo receives the closed-source extractors for the rest of the catalogue and runs them
+  //     here (the source still never leaves) ; a free repo gets 402 and keeps its free packs. Fail-open, always.
+  const pro = await loadProPacks(origin, oidcToken, root, rel);
+  const wireAll = { ...pro.wire, ...wirePacks }; // the public extractors win on a key collision (never expected)
+  // The coverage line — printed on EVERY run, clean or not : a run that scanned N files with P packs and found nothing
+  // must be distinguishable from a run that scanned nothing (release-audit B-P1-7).
+  line(`slopGrade Firewall: ${FREE_PACK_COUNT + pro.packCount} detector packs${pro.note} · ${files.length} files scanned.`);
+  if (printPayload) { console.log(JSON.stringify({ fingerprint, ...wireAll }, null, 2)); return 0; }
+
+  // 5. POST (time-bounded; body size-capped).
+  const body = JSON.stringify({ oidcToken, sha, fingerprint, ...wireAll, clientVersion: CLIENT_VERSION, fingerprintVersion: FINGERPRINT_VERSION, ...(pro.version ? { proVersion: pro.version } : {}) });
   if (Buffer.byteLength(body, "utf8") > MAX_PAYLOAD_BYTES) {
     ghWarn(`fingerprint exceeds ${Math.round(MAX_PAYLOAD_BYTES / 1024 / 1024)}MB — skipping upload for this run.`);
     return noVerdict();
@@ -224,7 +278,7 @@ export async function main(argv = [], env = process.env) {
   if (v === null) return noVerdict();
   if (!validVerdict(v)) { ghWarn("malformed verdict from server — treating as no verdict."); return noVerdict(); }
 
-  // 5. Human-readable report (server strings sanitized before hitting the log).
+  // 6. Human-readable report (server strings sanitized before hitting the log).
   line(`\nslopGrade Firewall — tenant isolation`);
   line(`  pattern       : ${v.pattern}${v.tenantKey ? ` (key: ${v.tenantKey})` : ""}`);
   line(`  conformance   : ${v.conformancePct == null ? "n/a" : v.conformancePct.toFixed(1) + "%"}`);
@@ -245,7 +299,11 @@ export async function main(argv = [], env = process.env) {
   // Every detector pack the server returned — DATA-DRIVEN (collectPackBlocks), never a hardcoded key list: a pack
   // missing from a static list would be silently dropped from the log, the feed and the SARIF (release-audit B-P0-2).
   for (const { key, label, block } of collectPackBlocks(v)) {
-    line(`\nslopGrade Firewall — ${label}: ${block.count} finding(s)`);
+    // A pack in the server's CALIBRATION WINDOW (pro packs not yet swept on the corpus) reports everything but never
+    // blocks : its findings annotate as warnings and count as advisory in the feed, so the summary never claims a
+    // « blocking » finding the check did not block on.
+    const advisory = block.advisory === true;
+    line(`\nslopGrade Firewall — ${label}: ${block.count} finding(s)${advisory ? " (advisory — calibration window)" : ""}`);
     const findings = Array.isArray(block.findings) ? block.findings : [];
     // `table` is "file:line" for the file-based packs → parse it so annotations + the feed land on the RIGHT line.
     for (const f of findings) {
@@ -255,7 +313,10 @@ export async function main(argv = [], env = process.env) {
       const detail = f.detail && String(f.detail).trim()
         ? String(f.detail)
         : `${label} finding here — the exact rule and the remaining findings are unlocked with the gate: ${origin}/ci`;
-      if (loc.file) { console.log(`::error file=${wfFile(loc.file)},line=${loc.line} title=slopGrade Firewall::[${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(detail)}`); feed.push({ file: loc.file, line: loc.line, pack: key, rule: f.rule, detail, severity: f.severity }); }
+      if (loc.file) {
+        console.log(`::${advisory ? "warning" : "error"} file=${wfFile(loc.file)},line=${loc.line} title=slopGrade Firewall::[${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(detail)}`);
+        feed.push({ file: loc.file, line: loc.line, pack: key, rule: f.rule, detail, severity: advisory ? "medium" : f.severity });
+      }
     }
     for (const f of findings.slice(0, 10)) line(`    - ${sanitizeLogLine(f.table ?? "")}  [${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(f.detail && String(f.detail).trim() ? f.detail : "(detail withheld on the free tier)")}`);
     if (block.hidden > 0) line(`    ... +${block.hidden} more hidden — enable the gate to see them all: ${origin}/ci`);
@@ -282,7 +343,7 @@ export async function main(argv = [], env = process.env) {
     catch (e) { ghWarn(`could not write SARIF to ${sanitizeLogLine(String(sarifPath))} (${errMsg(e)}).`); }
   }
 
-  // 6. Exit decision — the PURE, tested free/paid boundary. Blocks on --gate + EITHER a reliable+entitled cross-tenant
+  // 7. Exit decision — the PURE, tested free/paid boundary. Blocks on --gate + EITHER a reliable+entitled cross-tenant
   // hard leak OR >=1 blocking detector finding (packBlocking, critical|high — already server-paywalled to 0 unless
   // entitled). The build-block message NAMES the real reason(s).
   const decision = firewallVerdict({ gateMode, reliable: v.reliable, hardLeaks: v.hardLeaks, gateEntitled: v.gateEntitled, packBlocking: v.packBlocking });
