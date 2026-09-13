@@ -158,6 +158,22 @@ test("--print-payload outside CI prints the free payload and contacts nothing (u
   }, proResponse());
 });
 
+test("a pack in the server's calibration window (advisory:true) annotates as a WARNING and never counts as blocking in the feed", async () => {
+  const paid = { ...VERDICT, gateEntitled: true, gateLevel: "paid", packBlocking: 0,
+    iac: { count: 2, hidden: 0, blocking: 0, advisory: true, findings: [
+      { rule: "aws-sg-open-world", table: "infra/main.tf:3", detail: "security group open to 0.0.0.0/0 on all ports", severity: "high" },
+      { rule: "aws-sg-open-world", table: "infra/db.tf:9", detail: "security group open to 0.0.0.0/0 on all ports", severity: "high" },
+    ] } };
+  await withStubbedNetwork(paid, async ({ out }) => {
+    const code = await main(["--gate"], CI_ENV);
+    assert.equal(code, 0);                                                     // reported, never blocked
+    const text = out.join("\n");
+    assert.match(text, /iac: 2 finding\(s\) \(advisory — calibration window\)/);
+    assert.match(text, /::warning file=infra\/main\.tf,line=3 title=slopGrade Firewall::\[aws-sg-open-world\]/);
+    assert.doesNotMatch(text, /::error file=infra\//);
+  });
+});
+
 test("--gate --strict fails CLOSED on a blocked custom origin (a no-verdict path)", async () => {
   await withStubbedNetwork(VERDICT, async ({ calls, out }) => {
     const code = await main(["--gate", "--strict"], { ...CI_ENV, SLOPGRADE_ORIGIN: "https://evil.example" });

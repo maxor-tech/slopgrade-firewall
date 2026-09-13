@@ -299,7 +299,11 @@ export async function main(argv = [], env = process.env) {
   // Every detector pack the server returned — DATA-DRIVEN (collectPackBlocks), never a hardcoded key list: a pack
   // missing from a static list would be silently dropped from the log, the feed and the SARIF (release-audit B-P0-2).
   for (const { key, label, block } of collectPackBlocks(v)) {
-    line(`\nslopGrade Firewall — ${label}: ${block.count} finding(s)`);
+    // A pack in the server's CALIBRATION WINDOW (pro packs not yet swept on the corpus) reports everything but never
+    // blocks : its findings annotate as warnings and count as advisory in the feed, so the summary never claims a
+    // « blocking » finding the check did not block on.
+    const advisory = block.advisory === true;
+    line(`\nslopGrade Firewall — ${label}: ${block.count} finding(s)${advisory ? " (advisory — calibration window)" : ""}`);
     const findings = Array.isArray(block.findings) ? block.findings : [];
     // `table` is "file:line" for the file-based packs → parse it so annotations + the feed land on the RIGHT line.
     for (const f of findings) {
@@ -309,7 +313,10 @@ export async function main(argv = [], env = process.env) {
       const detail = f.detail && String(f.detail).trim()
         ? String(f.detail)
         : `${label} finding here — the exact rule and the remaining findings are unlocked with the gate: ${origin}/ci`;
-      if (loc.file) { console.log(`::error file=${wfFile(loc.file)},line=${loc.line} title=slopGrade Firewall::[${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(detail)}`); feed.push({ file: loc.file, line: loc.line, pack: key, rule: f.rule, detail, severity: f.severity }); }
+      if (loc.file) {
+        console.log(`::${advisory ? "warning" : "error"} file=${wfFile(loc.file)},line=${loc.line} title=slopGrade Firewall::[${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(detail)}`);
+        feed.push({ file: loc.file, line: loc.line, pack: key, rule: f.rule, detail, severity: advisory ? "medium" : f.severity });
+      }
     }
     for (const f of findings.slice(0, 10)) line(`    - ${sanitizeLogLine(f.table ?? "")}  [${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(f.detail && String(f.detail).trim() ? f.detail : "(detail withheld on the free tier)")}`);
     if (block.hidden > 0) line(`    ... +${block.hidden} more hidden — enable the gate to see them all: ${origin}/ci`);
