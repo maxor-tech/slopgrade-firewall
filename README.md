@@ -71,6 +71,18 @@ marked ✓ (the four unmarked — XXE, insecure deserialization, hardcoded secre
 Detectors run **intra-function**. Cross-function / cross-file dataflow, the other security classes, and the
 calibrated (corpus-tuned) false-positive suppression are part of the hosted product — see **[slopgrade.ai/firewall](https://www.slopgrade.ai/firewall)**.
 
+### Paid repos — the full catalogue, still in your runner
+
+When the repo's gate is paid, the client (≥ 0.7.0) asks `https://app.slopgrade.ai/api/ci/pro-extractors` — with the
+same OIDC proof — for the **closed-source extractors** of the other ~100 detector packs, verifies the bundle
+(size-bounded, sha256-checked), and runs it **locally**, then posts ~120 fingerprints instead of 22. Nothing else
+changes: your file contents still never leave, the classification still runs server-side, and a free repo simply
+gets `402` and keeps its 22 packs. The pro output goes through a second, shape-agnostic egress boundary
+(`sanitizeProFingerprints`: numbers, booleans and short strings under identifier-like keys — every source-bearing key
+is dropped). `--print-payload` inside CI performs the same ask, so what it prints is byte-for-byte what is posted on
+the paid tier. Every run prints a coverage line — `N detector packs (free tier | paid) · M files scanned` — so a
+clean run is never mistaken for a run that scanned nothing.
+
 ## Fail-open, always
 
 A missing OIDC token, a timeout (each call bounded at 20s), a network failure, or a server error **never** breaks
@@ -94,7 +106,7 @@ repo. The **hosted** [slopGrade Firewall](https://www.slopgrade.ai/firewall) add
 
 | | Free (this repo) | Hosted |
 |---|---|---|
-| Detection classes | the 10 highest-severity | the full detector catalog |
+| Detection classes | the 10 highest-severity (22 packs) | the full detector catalog (~120 packs) — the extra extractors stream to **your runner** at run time (client ≥ 0.7.0) ; your code still never leaves |
 | Dataflow | intra-function | cross-function + cross-file (interprocedural taint) |
 | False-positive suppression | commodity context checks | calibrated on a large private corpus |
 | Findings shown | per class : the **count** + **one located sample** (`file:line`, rule name withheld) | every finding, rule name + detail |

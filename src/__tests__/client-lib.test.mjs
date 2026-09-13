@@ -4,7 +4,77 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { sanitizePackFingerprints, collectPackBlocks, packLabel, buildSarif, sarifLevel, CLIENT_VERSION } from "../client-lib.mjs";
+import {
+  sanitizePackFingerprints, collectPackBlocks, packLabel, buildSarif, sarifLevel, CLIENT_VERSION,
+  sanitizeProFingerprints, runProPacks, validProBundleResponse, MAX_PRO_BUNDLE_BYTES,
+} from "../client-lib.mjs";
+
+// ── release-audit B-P1-7 : the PRO extractors (paid repos) — egress boundary, runner, response guard ──
+test("sanitizeProFingerprints keeps numbers/booleans/short strings under identifier keys and DROPS source-bearing keys", () => {
+  const clean = sanitizeProFingerprints({
+    dotnetSqliFingerprint: { files: [{ file: "R.cs", hits: [{ line: 4, kind: "concat", snippet: "SELECT * FROM x WHERE a='" + "leak" + "'", text: "no", raw: "no", high: true, ports: ["0-65535"] }] }] },
+    acFingerprint: { tableCols: { "public.orders": ["id", "org_id"] }, policies: [{ table: "public.orders", roles: ["authenticated"], permitUsing: true }], grants: [], rlsOn: ["public.orders"], sql: "create table …" },
+    dockerFingerprint: { files: [{ file: "Dockerfile", froms: [{ line: 1, pinned: false, reason: "latest" }], adds: [] }] },
+    "bad name!": { files: [] },
+  });
+  const hit = clean.dotnetSqliFingerprint.files[0].hits[0];
+  assert.deepEqual(hit, { line: 4, kind: "concat", high: true, ports: ["0-65535"] });   // snippet / text / raw gone
+  assert.deepEqual(clean.acFingerprint.tableCols, { "public.orders": ["id", "org_id"] }); // dotted identifier keys survive
+  assert.equal(clean.acFingerprint.sql, undefined);                                        // `sql` is a source carrier → dropped
+  assert.deepEqual(clean.dockerFingerprint.files[0].froms[0], { line: 1, pinned: false, reason: "latest" });
+  assert.equal(clean["bad name!"], undefined);
+});
+
+test("sanitizeProFingerprints bounds strings (200), array length, depth ; drops functions, NaN, null ; never throws", () => {
+  const deep = { a: { b: { c: { d: { e: { f: { g: 1 } } } } } } };
+  const clean = sanitizeProFingerprints({
+    p: { s: "x".repeat(1000), n: NaN, nil: null, fn: () => 1, list: Array.from({ length: 5 }, (_, i) => i), deep },
+  }, { maxItems: 3, maxDepth: 4 });
+  assert.equal(clean.p.s.length, 200);
+  assert.equal(clean.p.n, undefined);
+  assert.equal(clean.p.nil, undefined);
+  assert.equal(clean.p.fn, undefined);
+  assert.deepEqual(clean.p.list, [0, 1, 2]);
+  assert.deepEqual(clean.p.deep, { a: { b: {} } });                                     // cut at maxDepth (pack=0 → deep=1 → a=2 → b=3 → c dropped), never a throw
+  assert.deepEqual(sanitizeProFingerprints(null), {});
+  assert.deepEqual(sanitizeProFingerprints("x"), {});
+  assert.deepEqual(sanitizeProFingerprints({ arr: [1, 2] }), {});                        // a pack must be an object
+});
+
+test("runProPacks : file mode keeps only results that carry a list, manifest mode merges deps, sql mode runs once, throws are counted, lockfiles skipped", () => {
+  const texts = { "/r/a.js": "x", "/r/b.js": "y", "/r/package.json": "{}", "/r/sub/package.json": "{}", "/r/m/0001.sql": "create table t(id int);", "/r/m/0002.sql": "alter table t;", "/r/package-lock.json": "{}" };
+  const seenSql = [];
+  const packs = [
+    { fpField: "fileFingerprint", mode: "file", match: /\.js$/i, run: (t, f) => ({ file: f, hits: f.endsWith("a.js") ? [{ line: 1, kind: "k" }] : [] }) },
+    { fpField: "boomFingerprint", mode: "file", match: /\.js$/i, run: () => { throw new Error("boom"); } },
+    { fpField: "scFingerprint", mode: "manifest", match: /(^|\/)package(-lock)?\.json$/i, run: (t, f) => ({ deps: [{ name: "dep-" + f.length, spec: "^1" }] }) },
+    { fpField: "acFingerprint", mode: "sql", match: /\.sql$/i, run: (sql) => { seenSql.push(sql); return { tableCols: {}, policies: [], grants: [], rlsOn: [] }; } },
+    { fpField: "brokenPack", mode: "file" /* no match regex */, run: () => ({ file: "x", hits: [{ line: 1 }] }) },
+  ];
+  const { wire, errors, ran } = runProPacks(packs, Object.keys(texts), { read: (f) => texts[f], rel: (f) => f.slice(3) });
+  assert.deepEqual(wire.fileFingerprint, { files: [{ file: "a.js", hits: [{ line: 1, kind: "k" }] }] });   // b.js had no hits → not carried
+  assert.equal(errors, 2);                                                                              // boom on a.js + b.js
+  assert.equal(wire.boomFingerprint, undefined);
+  assert.equal(wire.scFingerprint.deps.length, 2);                                                       // two manifests merged, lockfile skipped
+  assert.equal(seenSql.length, 1);
+  assert.match(seenSql[0], /create table t\(id int\);\nalter table t;\n/);                                // whole schema, once
+  assert.equal(wire.brokenPack, undefined);                                                              // a pack without a match regex never runs
+  assert.equal(ran, 2 + 2 + 1);                                                                          // file(a,b) + manifest(2) + sql(1)
+});
+
+test("validProBundleResponse : accepts a bounded, hashed, well-formed response and refuses everything else", () => {
+  const sha = (s) => (s === "bundle" ? "f".repeat(64) : "0".repeat(64));
+  const good = { ok: true, version: "v1", sha256: "f".repeat(64), packs: ["dotnetSqliFingerprint"], bundle: "bundle" };
+  assert.deepEqual(validProBundleResponse(good, sha), { ok: true });
+  assert.equal(validProBundleResponse({ ...good, sha256: "0".repeat(64) }, sha).reason, "hash mismatch");
+  assert.equal(validProBundleResponse({ ...good, bundle: "" }, sha).reason, "empty bundle");
+  assert.equal(validProBundleResponse({ ...good, bundle: "b".repeat(MAX_PRO_BUNDLE_BYTES + 1) }, () => "f".repeat(64)).reason, "bundle too large");
+  assert.equal(validProBundleResponse({ ...good, packs: ["bad key!"] }, sha).reason, "bad pack list");
+  assert.equal(validProBundleResponse({ ...good, packs: [] }, sha).reason, "bad pack list");
+  assert.equal(validProBundleResponse({ ...good, version: 7 }, sha).reason, "missing version");
+  assert.equal(validProBundleResponse({ error: "plan-required" }, sha).reason, "not an ok response");
+  assert.equal(validProBundleResponse(null, sha).ok, false);
+});
 
 // ── release-audit B-P0-2 : the report must be DATA-DRIVEN over the server's pack keys, never a hardcoded list ──
 test("collectPackBlocks returns every pack object with count>0, in server order, skipping scalars/arrays/tenant fields", () => {

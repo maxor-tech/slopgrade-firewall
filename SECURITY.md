@@ -21,6 +21,12 @@ This repository is the **open-source client** that runs in your CI. Its security
 - **What leaves your runner:** only a structural fingerprint (table/column names, file paths, abstract query
   shapes) plus a short-lived GitHub OIDC token. File contents never leave. Audit exactly what would be sent with
   `node isolation-gate.mjs --print-payload`.
+- **Paid repos (client ≥ 0.7.0) — the pro extractors:** a repo whose gate is paid receives the closed-source extractors
+  for the rest of the detector catalogue from `app.slopgrade.ai/api/ci/pro-extractors` (proved by its OIDC token) and
+  runs them in the runner. The bundle is size-bounded and sha256-verified before it is evaluated ; its output goes
+  through a second, shape-agnostic egress boundary (`sanitizeProFingerprints` — numbers, booleans, short strings under
+  identifier-like keys ; every source-bearing key is dropped). File contents still never leave. `--print-payload`
+  inside CI shows the paid-tier payload byte-for-byte.
 - **Fail-open by design:** a network/server/OIDC failure never breaks your build (exit 0). `--strict` fails closed.
 - **Endpoint is fixed** to `https://app.slopgrade.ai`; a custom `SLOPGRADE_ORIGIN` runs dry unless
   `SLOPGRADE_ALLOW_CUSTOM_ORIGIN=1` is set and the origin is https.

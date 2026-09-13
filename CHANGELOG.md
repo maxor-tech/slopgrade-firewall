@@ -3,6 +3,28 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.7.0] — 2026-09-13
+
+Paid repos now run the **full detector catalogue** — in your runner, with the same zero-egress contract.
+
+### Added
+- **Pro extractors for paid repos.** The hosted product judges ~120 detector packs ; this client ships the extractors
+  for 22. A repo whose gate is paid now asks `POST /api/ci/pro-extractors` (with its OIDC token) for the closed-source
+  extractors of the other ~100 packs, verifies the bundle (size-bounded, sha256-checked), loads it from a temp file
+  and runs it **locally** — your source still never leaves the runner ; only fingerprints do. A free repo gets 402 and
+  keeps its 22 packs. Every failure path (network, 5xx, hash mismatch, load error) falls back to the free packs with a
+  warning — a pro hiccup never costs the verdict.
+- **Egress boundary for the pro packs** (`sanitizeProFingerprints`) : a recursive, bounded scrub that keeps numbers,
+  booleans and short strings under identifier-like keys and DROPS every key that could name source (`text`, `snippet`,
+  `content`, `raw`, `value`, `secret`, `sql`, …). `--print-payload` inside CI now performs the pro ask too, so the
+  printed payload stays byte-for-byte what is POSTed on the paid tier.
+- **A coverage line on every run** — `slopGrade Firewall: N detector packs (free tier | paid · pro extractors <v>) ·
+  M files scanned.` — a clean run is now distinguishable from a run that scanned nothing.
+- The POST carries `proVersion` when pro packs ran (server-side diagnostics).
+
+### Changed
+- `--print-payload` in CI mints the OIDC token (to ask for the pro bundle) ; it still never POSTs the payload.
+
 ## [0.6.2] — 2026-09-13
 
 Release-audit fixes (independent-repo install probe, 2026-09-13). No change to what leaves the runner.

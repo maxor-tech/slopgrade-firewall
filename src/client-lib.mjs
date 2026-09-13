@@ -2,9 +2,15 @@
 // unit-tested (the CLI in isolation-gate.mjs is a thin adapter around these + the network). Zero dependencies.
 
 export const DEFAULT_ORIGIN = "https://app.slopgrade.ai";
-export const CLIENT_VERSION = "0.6.2"; // keep in lock-step with package.json (pinned by client-lib.test.mjs)
+export const CLIENT_VERSION = "0.7.0"; // keep in lock-step with package.json (pinned by client-lib.test.mjs)
 export const FINGERPRINT_VERSION = 1;
 export const MAX_PAYLOAD_BYTES = 8 * 1024 * 1024; // 8MB hard cap on the POST body (clear error, not an opaque 413)
+/** The pro-extractor bundle a PAID repo receives from /api/ci/pro-extractors — bounded like every other input. */
+export const MAX_PRO_BUNDLE_BYTES = 4 * 1024 * 1024;
+/** A file larger than this is skipped by the pro pass (a minified bundle / a data dump is never product code). */
+export const MAX_PRO_FILE_CHARS = 1_000_000;
+/** How many detector packs the free client extracts on its own (the 22 `src/*-extract.mjs`). */
+export const FREE_PACK_COUNT = 22;
 
 /**
  * Origin resolution + the origin-override guard. The OIDC audience is derived from the origin and the fingerprint is
@@ -166,6 +172,103 @@ export function sanitizePackFingerprints(packs) {
   for (const [name, pack] of Object.entries(packs && typeof packs === "object" ? packs : {})) {
     const files = Array.isArray(pack?.files) ? pack.files : [];
     clean[ident(name)] = { files: files.map((f) => ({ file: ident(f?.file), hits: (Array.isArray(f?.hits) ? f.hits : []).map(packHit) })) };
+  }
+  return clean;
+}
+
+/**
+ * PRO extractors (paid repos, client ≥ 0.7.0). The hosted product judges ~120 detector packs, this client extracts 22.
+ * A repo that proves (OIDC) it is paid-entitled receives the closed-source extractors for the other ~100 packs from
+ * /api/ci/pro-extractors and runs them HERE, in the runner — the source still never leaves, only fingerprints do.
+ * Three pure pieces, all tested :
+ *   · validProBundleResponse — the server response is bounded and integrity-checked (sha256) before one byte is
+ *     evaluated ; a mismatch, an oversize or a malformed manifest means « no pro pass », never a half-trusted module.
+ *   · runProPacks — drives PRO_PACKS over the walked files (mode file / sql / manifest) ; a throwing extractor is
+ *     counted, never fatal.
+ *   · sanitizeProFingerprints — the egress boundary for shapes this client cannot know in advance : a recursive,
+ *     bounded scrub that keeps numbers, booleans and short strings under identifier-like keys, DROPS every key that
+ *     could name source (text/snippet/content/raw/value/secret/…), caps depth, array length and string length. Same
+ *     posture as sanitizePackFingerprints : what leaves is provable, `--print-payload` shows exactly it.
+ */
+export function validProBundleResponse(j, sha256Of) {
+  if (!j || typeof j !== "object" || j.ok !== true) return { ok: false, reason: "not an ok response" };
+  if (typeof j.bundle !== "string" || j.bundle.length === 0) return { ok: false, reason: "empty bundle" };
+  if (Buffer.byteLength(j.bundle, "utf8") > MAX_PRO_BUNDLE_BYTES) return { ok: false, reason: "bundle too large" };
+  if (typeof j.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(j.sha256)) return { ok: false, reason: "missing hash" };
+  if (typeof sha256Of === "function" && sha256Of(j.bundle) !== j.sha256) return { ok: false, reason: "hash mismatch" };
+  if (!Array.isArray(j.packs) || j.packs.length === 0 || !j.packs.every((p) => typeof p === "string" && /^[a-zA-Z0-9]{1,64}$/.test(p))) return { ok: false, reason: "bad pack list" };
+  if (typeof j.version !== "string" || j.version.length === 0 || j.version.length > 64) return { ok: false, reason: "missing version" };
+  return { ok: true };
+}
+
+/**
+ * Run the pro packs over `files` (absolute paths ; `rel` maps to the repo-relative posix path the server sees).
+ * mode "file" : per matching file, keep a result that carries at least one non-empty list ; mode "manifest" : per
+ * matching dependency manifest, merge `deps` ; mode "sql" : once, over every *.sql concatenated (whole-schema shape).
+ * @returns {{ wire: Record<string, object>, errors: number, ran: number }}
+ */
+const PRO_SKIP_FILE = /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|poetry\.lock|Pipfile\.lock|composer\.lock|Gemfile\.lock|go\.sum|flake\.lock)$/i;
+export function runProPacks(packs, files, { read, rel }) {
+  const wire = {};
+  let errors = 0, ran = 0, sqlAll = "";
+  const list = Array.isArray(packs) ? packs.filter((p) => p && typeof p.fpField === "string" && typeof p.run === "function") : [];
+  const sqlPacks = list.filter((p) => p.mode === "sql");
+  const filePacks = list.filter((p) => p.mode !== "sql" && p.match instanceof RegExp);
+  for (const f of files) {
+    const r = rel(f);
+    if (PRO_SKIP_FILE.test(r)) continue; // lockfiles / generated manifests : never product code, often huge
+    let t; try { t = read(f); } catch { continue; }
+    if (typeof t !== "string" || t.length > MAX_PRO_FILE_CHARS) continue;
+    if (sqlPacks.length && /\.sql$/i.test(r)) sqlAll += t + "\n";
+    for (const p of filePacks) {
+      if (!p.match.test(r)) continue;
+      let o; try { o = p.run(t, r); ran++; } catch { errors++; continue; }
+      if (!o || typeof o !== "object") continue;
+      if (p.mode === "manifest") {
+        const deps = Array.isArray(o.deps) ? o.deps : [];
+        if (deps.length) (wire[p.fpField] ??= { deps: [] }).deps.push(...deps);
+        continue;
+      }
+      const carries = Object.entries(o).some(([k, v]) => k !== "file" && Array.isArray(v) && v.length > 0);
+      if (carries) (wire[p.fpField] ??= { files: [] }).files.push({ ...o, file: r });
+    }
+  }
+  for (const p of sqlPacks) {
+    if (!sqlAll) continue;
+    try { const o = p.run(sqlAll); ran++; if (o && typeof o === "object") wire[p.fpField] = o; } catch { errors++; }
+  }
+  return { wire, errors, ran };
+}
+
+const PRO_DENY_KEY = /^(text|source|src|snippet|snippets|content|contents|code|raw|body|value|values|secret|secrets|token|password|match|matched|matches|line_?text|excerpt|sql|query|statement)$/i;
+const PRO_IDENT_KEY = /^[A-Za-z_$][\w.\-$]{0,127}$/;
+export function sanitizeProFingerprints(packs, { maxDepth = 6, maxItems = 200000, maxString = 200 } = {}) {
+  const scrub = (v, depth) => {
+    if (typeof v === "number") return Number.isFinite(v) ? v : undefined;
+    if (typeof v === "boolean") return v;
+    if (typeof v === "string") return v.slice(0, maxString);
+    if (v == null || depth >= maxDepth) return undefined;
+    if (Array.isArray(v)) {
+      const out = [];
+      for (const x of v.slice(0, maxItems)) { const s = scrub(x, depth + 1); if (s !== undefined) out.push(s); }
+      return out;
+    }
+    if (typeof v === "object") {
+      const out = {};
+      for (const [k, x] of Object.entries(v)) {
+        if (!PRO_IDENT_KEY.test(k) || PRO_DENY_KEY.test(k)) continue;
+        const s = scrub(x, depth + 1);
+        if (s !== undefined) out[k] = s;
+      }
+      return out;
+    }
+    return undefined; // functions, symbols, bigints — never on the wire
+  };
+  const clean = {};
+  for (const [name, pack] of Object.entries(packs && typeof packs === "object" ? packs : {})) {
+    if (!/^[a-zA-Z0-9]{1,64}$/.test(name)) continue;
+    const s = scrub(pack, 0);
+    if (s && typeof s === "object" && !Array.isArray(s)) clean[name] = s;
   }
   return clean;
 }
