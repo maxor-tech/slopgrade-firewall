@@ -7,7 +7,9 @@ import { readdirSync, lstatSync } from "node:fs";
 // `examples?/samples?/demo/sandbox/playground/cookbook` are excluded for the SAME reason as tests — sample/demo apps
 // bundled in a repo (common in platform monorepos: bundled example / edge-function / realtime apps) are not the
 // product's production tenant surface; their migrations/queries are illustrative, never a customer's build.
-const DEFAULT_EXCL = /(node_modules|\/dist\/|\/build\/|\.min\.|\.venv|__pycache__|\/\.git\/|\.next|\.(test|spec|stories)\.[a-z]+$|_(test|spec)\.[a-z]+$|[._-](examples?|samples?)\.[a-z]+$|(^|\/)(tests?|specs?|__tests__|__mocks__|e2e|fixtures?|mocks?|testdata|examples?|samples?|demos?|sandbox|playground|cookbook)\/|(^|\/)test_[^/]*\.py$|(^|\/)conftest\.py$)/i;
+// `vendor/` = vendored third-party code (Go modules, PHP composer, a vendored copy of this very client): not the
+// product's own surface, and scanning it makes the client fingerprint its own regex sources (release-audit B-P3-2).
+const DEFAULT_EXCL = /(node_modules|\/vendor\/|\/dist\/|\/build\/|\.min\.|\.venv|__pycache__|\/\.git\/|\.next|\.(test|spec|stories)\.[a-z]+$|_(test|spec)\.[a-z]+$|[._-](examples?|samples?)\.[a-z]+$|(^|\/)(tests?|specs?|__tests__|__mocks__|e2e|fixtures?|mocks?|testdata|examples?|samples?|demos?|sandbox|playground|cookbook)\/|(^|\/)test_[^/]*\.py$|(^|\/)conftest\.py$)/i;
 
 const MAX_DEPTH = 40;      // bound recursion (defense against pathological trees)
 const MAX_FILES = 200_000; // bound total collected files (DoS ceiling)
