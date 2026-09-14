@@ -50,7 +50,7 @@ import { extractCryptoFingerprint } from "./src/crypto-extract.mjs";
 // OSS shim: the interprocedural pass is stubbed (returns empty) → the taint detectors run INTRA-function only.
 import { buildWrapperRegistries, resolveImportedWrappers } from "./src/taint-interproc.mjs";
 import { firewallVerdict } from "./src/gate-verdict.mjs";
-import { postFindingComments, postSummaryComment } from "./src/pr-suggest.mjs";
+import { postFindingReview } from "./src/pr-suggest.mjs";
 import {
   resolveOrigin, classifyEnv, validVerdict, sanitizeLogLine, sanitizeFingerprint, sanitizePackFingerprints,
   parseLeak, buildSarif, collectPackBlocks, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
@@ -278,6 +278,14 @@ export async function main(argv = [], env = process.env) {
   if (v === null) return noVerdict();
   if (!validVerdict(v)) { ghWarn("malformed verdict from server — treating as no verdict."); return noVerdict(); }
 
+  // F1 (2026-09-14) — SILENT DOWNGRADE guard. loadProPacks returns silently (" (free tier)") on a 402, which is correct
+  // for a genuinely-free repo. But if the server's verdict says this repo IS entitled (`gateEntitled`) while the pro
+  // bundle did NOT load (pro.packCount === 0), the entitlement chain broke (livemode drift / unassigned slot / unlinked
+  // repo) and a PAYING customer is silently getting only the free packs. We KNOW it's paid here, so say so LOUDLY.
+  if (v.gateEntitled === true && pro.packCount === 0) {
+    ghWarn(`this repo is PAID (entitled) but the pro extractors did not load — you are getting only the ${FREE_PACK_COUNT} free packs, not the full catalogue. Check the repo's slot assignment + plan at ${origin}/ci (or re-run — a transient server error also lands here).`);
+  }
+
   // 6. Human-readable report (server strings sanitized before hitting the log).
   line(`\nslopGrade Firewall — tenant isolation`);
   line(`  pattern       : ${v.pattern}${v.tenantKey ? ` (key: ${v.tenantKey})` : ""}`);
@@ -322,15 +330,15 @@ export async function main(argv = [], env = process.env) {
     if (block.hidden > 0) line(`    ... +${block.hidden} more hidden — enable the gate to see them all: ${origin}/ci`);
   }
 
-  // The inline finding FEED (CodeRabbit-style) — one review comment per finding at its file:line + a deduped summary,
-  // when this is a PR with a writable token. Fail-open + dedup so a re-run updates instead of spamming (pr-suggest.mjs).
+  // The finding feed — posted as ONE PR review (the summary in its body + every on-diff finding inline), so the PR
+  // author gets ONE notification, not one email per finding (F8 2026-09-14 : a findings-heavy PR emailed ~40 times).
+  // Fail-open + dedup so a re-run adds only new findings, never a wall of comments (pr-suggest.mjs).
   if (feed.length) {
     const deps = { readEvent: () => { try { return JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8")); } catch { return null; } }, log: (m) => line(m), warn: (m) => ghWarn(m) };
     const blocking = feed.filter((f) => f.severity === "high" || f.severity === "critical").length;
     const summary = `## 🛡 slopGrade Firewall\n\n**${blocking}** blocking (critical/high) · ${feed.length - blocking} advisory · ${feed.length} finding(s) located.\n\nBlocking findings fail the check when the gate is enabled on this repo. See all findings + enable the gate: ${origin}/ci`;
-    const postedFeed = await postFindingComments(env, feed, deps);
-    const summaryState = await postSummaryComment(env, summary, deps);
-    if (postedFeed || summaryState !== "skipped") line(`\nslopGrade Firewall — feed: ${postedFeed} inline comment(s) posted, summary ${summaryState}.`);
+    const review = await postFindingReview(env, feed, summary, deps);
+    if (review.review !== "skipped" || review.comments) line(`\nslopGrade Firewall — ${review.comments} finding(s) inline in ONE PR review (${review.review}) — one notification, not one per finding.`);
   }
 
   if (sarifPath) {

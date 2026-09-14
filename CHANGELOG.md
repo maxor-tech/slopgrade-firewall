@@ -3,6 +3,25 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.7.1] — 2026-09-14
+
+One PR notification instead of dozens, and a loud signal when a paid repo isn't getting its full catalogue.
+
+### Changed
+- **The finding feed posts as ONE PR review, not one comment per finding.** A findings-heavy PR used to email the
+  author once per inline comment (~40 emails on a busy PR). The feed now posts a single review (`POST /pulls/N/reviews`,
+  event `COMMENT`) carrying the summary in its body + every on-diff finding inline — one notification. A review rejects
+  the whole batch if any comment is off-diff, so findings are first filtered to the PR diff (`parseAddedLines`); the
+  off-diff ones remain fully listed in the summary body. Dedup + the 30-comment cap are unchanged; on a review-API
+  refusal it falls back to a single summary comment (fail-open).
+
+### Fixed
+- **A paid repo no longer downgrades to the free tier silently.** `loadProPacks` returns quietly on a `402` (correct
+  for a genuinely-free repo). But when the server verdict says the repo *is* entitled (`gateEntitled`) while the pro
+  bundle didn't load, the entitlement chain broke (livemode drift / an unassigned slot / an unlinked repo) and a paying
+  customer was getting only the 22 free packs with no signal. The client now warns loudly in that case, pointing at the
+  repo's plan + slot at `/ci`.
+
 ## [0.7.0] — 2026-09-13
 
 Paid repos now run the **full detector catalogue** — in your runner, with the same zero-egress contract.
