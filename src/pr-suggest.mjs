@@ -120,31 +120,80 @@ async function existingFindingLocs(ctx, token, fetchImpl, warn) {
   } catch (e) { warn(`could not list existing PR comments (${e instanceof Error ? e.message : String(e)}) — may repost.`); return new Set(); }
 }
 
-/**
- * Post one inline review comment per finding at its file:line. FAIL-OPEN + per-comment isolated. Dedup: skips a
- * (path,line) that already carries our marker (re-run safe). Caps at `max` to avoid flooding a huge PR. Returns #posted.
- */
-export async function postFindingComments(env, findings, { fetchImpl = fetch, readEvent, log = () => {}, warn = () => {}, max = 30 } = {}) {
-  const token = env.GITHUB_TOKEN || env.FW_GH_TOKEN;
-  if (!token) { warn("no GITHUB_TOKEN — cannot post the inline finding feed (add `permissions: pull-requests: write`)."); return 0; }
-  const ctx = resolvePrContext(env, readEvent || (() => null));
-  if (!ctx) { log("not a pull_request event with a resolvable PR — skipping the inline finding feed."); return 0; }
-  const already = await existingFindingLocs(ctx, token, fetchImpl, warn);
-  const comments = buildFindingComments(findings, ctx.headSha).filter((c) => !already.has(`${c.path}:${c.line}`)).slice(0, max);
-  if (!comments.length) return 0;
-  let posted = 0;
-  for (const c of comments) {
-    try {
-      const res = await fetchImpl(`https://api.github.com/repos/${ctx.owner}/${ctx.name}/pulls/${ctx.number}/comments`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json", "User-Agent": "slopgrade-firewall" },
-        body: JSON.stringify({ body: c.body, commit_id: c.commit_id, path: c.path, line: c.line, side: c.side }),
-      });
-      if (res && res.ok) posted++;
-      else warn(`inline finding for ${c.path}:${c.line} not posted (HTTP ${res ? res.status : "?"} — the line may be outside this PR's diff).`);
-    } catch (e) { warn(`inline finding for ${c.path}:${c.line} failed (${e instanceof Error ? e.message : String(e)}).`); }
+/** Parse a unified-diff `patch` (from GET /pulls/N/files) → the set of RIGHT-side line numbers present in the diff,
+ *  i.e. the ONLY lines GitHub accepts an inline review comment on. PURE + testable. A hunk header `@@ -a,b +c,d @@`
+ *  starts the RIGHT counter at c ; ' '(context) and '+'(added) lines advance it and are commentable ; '-'(removed)
+ *  lines do not. A review rejects the WHOLE batch if any comment is off-diff, so this pre-filter is what makes the
+ *  single-review post (F8) reliable. */
+export function parseAddedLines(patch) {
+  const lines = new Set();
+  if (typeof patch !== "string") return lines;
+  let right = 0;
+  for (const l of patch.split("\n")) {
+    const h = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(l);
+    if (h) { right = Number(h[1]); continue; }
+    if (right === 0) continue;
+    if (l.startsWith("-") || l.startsWith("\\")) continue; // removed / "\ No newline" — no RIGHT number
+    if (l.startsWith("+") || l.startsWith(" ")) { lines.add(right); right++; }
   }
-  return posted;
+  return lines;
+}
+
+/** GET the PR's changed files → a Set of commentable "path:line" (present on the diff RIGHT side). FAIL-OPEN: any
+ *  error → empty Set, and the caller then posts a body-only review (the summary still lands, no inline). */
+async function diffAddedLocs(ctx, token, fetchImpl, warn) {
+  const locs = new Set();
+  try {
+    const res = await fetchImpl(`https://api.github.com/repos/${ctx.owner}/${ctx.name}/pulls/${ctx.number}/files?per_page=100`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "slopgrade-firewall" },
+    });
+    if (!res || !res.ok) return locs;
+    const files = await res.json();
+    for (const f of Array.isArray(files) ? files : []) {
+      if (!f || typeof f.filename !== "string" || typeof f.patch !== "string") continue;
+      for (const ln of parseAddedLines(f.patch)) locs.add(`${f.filename}:${ln}`);
+    }
+    return locs;
+  } catch (e) { warn(`could not read the PR diff (${e instanceof Error ? e.message : String(e)}) — inline feed skipped, summary still posts.`); return locs; }
+}
+
+/**
+ * Post the finding feed + summary as ONE PR REVIEW — a SINGLE notification — instead of one comment per finding.
+ * F8 (2026-09-14): the old path POSTed each finding to /pulls/N/comments, and GitHub emails the author once PER
+ * comment → a findings-heavy PR sent ~40 emails. A review (`POST /pulls/N/reviews` with a `body` + `comments[]`,
+ * event COMMENT) is ONE notification carrying the whole summary in its body + every on-diff finding inline.
+ *
+ * GitHub rejects the WHOLE review if any comment is off-diff, so we keep only findings on a diff line (diffAddedLocs);
+ * the off-diff ones are still fully listed in the summary body. Dedup (existing marker) + `max` cap preserved. A run
+ * with no NEW on-diff findings still posts a body-only review so the summary lands (one comment, updated picture).
+ * FAIL-OPEN + returns { comments, review: "posted"|"skipped" }. Never throws.
+ */
+export async function postFindingReview(env, findings, summaryBody, { fetchImpl = fetch, readEvent, log = () => {}, warn = () => {}, max = 30 } = {}) {
+  const token = env.GITHUB_TOKEN || env.FW_GH_TOKEN;
+  if (!token) { warn("no GITHUB_TOKEN — cannot post the PR review (add `permissions: pull-requests: write`)."); return { comments: 0, review: "skipped" }; }
+  const ctx = resolvePrContext(env, readEvent || (() => null));
+  if (!ctx) { log("not a pull_request event with a resolvable PR — skipping the PR review."); return { comments: 0, review: "skipped" }; }
+  const [already, onDiff] = await Promise.all([
+    existingFindingLocs(ctx, token, fetchImpl, warn),
+    diffAddedLocs(ctx, token, fetchImpl, warn),
+  ]);
+  const comments = buildFindingComments(findings, ctx.headSha)
+    .filter((c) => !already.has(`${c.path}:${c.line}`) && onDiff.has(`${c.path}:${c.line}`))
+    .slice(0, max)
+    .map((c) => ({ path: c.path, line: c.line, side: c.side, body: c.body }));
+  const body = `${String(summaryBody ?? "")}\n\n${SUMMARY_MARKER}`;
+  try {
+    const res = await fetchImpl(`https://api.github.com/repos/${ctx.owner}/${ctx.name}/pulls/${ctx.number}/reviews`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json", "User-Agent": "slopgrade-firewall" },
+      body: JSON.stringify({ commit_id: ctx.headSha, event: "COMMENT", body, comments }),
+    });
+    if (res && res.ok) return { comments: comments.length, review: "posted" };
+    warn(`PR review not posted (HTTP ${res ? res.status : "?"}) — falling back to a summary comment.`);
+  } catch (e) { warn(`PR review failed (${e instanceof Error ? e.message : String(e)}) — falling back to a summary comment.`); }
+  // Fallback (review API refused, e.g. a diff race) : the summary still lands as ONE issue comment.
+  const state = await postSummaryComment(env, summaryBody, { fetchImpl, readEvent, warn });
+  return { comments: 0, review: state === "skipped" ? "skipped" : "posted" };
 }
 
 /**

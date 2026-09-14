@@ -3,7 +3,7 @@
 // customer's PR depends on: a ```suggestion``` block, PR-context resolution, and that a non-diff line never breaks CI.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { suggestionBody, buildReviewComments, resolvePrContext, postSuggestions, findingCommentBody, buildFindingComments, postFindingComments, postSummaryComment, FINDING_MARKER, SUMMARY_MARKER } from "../pr-suggest.mjs";
+import { suggestionBody, buildReviewComments, resolvePrContext, postSuggestions, findingCommentBody, buildFindingComments, parseAddedLines, postFindingReview, postSummaryComment, FINDING_MARKER, SUMMARY_MARKER } from "../pr-suggest.mjs";
 
 test("suggestionBody wraps the fixed line in a GitHub ```suggestion``` block with attribution", () => {
   const body = suggestionBody({ after: "r = requests.get(u, verify=True)", note: "verify False->True (verify TLS certs)" });
@@ -101,29 +101,65 @@ test("buildFindingComments keeps only findings with a real file:line", () => {
   assert.equal(cs[0].side, "RIGHT");
 });
 
-test("postFindingComments DEDUPS: skips a (path,line) already carrying our marker, posts the new one", async () => {
+test("parseAddedLines: hunk header sets the RIGHT counter; +/context advance it, - does not", () => {
+  const patch = "@@ -1,3 +10,4 @@\n context10\n+added11\n-removed\n+added12\n@@ -20 +30,2 @@\n+added30\n context31";
+  assert.deepEqual([...parseAddedLines(patch)].sort((a, b) => a - b), [10, 11, 12, 30, 31]);
+  assert.equal(parseAddedLines(null).size, 0, "non-string -> empty");
+  assert.equal(parseAddedLines("no hunk header\n+x").size, 0, "a body with no @@ header commits nothing");
+});
+
+test("postFindingReview: ONE review carrying the summary body + only on-diff, non-dup findings inline (F8: one email)", async () => {
+  const env = { GITHUB_TOKEN: "t", GITHUB_REPOSITORY: "o/r", GITHUB_EVENT_NAME: "pull_request" };
+  const calls = [];
+  const fetchImpl = async (url, opts = {}) => {
+    const method = opts.method || "GET";
+    if (method === "GET" && url.includes("/pulls/") && url.includes("/comments")) // existing comments (dedup source)
+      return { ok: true, status: 200, json: async () => [{ path: "a.py", line: 5, body: `old ${FINDING_MARKER}` }] };
+    if (method === "GET" && url.includes("/files")) // the PR diff -> only b.py:9 is commentable
+      return { ok: true, status: 200, json: async () => [{ filename: "b.py", patch: "@@ -1 +9,1 @@\n+leak" }] };
+    calls.push({ url, method, body: JSON.parse(opts.body) });
+    return { ok: true, status: 200 };
+  };
+  const review = await postFindingReview(env, [
+    { file: "a.py", line: 5, rule: "sqli", detail: "d", severity: "high" }, // already commented -> skipped
+    { file: "b.py", line: 9, rule: "ssrf", detail: "d", severity: "high" }, // on-diff + new -> inline
+    { file: "c.py", line: 3, rule: "xss", detail: "d", severity: "high" },  // off-diff -> not inline (lives in summary)
+  ], "## summary body", { fetchImpl, readEvent: () => ({ pull_request: { number: 3, head: { sha: "H" } } }) });
+  assert.deepEqual(review, { comments: 1, review: "posted" });
+  assert.equal(calls.length, 1, "exactly ONE review POST -> ONE notification, not one per finding");
+  assert.match(calls[0].url, /\/repos\/o\/r\/pulls\/3\/reviews$/);
+  assert.equal(calls[0].body.event, "COMMENT");
+  assert.equal(calls[0].body.commit_id, "H");
+  assert.match(calls[0].body.body, /summary body/, "the summary rides in the ONE review body");
+  assert.equal(calls[0].body.comments.length, 1);
+  assert.equal(calls[0].body.comments[0].path, "b.py");
+  assert.equal(calls[0].body.comments[0].line, 9);
+});
+
+test("postFindingReview: review API refuses -> falls back to ONE summary comment (fail-open)", async () => {
   const env = { GITHUB_TOKEN: "t", GITHUB_REPOSITORY: "o/r", GITHUB_EVENT_NAME: "pull_request" };
   const posts = [];
   const fetchImpl = async (url, opts = {}) => {
-    if (!opts.method || opts.method === "GET")
-      return { ok: true, status: 200, json: async () => [{ path: "a.py", line: 5, body: `old ${FINDING_MARKER}` }] };
-    posts.push({ url, body: JSON.parse(opts.body) });
+    const method = opts.method || "GET";
+    if (method === "GET" && url.includes("/pulls/") && url.includes("/comments")) return { ok: true, status: 200, json: async () => [] };
+    if (method === "GET" && url.includes("/files")) return { ok: true, status: 200, json: async () => [{ filename: "b.py", patch: "@@ -1 +9,1 @@\n+x" }] };
+    if (url.includes("/reviews")) return { ok: false, status: 422 }; // review refused (e.g. a diff race)
+    if (method === "GET" && url.includes("/issues/")) return { ok: true, status: 200, json: async () => [] };
+    posts.push({ url, method });
     return { ok: true, status: 201 };
   };
-  const posted = await postFindingComments(env, [
-    { file: "a.py", line: 5, rule: "sqli", detail: "d", severity: "high" }, // already present -> skipped
-    { file: "b.py", line: 9, rule: "ssrf", detail: "d", severity: "high" }, // new -> posted
-  ], { fetchImpl, readEvent: () => ({ pull_request: { number: 3, head: { sha: "H" } } }) });
-  assert.equal(posted, 1, "only the new finding posts (re-run safe)");
-  assert.equal(posts.length, 1);
-  assert.equal(posts[0].body.path, "b.py");
-  assert.match(posts[0].url, /\/repos\/o\/r\/pulls\/3\/comments$/);
+  const warnings = [];
+  const review = await postFindingReview(env, [{ file: "b.py", line: 9, rule: "ssrf", detail: "d", severity: "high" }], "sum",
+    { fetchImpl, readEvent: () => ({ pull_request: { number: 3, head: { sha: "H" } } }), warn: (m) => warnings.push(m) });
+  assert.equal(review.review, "posted", "the summary still lands via the fallback");
+  assert.ok(posts.some((c) => c.url.includes("/issues/3/comments") && c.method === "POST"), "posted the summary as one issue comment");
+  assert.ok(warnings.some((w) => /review not posted/i.test(w)), "warned about the review fallback, never threw");
 });
 
-test("postFindingComments: no token -> warns, posts nothing, never throws", async () => {
+test("postFindingReview: no token -> warns, skipped, never throws", async () => {
   let warned = "";
-  const posted = await postFindingComments({}, [{ file: "a.py", line: 1, rule: "x", detail: "d", severity: "high" }], { warn: (m) => (warned = m) });
-  assert.equal(posted, 0);
+  const review = await postFindingReview({}, [{ file: "a.py", line: 1, rule: "x", detail: "d", severity: "high" }], "s", { warn: (m) => (warned = m) });
+  assert.deepEqual(review, { comments: 0, review: "skipped" });
   assert.match(warned, /GITHUB_TOKEN/);
 });
 
