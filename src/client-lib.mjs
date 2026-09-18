@@ -346,3 +346,63 @@ export function buildSarif(leaks, { version = CLIENT_VERSION, findings = [] } = 
 
 /** Uniform error-to-message (dedup of the `e instanceof Error ? e.message : String(e)` pattern). */
 export const errMsg = (e) => (e instanceof Error ? e.message : String(e));
+
+// ── GitHub Step Summary — the RENDERED report on the run page (unlike the PR review, it also shows on push runs). ──
+/** Blob base for a clickable line link: `${server}/${owner}/repo/blob/${sha}`. null when repo/sha are missing
+ *  (off CI) → locations stay plain code, never a broken link. Pure. */
+export function githubBlobBase(env, sha) {
+  const repo = env && env.GITHUB_REPOSITORY;
+  const server = (env && env.GITHUB_SERVER_URL) || "https://github.com";
+  return repo && sha ? `${server}/${repo}/blob/${sha}` : null;
+}
+
+/** A `file:line` as a clickable GitHub link when blobBase is set, else plain inline code. Pure. */
+function fileLink(blobBase, file, lineNo) {
+  if (!file) return "";
+  const n = Math.max(1, Number(lineNo) || 1);
+  const disp = `${file}:${n}`;
+  return blobBase ? `[\`${disp}\`](${blobBase}/${file}#L${n})` : `\`${disp}\``;
+}
+
+/**
+ * The GitHub Step Summary markdown for a firewall verdict `v` — a scannable, clickable report on the run page:
+ * verdict banner + pattern/conformance + cross-tenant leaks (clickable file:line) + per-pack finding counts
+ * (data-driven via collectPackBlocks, so a pack the server adds tomorrow renders today) + the "see all / enable"
+ * CTA. Pure. `decision` is the firewallVerdict kind (gate-blocked | gate-unpaid | pass).
+ */
+export function stepSummaryMarkdown(v, { origin = DEFAULT_ORIGIN, blobBase = null, decision = "pass" } = {}) {
+  const hard = Number(v && v.hardLeaks) || 0;
+  const packBlocking = Number(v && v.packBlocking) || 0;
+  const head = "## 🛡️ slopGrade Firewall — tenant isolation";
+  const verdict = decision === "gate-blocked"
+    ? `### ❌ Blocked — ${hard} hard cross-tenant leak${hard === 1 ? "" : "s"}${packBlocking > 0 ? ` · ${packBlocking} blocking finding${packBlocking === 1 ? "" : "s"}` : ""}`
+    : decision === "gate-unpaid"
+      ? `### ⚠️ Advisory — ${hard} hard leak${hard === 1 ? "" : "s"} found, not blocking on the free tier`
+      : hard > 0
+        ? `### ⚠️ Advisory — ${hard} leak${hard === 1 ? "" : "s"} (this pattern can't be gated reliably)`
+        : "### ✅ Clean — no blocking cross-tenant leaks";
+  const facts = `- **Pattern** \`${(v && v.pattern) || "n/a"}\`${v && v.tenantKey ? ` · **Tenant key** \`${v.tenantKey}\`` : ""}\n`
+    + `- **Conformance** ${v && v.conformancePct == null ? "n/a" : Number(v.conformancePct).toFixed(1) + "%"}`
+    + (Number(v && v.byId) > 0 ? `\n- **+${v.byId}** conditional by-id access${Number(v.byId) === 1 ? "" : "es"} (review)` : "");
+  const leaks = (Array.isArray(v && v.leaks) ? v.leaks : []).slice(0, 20).map(parseLeak).filter((p) => p.file);
+  const leakTable = leaks.length
+    ? "\n\n| Cross-tenant leak |\n|:--|\n" + leaks.map((p) => `| ${fileLink(blobBase, p.file, p.line)} |`).join("\n")
+      + (((v && Array.isArray(v.leaks) ? v.leaks.length : 0) > 20) ? `\n| _…and ${v.leaks.length - 20} more_ |` : "")
+    : "";
+  const packLines = collectPackBlocks(v)
+    .map(({ label, block }) => `- **${label}** — ${block.count} finding${Number(block.count) === 1 ? "" : "s"}${Number(block.hidden) > 0 ? ` (+${block.hidden} hidden)` : ""}`);
+  const packs = packLines.length ? "\n\n" + packLines.join("\n") : "";
+  const cta = decision === "gate-unpaid"
+    ? `\n\n> **[Enable the gate on this repo →](${origin}/ci)** to block these before they merge.`
+    : `\n\n<sub><a href="${origin}/ci">See all findings · manage the gate</a></sub>`;
+  return `${head}\n\n${verdict}\n\n${facts}${leakTable}${packs}${cta}\n`;
+}
+
+/** Append markdown to the GitHub Step Summary file. No-op off CI (var absent) ; fail-soft (never breaks the gate).
+ *  `writeImpl` (fs.appendFileSync) is injected for testability. */
+export function emitStepSummary(env, markdown, writeImpl) {
+  const path = env && env.GITHUB_STEP_SUMMARY;
+  if (!path || !markdown) return false;
+  try { writeImpl(path, markdown.endsWith("\n") ? markdown : markdown + "\n"); return true; }
+  catch { return false; }
+}
