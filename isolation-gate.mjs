@@ -18,7 +18,7 @@
 //     /api/ci/pro-extractors (OIDC-proved entitlement), sha256-verified, and run HERE — same zero-egress contract,
 //     a second egress boundary (sanitizeProFingerprints), fail-open to the free packs (loadProPacks below).
 import { pathToFileURL } from "node:url";
-import { writeFileSync, readFileSync } from "node:fs";
+import { writeFileSync, readFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -50,11 +50,12 @@ import { extractCryptoFingerprint } from "./src/crypto-extract.mjs";
 // OSS shim: the interprocedural pass is stubbed (returns empty) → the taint detectors run INTRA-function only.
 import { buildWrapperRegistries, resolveImportedWrappers } from "./src/taint-interproc.mjs";
 import { firewallVerdict } from "./src/gate-verdict.mjs";
-import { postFindingReview } from "./src/pr-suggest.mjs";
+import { postFindingReview, resolvePrContext } from "./src/pr-suggest.mjs";
 import {
   resolveOrigin, classifyEnv, validVerdict, sanitizeLogLine, sanitizeFingerprint, sanitizePackFingerprints,
   parseLeak, buildSarif, collectPackBlocks, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
   validProBundleResponse, runProPacks, sanitizeProFingerprints, FREE_PACK_COUNT,
+  githubBlobBase, stepSummaryMarkdown, emitStepSummary,
 } from "./src/client-lib.mjs";
 
 const CODE_EXTS = /\.(py|ts|tsx|js|jsx|mjs|cjs|sql|rb|go|php|prisma|java|cs|rs|c|cc|cpp|h|hpp|kt|scala|ex|exs)$/;
@@ -355,6 +356,14 @@ export async function main(argv = [], env = process.env) {
   // hard leak OR >=1 blocking detector finding (packBlocking, critical|high — already server-paywalled to 0 unless
   // entitled). The build-block message NAMES the real reason(s).
   const decision = firewallVerdict({ gateMode, reliable: v.reliable, hardLeaks: v.hardLeaks, gateEntitled: v.gateEntitled, packBlocking: v.packBlocking });
+  // Rendered run-page report (GitHub Step Summary) — a scannable, clickable verdict at the top of the run. Unlike the
+  // PR review it also shows on push runs (no PR to comment on). Clickable file:line via the PR head sha (blob base).
+  // Fail-soft: it never changes the verdict or breaks the build (no summary file / write error → silently skipped).
+  try {
+    const prCtx = resolvePrContext(env, () => { try { return JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8")); } catch { return null; } });
+    const blobBase = githubBlobBase(env, (prCtx && prCtx.headSha) || env.GITHUB_SHA || null);
+    emitStepSummary(env, stepSummaryMarkdown(v, { origin, blobBase, decision: decision.kind }), appendFileSync);
+  } catch (e) { ghWarn(`step summary skipped (${errMsg(e)}).`); }
   if (decision.kind === "gate-blocked") {
     const reasons = [];
     if (v.reliable && v.hardLeaks > 0 && v.gateEntitled) reasons.push(`${v.hardLeaks} hard cross-tenant leak(s)`);
