@@ -3,6 +3,22 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.7.4] — 2026-09-18
+
+Consume the verdict in your own workflow, and harden the Code Scanning upload for huge repos and flaky networks.
+
+### Added
+- **Action outputs.** The step now surfaces `verdict` (advisory / gate-blocked / gate-unpaid / gate-pass), `blocked`,
+  `hard-leaks`, `blocking-findings`, `conformance`, `entitled`, and `sarif-uploaded` (via `$GITHUB_OUTPUT`) — so a
+  downstream step can act on the result (post to Slack, gate another job, render a badge) without re-parsing logs.
+
+### Changed
+- **The Code Scanning upload retries once on a transient 5xx / network error** (with a short backoff, mirroring the
+  verdict POST) — a flaky moment no longer silently drops the upload. A 403 (missing scope) and other 4xx stay
+  no-retry: they're permanent states, not transient.
+- **The SARIF is capped at 25 000 results** (`MAX_SARIF_RESULTS`) so a very large repo never exceeds GitHub's per-run
+  SARIF limit and 413s the upload; the truncated findings still appear in the log and the PR feed.
+
 ## [0.7.3] — 2026-09-18
 
 Findings now land in GitHub's own Security tab — inline on the PR, tracked across commits, dismissible — with one permission line and no extra workflow step.

@@ -70,17 +70,34 @@ test("upload — 403 (missing scope / GHAS off): QUIET skip via log, never a war
   assert.ok(logs.some((m) => /security-events: write/.test(m)));
 });
 
-test("upload — 5xx: loud failure (warn), returns failed, never throws", async () => {
-  const warns = [];
-  const r = await uploadSarifToCodeScanning(CI, SARIF, { fetchImpl: async () => okRes(500), warn: (m) => warns.push(m) });
+test("upload — 5xx twice: retried once (2 calls) then loud failure, returns failed, never throws", async () => {
+  const warns = []; let calls = 0;
+  const r = await uploadSarifToCodeScanning(CI, SARIF, { fetchImpl: async () => { calls++; return okRes(500); }, sleepImpl: async () => {}, warn: (m) => warns.push(m) });
   assert.equal(r, "failed");
+  assert.equal(calls, 2); // one retry on a 5xx
   assert.ok(warns.some((m) => /500/.test(m)));
 });
 
-test("upload — network throw: caught, returns failed (never breaks the gate)", async () => {
-  const warns = [];
-  const r = await uploadSarifToCodeScanning(CI, SARIF, { fetchImpl: async () => { throw new Error("ENETDOWN"); }, warn: (m) => warns.push(m) });
+test("upload — 5xx then 202: the retry succeeds → uploaded", async () => {
+  let calls = 0;
+  const r = await uploadSarifToCodeScanning(CI, SARIF, { fetchImpl: async () => { calls++; return okRes(calls === 1 ? 503 : 202); }, sleepImpl: async () => {} });
+  assert.equal(r, "uploaded");
+  assert.equal(calls, 2);
+});
+
+test("upload — 422 (permanent 4xx): NOT retried, returns failed after 1 call", async () => {
+  const warns = []; let calls = 0;
+  const r = await uploadSarifToCodeScanning(CI, SARIF, { fetchImpl: async () => { calls++; return okRes(422); }, sleepImpl: async () => {}, warn: (m) => warns.push(m) });
   assert.equal(r, "failed");
+  assert.equal(calls, 1); // a 4xx is permanent — no retry
+  assert.ok(warns.some((m) => /422/.test(m)));
+});
+
+test("upload — network throw twice: retried once, caught, returns failed (never breaks the gate)", async () => {
+  const warns = []; let calls = 0;
+  const r = await uploadSarifToCodeScanning(CI, SARIF, { fetchImpl: async () => { calls++; throw new Error("ENETDOWN"); }, sleepImpl: async () => {}, warn: (m) => warns.push(m) });
+  assert.equal(r, "failed");
+  assert.equal(calls, 2);
   assert.ok(warns.some((m) => /ENETDOWN/.test(m)));
 });
 

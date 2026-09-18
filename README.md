@@ -35,6 +35,27 @@ jobs:
 
 Or run it directly: `node isolation-gate.mjs --print-payload` (audit exactly what would leave the runner).
 
+## Outputs
+
+The step exposes the verdict so a later step can act on it (post to Slack, gate another job, render a badge):
+
+| Output | Example | Meaning |
+|---|---|---|
+| `verdict` | `gate-blocked` | `advisory` · `gate-blocked` · `gate-unpaid` · `gate-pass` |
+| `blocked` | `true` | did the gate fail the build? |
+| `hard-leaks` | `2` | count of hard cross-tenant leaks |
+| `blocking-findings` | `3` | count of blocking (critical/high) security findings |
+| `conformance` | `94.2` | tenant-scoping conformance %, or empty |
+| `entitled` | `true` | public free gate or a paid slot |
+| `sarif-uploaded` | `true` | were findings sent to Code Scanning this run? |
+
+```yaml
+      - uses: maxor-tech/slopgrade-firewall@<sha>
+        id: firewall
+      - if: ${{ steps.firewall.outputs.blocked == 'true' }}
+        run: echo "blocked on ${{ steps.firewall.outputs.hard-leaks }} leak(s)"
+```
+
 ## What it detects (free tier — the 10 highest-severity classes)
 
 All ten classes run across **JavaScript/TypeScript** and **Python**. **Go** and **.NET** cover the six

@@ -19,6 +19,28 @@ inputs:
     description: "if set, ALSO write the SARIF report to this path (for a build artifact or a manual github/codeql-action/upload-sarif step). The Code Scanning upload above already runs without it. Default empty (no file written)."
     required: false
     default: ""
+outputs:
+  verdict:
+    description: "advisory | gate-blocked | gate-unpaid | gate-pass — the exit decision (empty if no server verdict was reached)."
+    value: ${{ steps.firewall.outputs.verdict }}
+  blocked:
+    description: "true if the gate failed the build (a blocking leak/finding in gate mode), false otherwise."
+    value: ${{ steps.firewall.outputs.blocked }}
+  hard-leaks:
+    description: "count of hard cross-tenant leaks in the verdict."
+    value: ${{ steps.firewall.outputs.hard-leaks }}
+  blocking-findings:
+    description: "count of blocking (critical/high) security findings the gate would fail on."
+    value: ${{ steps.firewall.outputs.blocking-findings }}
+  conformance:
+    description: "tenant-scoping conformance percent (e.g. 94.2), or empty when not applicable."
+    value: ${{ steps.firewall.outputs.conformance }}
+  entitled:
+    description: "true if the repo is entitled (public free gate OR a paid slot)."
+    value: ${{ steps.firewall.outputs.entitled }}
+  sarif-uploaded:
+    description: "true if findings were uploaded to GitHub Code Scanning this run."
+    value: ${{ steps.firewall.outputs.sarif-uploaded }}
 runs:
   using: "composite"
   steps:
@@ -28,6 +50,7 @@ runs:
       if: ${{ inputs.firewall-mode != 'off' }}
       with: { node-version: "22" }
     - name: slopgrade-firewall
+      id: firewall
       if: ${{ inputs.firewall-mode != 'off' }}
       shell: bash
       env:

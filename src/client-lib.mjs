@@ -3,7 +3,7 @@
 import { gzipSync } from "node:zlib"; // builtin, pure (no I/O) — for the Code Scanning SARIF upload encoding.
 
 export const DEFAULT_ORIGIN = "https://app.slopgrade.ai";
-export const CLIENT_VERSION = "0.7.3"; // keep in lock-step with package.json (pinned by client-lib.test.mjs)
+export const CLIENT_VERSION = "0.7.4"; // keep in lock-step with package.json (pinned by client-lib.test.mjs)
 export const FINGERPRINT_VERSION = 1;
 export const MAX_PAYLOAD_BYTES = 8 * 1024 * 1024; // 8MB hard cap on the POST body (clear error, not an opaque 413)
 /** The pro-extractor bundle a PAID repo receives from /api/ci/pro-extractors — bounded like every other input. */
@@ -12,6 +12,9 @@ export const MAX_PRO_BUNDLE_BYTES = 4 * 1024 * 1024;
 export const MAX_PRO_FILE_CHARS = 1_000_000;
 /** How many detector packs the free client extracts on its own (the 22 `src/*-extract.mjs`). */
 export const FREE_PACK_COUNT = 22;
+/** GitHub Code Scanning rejects a SARIF run with more than this many results — cap so a huge repo's upload never 413s
+ *  (the truncated findings still appear in the log + the PR feed; the SARIF just carries the first N). */
+export const MAX_SARIF_RESULTS = 25000;
 
 /**
  * Origin resolution + the origin-override guard. The OIDC audience is derived from the origin and the fingerprint is
@@ -296,7 +299,7 @@ export function sarifLevel(severity) {
  * pack key, so every free-tier class is visible in code scanning, not only the cross-tenant rule. Only entries with
  * a parseable path become results; an unmappable path is skipped (a wrong-path annotation is worse than none).
  */
-export function buildSarif(leaks, { version = CLIENT_VERSION, findings = [] } = {}) {
+export function buildSarif(leaks, { version = CLIENT_VERSION, findings = [], maxResults = MAX_SARIF_RESULTS } = {}) {
   const results = (Array.isArray(leaks) ? leaks : [])
     .map(parseLeak)
     .filter((l) => l.file)
@@ -340,7 +343,7 @@ export function buildSarif(leaks, { version = CLIENT_VERSION, findings = [] } = 
         version,
         rules,
       } },
-      results,
+      results: results.length > maxResults ? results.slice(0, maxResults) : results,
     }],
   };
 }
@@ -433,7 +436,7 @@ export function encodeSarifForUpload(sarif, gzipImpl = gzipSync) {
  * a gentle one-line nudge, not a scary annotation on every run.
  * @param {object} deps { fetchImpl, gzipImpl, log, warn } — injected for testability.
  */
-export async function uploadSarifToCodeScanning(env, sarif, { fetchImpl = fetch, gzipImpl = gzipSync, log = () => {}, warn = () => {} } = {}) {
+export async function uploadSarifToCodeScanning(env, sarif, { fetchImpl = fetch, gzipImpl = gzipSync, sleepImpl = (ms) => new Promise((r) => setTimeout(r, ms)), log = () => {}, warn = () => {} } = {}) {
   const token = (env && (env.GITHUB_TOKEN || env.FW_GH_TOKEN)) || "";
   const repo = (env && env.GITHUB_REPOSITORY) || "";
   const sha = (env && env.GITHUB_SHA) || "";
@@ -445,16 +448,40 @@ export async function uploadSarifToCodeScanning(env, sarif, { fetchImpl = fetch,
   let payload;
   try { payload = encodeSarifForUpload(sarif, gzipImpl); }
   catch (e) { warn(`Code Scanning: could not encode the SARIF (${errMsg(e)}) — skipped.`); return "failed"; }
+  // POST with ONE backoff retry on a transient 5xx / network error (mirrors postVerdict). A 2xx/202 wins ; a 403 is a
+  // permission STATE (no retry — retrying won't grant the scope) ; any other 4xx is a permanent reject (no retry).
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetchImpl(`https://api.github.com/repos/${owner}/${name}/code-scanning/sarifs`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json", "User-Agent": "slopgrade-firewall" },
+        body: JSON.stringify({ commit_sha: sha, ref, sarif: payload }),
+      });
+      if (res && (res.status === 202 || res.ok)) { log("Code Scanning: SARIF uploaded — findings appear in the Security tab + inline on the PR (tracked across commits, dismissible)."); return "uploaded"; }
+      const status = res ? res.status : "?";
+      if (status === 403) { log("Code Scanning: upload refused (403) — grant `permissions: security-events: write` (a private repo also needs GitHub Advanced Security). Skipped."); return "skipped"; }
+      if (typeof status === "number" && status >= 500 && attempt === 0) { await sleepImpl(750); continue; }
+      warn(`Code Scanning: upload not accepted (HTTP ${status}) — skipped.`);
+      return "failed";
+    } catch (e) {
+      if (attempt === 0) { await sleepImpl(750); continue; }
+      warn(`Code Scanning: upload failed (${errMsg(e)}) — skipped.`);
+      return "failed";
+    }
+  }
+  return "failed";
+}
+
+// ── Action OUTPUTS — expose the verdict + counts to downstream workflow steps (Slack alert, gate another job, badge). ──
+/** Append `key=value` lines to the GITHUB_OUTPUT file so the composite action can surface them as step outputs. Values
+ *  are single-line scalars (verdict string, counts, booleans) — no multiline delimiter needed. No-op off CI (var
+ *  absent) ; fail-soft (never throws). `writeImpl` (fs.appendFileSync) is injected for testability. Returns written?. */
+export function emitOutputs(env, outputs, writeImpl) {
+  const path = env && env.GITHUB_OUTPUT;
+  if (!path || !outputs) return false;
   try {
-    const res = await fetchImpl(`https://api.github.com/repos/${owner}/${name}/code-scanning/sarifs`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json", "User-Agent": "slopgrade-firewall" },
-      body: JSON.stringify({ commit_sha: sha, ref, sarif: payload }),
-    });
-    if (res && (res.status === 202 || res.ok)) { log("Code Scanning: SARIF uploaded — findings appear in the Security tab + inline on the PR (tracked across commits, dismissible)."); return "uploaded"; }
-    const status = res ? res.status : "?";
-    if (status === 403) { log("Code Scanning: upload refused (403) — grant `permissions: security-events: write` (a private repo also needs GitHub Advanced Security). Skipped."); return "skipped"; }
-    warn(`Code Scanning: upload not accepted (HTTP ${status}) — skipped.`);
-    return "failed";
-  } catch (e) { warn(`Code Scanning: upload failed (${errMsg(e)}) — skipped.`); return "failed"; }
+    const body = Object.entries(outputs).map(([k, v]) => `${k}=${String(v ?? "")}`).join("\n") + "\n";
+    writeImpl(path, body);
+    return true;
+  } catch { return false; }
 }
