@@ -3,6 +3,23 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.7.2] — 2026-09-18
+
+A rendered report on every run page — including push runs, where PR comments never appear — with every leak a one-click jump to the exact line.
+
+### Added
+- **A GitHub Step Summary is written on every run.** The gate now renders a markdown report to `$GITHUB_STEP_SUMMARY`
+  (`stepSummaryMarkdown` + `emitStepSummary`): a verdict banner (✅ clean / ⚠️ advisory / ❌ blocked), the pattern +
+  tenant key + conformance facts, the blocking-pack count, and the leak list — visible on the run page for **push runs
+  too**, not just PRs (the inline review + sticky comment channels only fire when there's a PR to comment on).
+- **Every `file:line` leak is a clickable link** to the exact line at the run's head SHA
+  (`githubBlobBase` + `fileLink` → `<server>/<repo>/blob/<sha>/<file>#L<n>`). Off CI (no repo/SHA in the env) it
+  degrades to plain code text — never a broken link. A paid repo's advisory report links straight to the offending line.
+
+### Notes
+- Purely additive and display-only: the gate's verdict and exit code are **unchanged**. The Step Summary is fail-soft
+  (a write error is swallowed) and a no-op off CI, so it can never break a build.
+
 ## [0.7.1] — 2026-09-14
 
 One PR notification instead of dozens, and a loud signal when a paid repo isn't getting its full catalogue.
