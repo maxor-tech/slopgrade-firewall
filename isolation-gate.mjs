@@ -54,7 +54,7 @@ import { postFindingReview, resolvePrContext } from "./src/pr-suggest.mjs";
 import {
   resolveOrigin, classifyEnv, validVerdict, sanitizeLogLine, sanitizeFingerprint, sanitizePackFingerprints,
   parseLeak, buildSarif, collectPackBlocks, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
-  validProBundleResponse, runProPacks, sanitizeProFingerprints, FREE_PACK_COUNT,
+  validProBundleResponse, runProPacks, sanitizeProFingerprints, FREE_PACK_COUNT, MAX_SARIF_RESULTS,
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs,
 } from "./src/client-lib.mjs";
 
@@ -353,6 +353,11 @@ export async function main(argv = [], env = process.env) {
     ...(v.cicd?.findings ?? []),
   ].map((f) => `${f.table}:1  ${f.detail}`);
   const sarif = buildSarif([...(v.leaks ?? []), ...acLeaks], { version: CLIENT_VERSION, findings: feed.filter((f) => f.pack !== "cross-tenant") });
+  // Make a cap VISIBLE, never silent: on a repo large enough to hit the SARIF result limit, say so loudly so the dev
+  // knows Code Scanning shows only the first N — the rest are still in the log + PR feed above (closes the truncation gap).
+  if (sarif.runs[0].results.length >= MAX_SARIF_RESULTS) {
+    ghWarn(`SARIF capped at ${MAX_SARIF_RESULTS} findings for Code Scanning (very large repo) — the remaining findings are in the log and the PR feed, not the Security tab.`);
+  }
   // Back-compat: --sarif <path> still writes the file (for an artifact or a manual codeql-action/upload-sarif step).
   if (sarifPath) {
     try { writeFileSync(sarifPath, JSON.stringify(sarif, null, 2)); line(`  SARIF written: ${sarifPath}`); }

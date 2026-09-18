@@ -148,6 +148,16 @@ located sample, and the build is never blocked. The full list, the rule names an
 **$8–29/repo/mo** (volume pricing) — **14-day free trial, no card**. Users unlimited; billed per repo, never per
 seat. → **[slopgrade.ai/firewall](https://www.slopgrade.ai/firewall)**
 
+## Show it in your README
+
+Once the gate runs on your repo, add the badge so contributors know the diff is checked:
+
+```markdown
+[![slopGrade Firewall](https://img.shields.io/badge/security-slopGrade%20Firewall-36D399?logo=github)](https://www.slopgrade.ai/firewall)
+```
+
+[![slopGrade Firewall](https://img.shields.io/badge/security-slopGrade%20Firewall-36D399?logo=github)](https://www.slopgrade.ai/firewall)
+
 ## Development
 
 ```bash

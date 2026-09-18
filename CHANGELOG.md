@@ -3,6 +3,16 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.7.5] — 2026-09-18
+
+### Changed
+- **A SARIF result cap is now visible, not silent.** When a repo is large enough to hit the 25 000-result cap, the run
+  logs a clear warning that Code Scanning shows only the first N and the rest are in the log + PR feed — closing the
+  one remaining rough edge of the cap (the findings were never lost, but the truncation was previously unannounced).
+
+### Added
+- **A README badge snippet** consumers can add to show the diff is checked by the slopGrade Firewall.
+
 ## [0.7.4] — 2026-09-18
 
 Consume the verdict in your own workflow, and harden the Code Scanning upload for huge repos and flaky networks.
