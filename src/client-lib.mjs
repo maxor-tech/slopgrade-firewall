@@ -1,8 +1,9 @@
 // PURE, testable client helpers — the security- and correctness-critical logic, isolated from I/O so it can be
-// unit-tested (the CLI in isolation-gate.mjs is a thin adapter around these + the network). Zero dependencies.
+// unit-tested (the CLI in isolation-gate.mjs is a thin adapter around these + the network). Zero npm dependencies.
+import { gzipSync } from "node:zlib"; // builtin, pure (no I/O) — for the Code Scanning SARIF upload encoding.
 
 export const DEFAULT_ORIGIN = "https://app.slopgrade.ai";
-export const CLIENT_VERSION = "0.7.2"; // keep in lock-step with package.json (pinned by client-lib.test.mjs)
+export const CLIENT_VERSION = "0.7.3"; // keep in lock-step with package.json (pinned by client-lib.test.mjs)
 export const FINGERPRINT_VERSION = 1;
 export const MAX_PAYLOAD_BYTES = 8 * 1024 * 1024; // 8MB hard cap on the POST body (clear error, not an opaque 413)
 /** The pro-extractor bundle a PAID repo receives from /api/ci/pro-extractors — bounded like every other input. */
@@ -405,4 +406,55 @@ export function emitStepSummary(env, markdown, writeImpl) {
   if (!path || !markdown) return false;
   try { writeImpl(path, markdown.endsWith("\n") ? markdown : markdown + "\n"); return true; }
   catch { return false; }
+}
+
+// ── GitHub Code Scanning — the RICHEST native security surface (Security tab + inline PR annotations that TRACK across
+//    commits and are DISMISSIBLE), FREE on public repos. We upload the SARIF ourselves, so a consumer gets it with one
+//    permission line and no extra workflow step (no `codeql-action/upload-sarif` to wire, no SHA to pin). ──
+
+/** Base64(gzip(JSON)) — the exact encoding the Code Scanning SARIF-upload API wants for its `sarif` field. Pure.
+ *  `gzipImpl` is injected (defaults to node:zlib gzipSync) so the encoding is unit-testable without a real gzip. */
+export function encodeSarifForUpload(sarif, gzipImpl = gzipSync) {
+  return Buffer.from(gzipImpl(Buffer.from(JSON.stringify(sarif), "utf8"))).toString("base64");
+}
+
+/**
+ * Upload the SARIF to GitHub Code Scanning (POST /repos/{o}/{r}/code-scanning/sarifs). Posts to the consumer's OWN repo
+ * with their OWN GITHUB_TOKEN — the SARIF is built LOCALLY (buildSarif), so nothing new leaves the runner; slopGrade's
+ * brain is never contacted here. Needs `permissions: security-events: write` (free on public repos; a private repo also
+ * needs GitHub Advanced Security).
+ *
+ * FAIL-SOFT by design — it NEVER throws and NEVER changes the verdict:
+ *  - no token / repo / sha / ref  → a plain info line (with the permission hint), returns "skipped".
+ *  - HTTP 403 (token lacks the scope, or GHAS off) → a plain info line telling the user how to unlock it, "skipped".
+ *  - any other non-2xx / network / encode error → one `warn`, returns "failed".
+ *  - accepted (202) → an info line, returns "uploaded".
+ * The 403/skip cases stay QUIET (a `log`, not a `::warning`) so an existing user who hasn't granted the permission gets
+ * a gentle one-line nudge, not a scary annotation on every run.
+ * @param {object} deps { fetchImpl, gzipImpl, log, warn } — injected for testability.
+ */
+export async function uploadSarifToCodeScanning(env, sarif, { fetchImpl = fetch, gzipImpl = gzipSync, log = () => {}, warn = () => {} } = {}) {
+  const token = (env && (env.GITHUB_TOKEN || env.FW_GH_TOKEN)) || "";
+  const repo = (env && env.GITHUB_REPOSITORY) || "";
+  const sha = (env && env.GITHUB_SHA) || "";
+  const ref = (env && env.GITHUB_REF) || "";
+  const slash = repo.indexOf("/");
+  if (!token) { log("Code Scanning: no GITHUB_TOKEN — skipped (add `permissions: security-events: write` to see findings in the Security tab)."); return "skipped"; }
+  if (slash <= 0 || slash === repo.length - 1 || !sha || !ref) { log("Code Scanning: repo/sha/ref missing (not a CI run) — SARIF upload skipped."); return "skipped"; }
+  const owner = repo.slice(0, slash), name = repo.slice(slash + 1);
+  let payload;
+  try { payload = encodeSarifForUpload(sarif, gzipImpl); }
+  catch (e) { warn(`Code Scanning: could not encode the SARIF (${errMsg(e)}) — skipped.`); return "failed"; }
+  try {
+    const res = await fetchImpl(`https://api.github.com/repos/${owner}/${name}/code-scanning/sarifs`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json", "User-Agent": "slopgrade-firewall" },
+      body: JSON.stringify({ commit_sha: sha, ref, sarif: payload }),
+    });
+    if (res && (res.status === 202 || res.ok)) { log("Code Scanning: SARIF uploaded — findings appear in the Security tab + inline on the PR (tracked across commits, dismissible)."); return "uploaded"; }
+    const status = res ? res.status : "?";
+    if (status === 403) { log("Code Scanning: upload refused (403) — grant `permissions: security-events: write` (a private repo also needs GitHub Advanced Security). Skipped."); return "skipped"; }
+    warn(`Code Scanning: upload not accepted (HTTP ${status}) — skipped.`);
+    return "failed";
+  } catch (e) { warn(`Code Scanning: upload failed (${errMsg(e)}) — skipped.`); return "failed"; }
 }

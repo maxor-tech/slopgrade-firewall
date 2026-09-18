@@ -18,6 +18,7 @@ jobs:
       contents: read
       id-token: write            # zero secret: GitHub proves your repo by OIDC (no PAT, nothing to store)
       pull-requests: write       # optional: post the inline finding feed on the PR (omit to skip the feed)
+      security-events: write     # optional: send findings to the Security tab (Code Scanning) — free on public repos
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -28,7 +29,8 @@ jobs:
           # firewall-mode: "advisory"  # opt into report-only: report leaks, never block
           # firewall-mode: "off"       # disable
           # strict: "true"             # with gate: fail the build if no verdict is available (default: fail open)
-          # sarif-file: "firewall.sarif"   # also write SARIF, then upload it to see leaks on the PR diff
+          # upload-sarif: "false"          # opt out of the Code Scanning upload (default: true — needs security-events: write)
+          # sarif-file: "firewall.sarif"   # ALSO write the SARIF to a file (for a build artifact); upload runs regardless
 ```
 
 Or run it directly: `node isolation-gate.mjs --print-payload` (audit exactly what would leave the runner).
@@ -63,7 +65,13 @@ marked ✓ (the four unmarked — XXE, insecure deserialization, hardcoded secre
    **inline review comment** on its exact `file:line`, plus one summary comment updated in place (deduped, so a re-run
    updates instead of spamming). It posts with your **own** `GITHUB_TOKEN`, to your own PR — findings never reach
    slopGrade. Omit the permission to skip the feed.
-4. **Exit** — `advisory` always exits 0 (reports only). `gate` (the default) blocks (exit 1) **only** on a `reliable`
+4. **Code Scanning** — when the workflow grants `security-events: write`, the same findings are uploaded to your
+   repo's **Security tab** as a SARIF report, so they also appear **inline on the PR "Files changed" tab**, tracked
+   across commits and dismissible — GitHub's native security surface, **free on public repos**. No extra step to wire
+   and no action SHA to pin: the upload uses your own `GITHUB_TOKEN`, to your own repo (nothing reaches slopGrade). A
+   clean run uploads an empty report, so fixed alerts auto-resolve. Omit the permission (or `upload-sarif: "false"`)
+   to skip it — the upload quietly no-ops, never breaking the build.
+5. **Exit** — `advisory` always exits 0 (reports only). `gate` (the default) blocks (exit 1) **only** on a `reliable`
    cross-tenant hard leak in an entitled repo, **or** a blocking (critical/high) detector finding. A non-entitled repo
    in `gate` mode stays advisory — the paywall fails open, so a free repo is never blocked. The whole decision is the
    pure, tested [`firewallVerdict`](./src/gate-verdict.mjs).

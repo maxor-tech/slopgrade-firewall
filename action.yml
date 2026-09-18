@@ -11,8 +11,12 @@ inputs:
     description: "fail CLOSED (exit 1) when no server verdict is available in gate mode, so the control cannot silently self-disable on an outage. Default false (fail open — a network/server incident never breaks the build)."
     required: false
     default: "false"
+  upload-sarif:
+    description: "upload findings to GitHub Code Scanning (Security tab + inline PR annotations, tracked across commits + dismissible) using YOUR GITHUB_TOKEN — no extra step, no SHA to pin. Needs `permissions: security-events: write` (free on public repos; a private repo also needs GitHub Advanced Security). Fail-soft: without the permission it quietly no-ops, never breaking the build. Default true; set false to disable."
+    required: false
+    default: "true"
   sarif-file:
-    description: "if set, write a SARIF report of the leaks to this path (upload it with github/codeql-action/upload-sarif so findings appear in the PR diff + code-scanning tab). Default empty (disabled)."
+    description: "if set, ALSO write the SARIF report to this path (for a build artifact or a manual github/codeql-action/upload-sarif step). The Code Scanning upload above already runs without it. Default empty (no file written)."
     required: false
     default: ""
 runs:
@@ -30,8 +34,11 @@ runs:
         FW_MODE: ${{ inputs.firewall-mode }}
         FW_STRICT: ${{ inputs.strict }}
         FW_SARIF: ${{ inputs.sarif-file }}
-        # For the inline PR comment feed — the caller's OWN GITHUB_TOKEN (they must grant `permissions:
-        # pull-requests: write`); it posts to their OWN PR and never reaches slopGrade. Empty on non-PR runs = no-op.
+        FW_UPLOAD_SARIF: ${{ inputs.upload-sarif }}
+        # The caller's OWN GITHUB_TOKEN, used for two consumer-side surfaces, both posting to the caller's OWN repo and
+        # never reaching slopGrade: the inline PR comment feed (`permissions: pull-requests: write`) and the Code
+        # Scanning SARIF upload (`permissions: security-events: write`). Missing either permission = that surface
+        # quietly no-ops; the gate still runs. Empty token on a non-PR run = the PR feed is a no-op.
         GITHUB_TOKEN: ${{ github.token }}
         FW_CLI: ${{ github.action_path }}/isolation-gate.mjs
       run: |

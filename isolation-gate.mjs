@@ -55,7 +55,7 @@ import {
   resolveOrigin, classifyEnv, validVerdict, sanitizeLogLine, sanitizeFingerprint, sanitizePackFingerprints,
   parseLeak, buildSarif, collectPackBlocks, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
   validProBundleResponse, runProPacks, sanitizeProFingerprints, FREE_PACK_COUNT,
-  githubBlobBase, stepSummaryMarkdown, emitStepSummary,
+  githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning,
 } from "./src/client-lib.mjs";
 
 const CODE_EXTS = /\.(py|ts|tsx|js|jsx|mjs|cjs|sql|rb|go|php|prisma|java|cs|rs|c|cc|cpp|h|hpp|kt|scala|ex|exs)$/;
@@ -342,14 +342,27 @@ export async function main(argv = [], env = process.env) {
     if (review.review !== "skipped" || review.comments) line(`\nslopGrade Firewall — ${review.comments} finding(s) inline in ONE PR review (${review.review}) — one notification, not one per finding.`);
   }
 
+  // SARIF — the machine-readable report for GitHub Code Scanning. Built from the SAME findings the log + inline feed
+  // used, so all three agree: cross-tenant leaks (v.leaks → rule cross-tenant-isolation-leak), the access-control / db /
+  // supply-chain / secrets / container / ci-cd findings (file-level, line 1), and EVERY detector pack via the normalized
+  // `feed` (minus the cross-tenant rows v.leaks already carries — so no double alert). Previously the packs were absent
+  // from the SARIF entirely; now every free-tier class is visible in code scanning.
+  const acLeaks = [
+    ...(v.accessControl?.findings ?? []), ...(v.dbSafety?.findings ?? []),
+    ...(v.supplyChain?.findings ?? []), ...(v.secrets?.findings ?? []), ...(v.container?.findings ?? []),
+    ...(v.cicd?.findings ?? []),
+  ].map((f) => `${f.table}:1  ${f.detail}`);
+  const sarif = buildSarif([...(v.leaks ?? []), ...acLeaks], { version: CLIENT_VERSION, findings: feed.filter((f) => f.pack !== "cross-tenant") });
+  // Back-compat: --sarif <path> still writes the file (for an artifact or a manual codeql-action/upload-sarif step).
   if (sarifPath) {
-    const acLeaks = [
-      ...(v.accessControl?.findings ?? []), ...(v.dbSafety?.findings ?? []),
-      ...(v.supplyChain?.findings ?? []), ...(v.secrets?.findings ?? []), ...(v.container?.findings ?? []),
-      ...(v.cicd?.findings ?? []),
-    ].map((f) => `${f.table}:1  ${f.detail}`);
-    try { writeFileSync(sarifPath, JSON.stringify(buildSarif([...(v.leaks ?? []), ...acLeaks], { version: CLIENT_VERSION }), null, 2)); line(`  SARIF written: ${sarifPath}`); }
+    try { writeFileSync(sarifPath, JSON.stringify(sarif, null, 2)); line(`  SARIF written: ${sarifPath}`); }
     catch (e) { ghWarn(`could not write SARIF to ${sanitizeLogLine(String(sarifPath))} (${errMsg(e)}).`); }
+  }
+  // Upload to Code Scanning ourselves — the Security tab + inline PR annotations (tracked across commits, dismissible),
+  // with NO extra workflow step to wire and no SHA to pin. Default on; FW_UPLOAD_SARIF=false opts out. Fail-soft: it
+  // never throws, never changes the verdict, and stays quiet (an info line, not a warning) when the permission is absent.
+  if (env.FW_UPLOAD_SARIF !== "false") {
+    await uploadSarifToCodeScanning(env, sarif, { log: (m) => line(m), warn: (m) => ghWarn(m) });
   }
 
   // 7. Exit decision — the PURE, tested free/paid boundary. Blocks on --gate + EITHER a reliable+entitled cross-tenant

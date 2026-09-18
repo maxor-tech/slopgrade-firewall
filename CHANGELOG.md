@@ -3,6 +3,29 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.7.3] — 2026-09-18
+
+Findings now land in GitHub's own Security tab — inline on the PR, tracked across commits, dismissible — with one permission line and no extra workflow step.
+
+### Added
+- **Automatic upload to GitHub Code Scanning.** The gate now posts its SARIF to the repo's Security tab itself
+  (`uploadSarifToCodeScanning` → `POST /code-scanning/sarifs`), so findings also appear **inline on the PR "Files
+  changed" tab**, tracked across commits and dismissible — GitHub's native security surface, **free on public repos**.
+  It uses the caller's own `GITHUB_TOKEN` against their own repo (nothing new leaves the runner; slopGrade is never
+  contacted for it), needs `permissions: security-events: write`, and requires **no** `codeql-action/upload-sarif` step
+  and **no** action SHA to pin. Default on; `upload-sarif: "false"` opts out. A clean run uploads an empty report so
+  fixed alerts auto-resolve.
+- **The SARIF now carries every detector pack**, not just the cross-tenant and access-control findings — the same
+  normalized feed the inline PR comments use, so the log, the PR review and Code Scanning all show the same findings.
+
+### Changed
+- `sarif-file` is now purely optional (write the SARIF to a file for a build artifact or a manual upload step); the
+  Code Scanning upload runs whether or not a file path is set.
+
+### Notes
+- Fail-soft, as ever: without `security-events: write` (or on a private repo without GitHub Advanced Security) the
+  upload quietly no-ops with a one-line hint — never a warning annotation, never a broken build, verdict unchanged.
+
 ## [0.7.2] — 2026-09-18
 
 A rendered report on every run page — including push runs, where PR comments never appear — with every leak a one-click jump to the exact line.
