@@ -1,9 +1,10 @@
 // PURE, testable client helpers — the security- and correctness-critical logic, isolated from I/O so it can be
 // unit-tested (the CLI in isolation-gate.mjs is a thin adapter around these + the network). Zero npm dependencies.
 import { gzipSync } from "node:zlib"; // builtin, pure (no I/O) — for the Code Scanning SARIF upload encoding.
+import { verify as edVerify, createPublicKey } from "node:crypto"; // builtin — Ed25519 verify of the pro-bundle signature.
 
 export const DEFAULT_ORIGIN = "https://app.slopgrade.ai";
-export const CLIENT_VERSION = "0.7.8"; // keep in lock-step with package.json (pinned by client-lib.test.mjs)
+export const CLIENT_VERSION = "0.7.9"; // keep in lock-step with package.json (pinned by client-lib.test.mjs)
 export const FINGERPRINT_VERSION = 1;
 export const MAX_PAYLOAD_BYTES = 8 * 1024 * 1024; // 8MB hard cap on the POST body (clear error, not an opaque 413)
 /** The pro-extractor bundle a PAID repo receives from /api/ci/pro-extractors — bounded like every other input. */
@@ -203,6 +204,33 @@ export function validProBundleResponse(j, sha256Of) {
   if (!Array.isArray(j.packs) || j.packs.length === 0 || !j.packs.every((p) => typeof p === "string" && /^[a-zA-Z0-9]{1,64}$/.test(p))) return { ok: false, reason: "bad pack list" };
   if (typeof j.version !== "string" || j.version.length === 0 || j.version.length > 64) return { ok: false, reason: "missing version" };
   return { ok: true };
+}
+
+/**
+ * The pinned Ed25519 PUBLIC key (SPKI PEM) that must have signed the pro bundle. THIS is the real trust anchor — the
+ * sha256 in validProBundleResponse only proves the bytes weren't corrupted (the server supplies both bundle AND hash,
+ * so a compromised server / CA-valid MITM could match its own hash). A signature the client verifies against a key it
+ * SHIPS cannot be forged by whoever controls the response. Empty = signing NOT YET ACTIVATED (the client skips the
+ * check, current behavior) — pin the real key here to enforce. Generate the keypair OFF this machine and keep the
+ * PRIVATE half in the server env (SLOPGRADE_PRO_SIGNING_KEY); only the PUBLIC half belongs in this source.
+ *   node -e "const{generateKeyPairSync}=require('crypto');const{publicKey,privateKey}=generateKeyPairSync('ed25519');console.log(publicKey.export({type:'spki',format:'pem'}));console.error(privateKey.export({type:'pkcs8',format:'pem'}))"
+ */
+export const PRO_BUNDLE_PUBKEY = "";
+
+/**
+ * Verify the pro bundle's Ed25519 signature (base64) against `pubkeyPem` (SPKI PEM). PURE (node:crypto verify is CPU,
+ * no I/O). `edVerify(null, …)` is Ed25519 (algorithm is null). Returns {ok} — {ok:false} with a reason on a missing/bad
+ * signature or an unusable key. An empty pinned key means signing is not activated → the CALLER decides to skip; this
+ * function, given an empty key, treats it as "no trust anchor" and returns ok:false so a caller that DID pin a key can
+ * never silently accept an unsigned bundle. `verifyImpl` injected for testability. */
+export function verifyBundleSig(bundle, sigB64, pubkeyPem, verifyImpl = edVerify) {
+  if (typeof pubkeyPem !== "string" || pubkeyPem.length === 0) return { ok: false, reason: "no pinned key" };
+  if (typeof sigB64 !== "string" || sigB64.length === 0) return { ok: false, reason: "missing signature" };
+  try {
+    const key = createPublicKey(pubkeyPem);
+    const ok = verifyImpl(null, Buffer.from(String(bundle), "utf8"), key, Buffer.from(sigB64, "base64"));
+    return ok ? { ok: true } : { ok: false, reason: "bad signature" };
+  } catch { return { ok: false, reason: "verify error" }; }
 }
 
 /**

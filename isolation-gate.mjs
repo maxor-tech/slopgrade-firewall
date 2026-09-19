@@ -54,7 +54,7 @@ import { postFindingReview, resolvePrContext } from "./src/pr-suggest.mjs";
 import {
   resolveOrigin, DEFAULT_ORIGIN, classifyEnv, validVerdict, sanitizeLogLine, sanitizeFingerprint, sanitizePackFingerprints,
   parseLeak, findingLocation, buildSarif, collectPackBlocks, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
-  validProBundleResponse, runProPacks, sanitizeProFingerprints, FREE_PACK_COUNT, MAX_SARIF_RESULTS, MAX_PRO_BUNDLE_BYTES,
+  validProBundleResponse, verifyBundleSig, PRO_BUNDLE_PUBKEY, runProPacks, sanitizeProFingerprints, FREE_PACK_COUNT, MAX_SARIF_RESULTS, MAX_PRO_BUNDLE_BYTES,
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs,
 } from "./src/client-lib.mjs";
 
@@ -142,6 +142,14 @@ async function loadProPacks(origin, oidcToken, root, rel) {
   } catch (e) { ghWarn(`pro extractors: oversized or malformed response (${errMsg(e)}) — running the free packs.`); return none(" (free tier — pro extractors malformed)"); }
   const check = validProBundleResponse(j, (s) => createHash("sha256").update(s).digest("hex"));
   if (!check.ok) { ghWarn(`pro extractors rejected (${check.reason}) — running the ${FREE_PACK_COUNT} free packs.`); return none(" (free tier — pro extractors rejected)"); }
+  // AUTHENTICITY (not just integrity) : when a pinned public key is configured, the bundle MUST carry a valid Ed25519
+  // signature over its bytes — a compromised server / CA-valid MITM can match its own sha256 but cannot forge this.
+  // An unsigned/invalid bundle is NEVER written or imported ; we degrade to the free packs. Empty pinned key = signing
+  // not yet activated → skipped (unchanged behavior) until the public key is pinned in client-lib.
+  if (PRO_BUNDLE_PUBKEY) {
+    const sig = verifyBundleSig(j.bundle, j.sig, PRO_BUNDLE_PUBKEY);
+    if (!sig.ok) { ghWarn(`pro extractors signature ${sig.reason} — NOT executing the untrusted bundle ; running the ${FREE_PACK_COUNT} free packs.`); return none(" (free tier — pro extractors unsigned/untrusted)"); }
+  }
   // Write to a PRIVATE (0700) unique temp dir with the EXCLUSIVE flag (no symlink-follow, no clobber), import, then
   // remove the dir — closes the predictable-name symlink/TOCTOU race on shared self-hosted runners.
   let mod, dir;

@@ -3,6 +3,19 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.7.9] — 2026-09-19
+
+The primary control for the paid pro-extractor path: cryptographic authenticity, not just integrity.
+
+### Security
+- **The pro bundle is verified against a pinned Ed25519 public key before it is ever written or executed.** The sha256
+  check only proves the bytes weren't corrupted — the server supplies both the bundle and its hash, so a compromised
+  server or a CA-valid MITM could match its own hash. A signature verified against a key the client *ships*
+  (`PRO_BUNDLE_PUBKEY`) cannot be forged by whoever controls the response. An unsigned/invalid bundle is **never run** —
+  the client degrades to the free packs. (`verifyBundleSig`, Ed25519 via `node:crypto`.)
+- Ships **inert** until the public key is pinned: with `PRO_BUNDLE_PUBKEY` empty the check is skipped (unchanged
+  behavior). Activation is a coordinated rollout — the server signs first (env private key), then this key is pinned.
+
 ## [0.7.8] — 2026-09-19
 
 Runner-safety hardening of the paid pro-extractor path, from a wider adversarial security review.
