@@ -3,6 +3,21 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.7.7] — 2026-09-19
+
+### Fixed
+- **Access-control / db-safety findings now land on their real file, with their own rule, in every channel.** These
+  packs put a *DB table name* in `table` (not a `file:line`) and the real path in a separate `file` field. The old code
+  located them via `table` — producing a bogus path like `orders:1`, mislabeling them as `cross-tenant-isolation-leak`
+  in the SARIF, and dropping them from the inline PR feed entirely. A new `findingLocation()` resolves location from
+  `file` when `table` isn't a `file:line`, and the redundant, wrongly-labeled SARIF path was removed — so the log, the
+  PR review, and Code Scanning all show these findings on the right file under their own pack rule (`accessControl`,
+  `dbSafety`, …), once each.
+
+### Docs
+- README documents that fork PRs get a read-only `GITHUB_TOKEN`, so the PR feed + Code Scanning upload are skipped
+  fail-soft on external-contributor runs (the gate still runs).
+
 ## [0.7.6] — 2026-09-19
 
 Hardening from an adversarial review of the v0.7.2–0.7.5 GitHub-native work.

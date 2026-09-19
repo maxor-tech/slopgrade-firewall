@@ -53,7 +53,7 @@ import { firewallVerdict } from "./src/gate-verdict.mjs";
 import { postFindingReview, resolvePrContext } from "./src/pr-suggest.mjs";
 import {
   resolveOrigin, classifyEnv, validVerdict, sanitizeLogLine, sanitizeFingerprint, sanitizePackFingerprints,
-  parseLeak, buildSarif, collectPackBlocks, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
+  parseLeak, findingLocation, buildSarif, collectPackBlocks, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
   validProBundleResponse, runProPacks, sanitizeProFingerprints, FREE_PACK_COUNT, MAX_SARIF_RESULTS,
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs,
 } from "./src/client-lib.mjs";
@@ -305,8 +305,6 @@ export async function main(argv = [], env = process.env) {
   for (const l of (Array.isArray(v.leaks) ? v.leaks : []).slice(0, 10)) line(`    - ${l}`);
   if (v.hiddenLeaks > 0) line(`    ... +${v.hiddenLeaks} more leak(s) hidden — see them all and block them in CI: ${origin}/ci`);
 
-  // A leak/finding location is "file:line" — parse once for annotations + the inline feed.
-  const parseLoc = (t) => { const m = /^(.*):(\d+)$/.exec(String(t ?? "")); return m ? { file: m[1], line: Number(m[2]) } : { file: null, line: 1 }; };
   const feed = []; // normalized {file,line,rule,detail,severity} for the inline PR comment feed (CodeRabbit-style)
 
   // `file=` is a workflow-command argument: sanitize it like every other server string (no `,`/`::` spoof).
@@ -323,9 +321,10 @@ export async function main(argv = [], env = process.env) {
     const advisory = block.advisory === true;
     line(`\nslopGrade Firewall — ${label}: ${block.count} finding(s)${advisory ? " (advisory — calibration window)" : ""}`);
     const findings = Array.isArray(block.findings) ? block.findings : [];
-    // `table` is "file:line" for the file-based packs → parse it so annotations + the feed land on the RIGHT line.
+    // Location: most packs put "file:line" in `table`; the AC family (accessControl/dbSafety) puts a DB TABLE NAME
+    // there + the real path in `file` — findingLocation resolves both, so annotations/feed/SARIF land on the RIGHT file.
     for (const f of findings) {
-      const loc = parseLoc(f.table);
+      const loc = findingLocation(f);
       // The free tier withholds the rule name + detail (rule "gated", empty detail): say so, and say where to unlock,
       // instead of printing an empty annotation.
       const detail = f.detail && String(f.detail).trim()
@@ -351,22 +350,17 @@ export async function main(argv = [], env = process.env) {
     if (review.review !== "skipped" || review.comments) line(`\nslopGrade Firewall — ${review.comments} finding(s) inline in ONE PR review (${review.review}) — one notification, not one per finding.`);
   }
 
-  // SARIF — the machine-readable report for GitHub Code Scanning. Built from the SAME findings the log + inline feed
-  // used, so all three agree: cross-tenant leaks (v.leaks → rule cross-tenant-isolation-leak), the access-control / db /
-  // supply-chain / secrets / container / ci-cd findings (file-level, line 1), and EVERY detector pack via the normalized
-  // `feed` (minus the cross-tenant rows v.leaks already carries — so no double alert). Previously the packs were absent
-  // from the SARIF entirely; now every free-tier class is visible in code scanning.
-  const acLeaks = [
-    ...(v.accessControl?.findings ?? []), ...(v.dbSafety?.findings ?? []),
-    ...(v.supplyChain?.findings ?? []), ...(v.secrets?.findings ?? []), ...(v.container?.findings ?? []),
-    ...(v.cicd?.findings ?? []),
-  ].map((f) => `${f.table}:1  ${f.detail}`);
+  // SARIF — built from the SAME normalized feed the log + PR review use, so all three channels agree: cross-tenant
+  // leaks via v.leaks (rule cross-tenant-isolation-leak), and EVERY detector pack via the feed, EACH carrying its own
+  // pack rule id. The AC family (accessControl/dbSafety) now flows through the feed too — findingLocation resolves it to
+  // its real `file` — so it is no longer lumped under the cross-tenant rule nor dropped (B#2). `feed` cross-tenant rows
+  // are excluded here because v.leaks already carries them (no double alert).
   const sarifFindings = feed.filter((f) => f.pack !== "cross-tenant");
-  const sarif = buildSarif([...(v.leaks ?? []), ...acLeaks], { version: CLIENT_VERSION, findings: sarifFindings });
+  const sarif = buildSarif(v.leaks ?? [], { version: CLIENT_VERSION, findings: sarifFindings });
   // Make a cap VISIBLE, never silent — but only when it ACTUALLY truncates. Count the real mappable candidates (the
   // same predicates buildSarif applies) so the warning fires on genuine overflow, not at exactly the cap, and names the
   // true count. buildSarif keeps the HIGHEST-severity results, so the dropped ones are the lowest-severity.
-  const sarifCandidates = [...(v.leaks ?? []), ...acLeaks].reduce((n, l) => n + (parseLeak(l).file ? 1 : 0), 0)
+  const sarifCandidates = (Array.isArray(v.leaks) ? v.leaks : []).reduce((n, l) => n + (parseLeak(l).file ? 1 : 0), 0)
     + sarifFindings.filter((f) => typeof f.file === "string" && f.file).length;
   if (sarifCandidates > MAX_SARIF_RESULTS) {
     ghWarn(`SARIF capped: ${sarifCandidates} findings exceed GitHub's ${MAX_SARIF_RESULTS}-result Code Scanning limit — the highest-severity ${MAX_SARIF_RESULTS} are uploaded; the rest are in the log and the PR feed.`);

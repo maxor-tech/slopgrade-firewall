@@ -3,7 +3,7 @@
 import { gzipSync } from "node:zlib"; // builtin, pure (no I/O) — for the Code Scanning SARIF upload encoding.
 
 export const DEFAULT_ORIGIN = "https://app.slopgrade.ai";
-export const CLIENT_VERSION = "0.7.6"; // keep in lock-step with package.json (pinned by client-lib.test.mjs)
+export const CLIENT_VERSION = "0.7.7"; // keep in lock-step with package.json (pinned by client-lib.test.mjs)
 export const FINGERPRINT_VERSION = 1;
 export const MAX_PAYLOAD_BYTES = 8 * 1024 * 1024; // 8MB hard cap on the POST body (clear error, not an opaque 413)
 /** The pro-extractor bundle a PAID repo receives from /api/ci/pro-extractors — bounded like every other input. */
@@ -282,6 +282,20 @@ export function parseLeak(s) {
   const m = /^(.+?):(\d+)\s+(.*)$/.exec(String(s).trim());
   if (!m) return { file: null, line: 0, message: sanitizeLogLine(String(s)) };
   return { file: m[1], line: Number(m[2]), message: sanitizeLogLine(m[3] || "cross-tenant isolation leak") };
+}
+
+/**
+ * Resolve a detector finding's SOURCE LOCATION → {file, line}, {file:null} if none. Most packs put "file:line" in
+ * `table`; the access-control family (accessControl/dbSafety) instead puts a DB TABLE NAME in `table` and the real
+ * path in a separate `file` field (with no line) — so fall back to `file` when `table` isn't a "file:line". This is
+ * why the AC family must NOT be located via `table` (that yields a bogus path like `orders:1` and drops it from the
+ * feed entirely). Pure + testable.
+ */
+export function findingLocation(f) {
+  const m = /^(.*):(\d+)$/.exec(String(f && f.table != null ? f.table : ""));
+  if (m) return { file: m[1], line: Number(m[2]) };
+  if (f && typeof f.file === "string" && f.file) return { file: f.file, line: Number(f.line) || 1 };
+  return { file: null, line: 1 };
 }
 
 /** SARIF level for a detector severity: critical/high → error, medium → warning, anything else → note. */

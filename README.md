@@ -97,6 +97,13 @@ marked ✓ (the four unmarked — XXE, insecure deserialization, hardcoded secre
    in `gate` mode stays advisory — the paywall fails open, so a free repo is never blocked. The whole decision is the
    pure, tested [`firewallVerdict`](./src/gate-verdict.mjs).
 
+> **Fork PRs (external contributors):** GitHub gives the `pull_request` event a **read-only** `GITHUB_TOKEN` on runs
+> from a fork, whatever `permissions:` you declare. The gate still runs (verdict + exit code are unaffected), but the
+> PR feed (step 3) and Code Scanning upload (step 4) can't write and are **skipped fail-soft** — so an external-contributor
+> PR gets the log + Step Summary, not inline comments or Security-tab alerts. This is inherent to GitHub's fork model;
+> teams that want those surfaces on fork PRs use a separate `workflow_run`/`pull_request_target` workflow (with its own
+> security trade-offs), which is out of scope for this action.
+
 Detectors run **intra-function**. Cross-function / cross-file dataflow, the other security classes, and the
 calibrated (corpus-tuned) false-positive suppression are part of the hosted product — see **[slopgrade.ai/firewall](https://www.slopgrade.ai/firewall)**.
 
