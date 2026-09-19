@@ -152,6 +152,15 @@ export async function main(argv = [], env = process.env) {
   const root = env.GITHUB_WORKSPACE || process.cwd();
   const noVerdict = () => (strict && gateMode ? 1 : 0);
 
+  // Fail-safe outputs sentinel — emitted BEFORE any no-verdict early return, so a downstream step reading
+  // `steps.firewall.outputs.blocked` never sees an EMPTY string (which `!= 'true'` would treat as "not blocked" even
+  // when the gate failed CLOSED under --strict and exited 1). `blocked` here mirrors the no-verdict exit code
+  // (strict+gate ⇒ 1 ⇒ true). The happy path re-emits the REAL values at the decision — GITHUB_OUTPUT: last write wins.
+  emitOutputs(env, {
+    verdict: "no-verdict", blocked: strict && gateMode,
+    "hard-leaks": "", "blocking-findings": "", conformance: "", entitled: "", "sarif-uploaded": false,
+  }, appendFileSync);
+
   // 1. LOCAL — the structural fingerprint (file contents never leave). Wrapped so a crafted repo (symlink cycle)
   //    that makes extraction throw routes through noVerdict(), NOT the entrypoint catch (which fails OPEN).
   let fingerprint;
@@ -352,11 +361,15 @@ export async function main(argv = [], env = process.env) {
     ...(v.supplyChain?.findings ?? []), ...(v.secrets?.findings ?? []), ...(v.container?.findings ?? []),
     ...(v.cicd?.findings ?? []),
   ].map((f) => `${f.table}:1  ${f.detail}`);
-  const sarif = buildSarif([...(v.leaks ?? []), ...acLeaks], { version: CLIENT_VERSION, findings: feed.filter((f) => f.pack !== "cross-tenant") });
-  // Make a cap VISIBLE, never silent: on a repo large enough to hit the SARIF result limit, say so loudly so the dev
-  // knows Code Scanning shows only the first N — the rest are still in the log + PR feed above (closes the truncation gap).
-  if (sarif.runs[0].results.length >= MAX_SARIF_RESULTS) {
-    ghWarn(`SARIF capped at ${MAX_SARIF_RESULTS} findings for Code Scanning (very large repo) — the remaining findings are in the log and the PR feed, not the Security tab.`);
+  const sarifFindings = feed.filter((f) => f.pack !== "cross-tenant");
+  const sarif = buildSarif([...(v.leaks ?? []), ...acLeaks], { version: CLIENT_VERSION, findings: sarifFindings });
+  // Make a cap VISIBLE, never silent — but only when it ACTUALLY truncates. Count the real mappable candidates (the
+  // same predicates buildSarif applies) so the warning fires on genuine overflow, not at exactly the cap, and names the
+  // true count. buildSarif keeps the HIGHEST-severity results, so the dropped ones are the lowest-severity.
+  const sarifCandidates = [...(v.leaks ?? []), ...acLeaks].reduce((n, l) => n + (parseLeak(l).file ? 1 : 0), 0)
+    + sarifFindings.filter((f) => typeof f.file === "string" && f.file).length;
+  if (sarifCandidates > MAX_SARIF_RESULTS) {
+    ghWarn(`SARIF capped: ${sarifCandidates} findings exceed GitHub's ${MAX_SARIF_RESULTS}-result Code Scanning limit — the highest-severity ${MAX_SARIF_RESULTS} are uploaded; the rest are in the log and the PR feed.`);
   }
   // Back-compat: --sarif <path> still writes the file (for an artifact or a manual codeql-action/upload-sarif step).
   if (sarifPath) {

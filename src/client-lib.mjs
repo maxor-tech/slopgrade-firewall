@@ -3,7 +3,7 @@
 import { gzipSync } from "node:zlib"; // builtin, pure (no I/O) — for the Code Scanning SARIF upload encoding.
 
 export const DEFAULT_ORIGIN = "https://app.slopgrade.ai";
-export const CLIENT_VERSION = "0.7.5"; // keep in lock-step with package.json (pinned by client-lib.test.mjs)
+export const CLIENT_VERSION = "0.7.6"; // keep in lock-step with package.json (pinned by client-lib.test.mjs)
 export const FINGERPRINT_VERSION = 1;
 export const MAX_PAYLOAD_BYTES = 8 * 1024 * 1024; // 8MB hard cap on the POST body (clear error, not an opaque 413)
 /** The pro-extractor bundle a PAID repo receives from /api/ci/pro-extractors — bounded like every other input. */
@@ -125,7 +125,7 @@ export function sanitizeLogLine(s, max = 240) {
  */
 // Coerce to a bounded identifier string — the boundary must not trust the shape of names/paths coming from the
 // extractor, so a future extractor bug can never let a source-bearing value ride through tableCols/rls untouched.
-const ident = (x) => String(x).slice(0, 200);
+const ident = (x) => String(x).replace(/[ --]/g, "").slice(0, 200);
 
 export function sanitizeFingerprint(fp) {
   const s = fp?.signals ?? {};
@@ -292,6 +292,10 @@ export function sarifLevel(severity) {
   return "note";
 }
 
+/** Ordering for the result cap: keep errors before warnings before notes, so a truncation at MAX_SARIF_RESULTS never
+ *  drops a critical while a `note` survives (the SARIF result array is otherwise insertion-ordered). */
+const SARIF_LEVEL_RANK = { error: 0, warning: 1, note: 2 };
+
 /**
  * Build a SARIF 2.1.0 report so findings land in the PR "Files changed" diff and the code-scanning tab (upload with
  * github/codeql-action/upload-sarif). Two sources: the cross-tenant `leaks` (strings "path:line  reason") and the
@@ -307,7 +311,9 @@ export function buildSarif(leaks, { version = CLIENT_VERSION, findings = [], max
       ruleId: "cross-tenant-isolation-leak",
       level: "error",
       message: { text: l.message },
-      locations: [{ physicalLocation: { artifactLocation: { uri: l.file }, region: { startLine: Math.max(1, l.line) } } }],
+      // Sanitize the uri like message.text: a server-controlled path must not carry control chars / `..` into the
+      // consumer's Security tab under their token (egress symmetry — the leak strings came from the server).
+      locations: [{ physicalLocation: { artifactLocation: { uri: sanitizeLogLine(l.file) }, region: { startLine: Math.max(1, l.line) } } }],
     }));
   const rules = [{
     id: "cross-tenant-isolation-leak",
@@ -330,7 +336,7 @@ export function buildSarif(leaks, { version = CLIENT_VERSION, findings = [], max
       ruleId: pack,
       level: sarifLevel(f.severity),
       message: { text: sanitizeLogLine(f.detail || `${packLabel(pack)} finding`) },
-      locations: [{ physicalLocation: { artifactLocation: { uri: f.file }, region: { startLine: Math.max(1, Number(f.line) || 1) } } }],
+      locations: [{ physicalLocation: { artifactLocation: { uri: sanitizeLogLine(f.file) }, region: { startLine: Math.max(1, Number(f.line) || 1) } } }],
     });
   }
   return {
@@ -343,7 +349,11 @@ export function buildSarif(leaks, { version = CLIENT_VERSION, findings = [], max
         version,
         rules,
       } },
-      results: results.length > maxResults ? results.slice(0, maxResults) : results,
+      // Over the cap: sort by severity FIRST so the kept N are the highest-severity findings (a critical must never be
+      // truncated away while a note survives). Stable sort preserves order within a level. Under the cap: unchanged.
+      results: results.length > maxResults
+        ? [...results].sort((a, b) => (SARIF_LEVEL_RANK[a.level] ?? 3) - (SARIF_LEVEL_RANK[b.level] ?? 3)).slice(0, maxResults)
+        : results,
     }],
   };
 }
@@ -448,8 +458,9 @@ export async function uploadSarifToCodeScanning(env, sarif, { fetchImpl = fetch,
   let payload;
   try { payload = encodeSarifForUpload(sarif, gzipImpl); }
   catch (e) { warn(`Code Scanning: could not encode the SARIF (${errMsg(e)}) — skipped.`); return "failed"; }
-  // POST with ONE backoff retry on a transient 5xx / network error (mirrors postVerdict). A 2xx/202 wins ; a 403 is a
-  // permission STATE (no retry — retrying won't grant the scope) ; any other 4xx is a permanent reject (no retry).
+  // POST with ONE backoff retry on a TRANSIENT status — 5xx OR 429 (rate limit), the most-retryable class (honoring a
+  // Retry-After header when present). A 2xx/202 wins ; a 403 is usually a missing scope (no retry — retrying won't grant
+  // it), though it can also be secondary-rate-limiting, so the message names both ; any other 4xx is a permanent reject.
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res = await fetchImpl(`https://api.github.com/repos/${owner}/${name}/code-scanning/sarifs`, {
@@ -459,8 +470,12 @@ export async function uploadSarifToCodeScanning(env, sarif, { fetchImpl = fetch,
       });
       if (res && (res.status === 202 || res.ok)) { log("Code Scanning: SARIF uploaded — findings appear in the Security tab + inline on the PR (tracked across commits, dismissible)."); return "uploaded"; }
       const status = res ? res.status : "?";
-      if (status === 403) { log("Code Scanning: upload refused (403) — grant `permissions: security-events: write` (a private repo also needs GitHub Advanced Security). Skipped."); return "skipped"; }
-      if (typeof status === "number" && status >= 500 && attempt === 0) { await sleepImpl(750); continue; }
+      if (status === 403) { log("Code Scanning: upload refused (403) — grant `permissions: security-events: write` (a private repo also needs GitHub Advanced Security); if the permission is already granted, GitHub may be rate-limiting the token. Skipped."); return "skipped"; }
+      if (typeof status === "number" && (status >= 500 || status === 429) && attempt === 0) {
+        const ra = Number(res && res.headers && typeof res.headers.get === "function" ? res.headers.get("retry-after") : NaN);
+        await sleepImpl(Number.isFinite(ra) && ra > 0 ? Math.min(ra * 1000, 60000) : 750);
+        continue;
+      }
       warn(`Code Scanning: upload not accepted (HTTP ${status}) — skipped.`);
       return "failed";
     } catch (e) {

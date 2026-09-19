@@ -111,3 +111,27 @@ test("upload — encode error (gzip throws): caught before the fetch, returns fa
   assert.equal(r, "failed");
   assert.equal(called, false);
 });
+
+test("upload — 429 (rate limit) is RETRIED, not treated as permanent: twice → 2 calls then failed", async () => {
+  let calls = 0;
+  const r = await uploadSarifToCodeScanning(CI, SARIF, { fetchImpl: async () => { calls++; return okRes(429); }, sleepImpl: async () => {} });
+  assert.equal(r, "failed");
+  assert.equal(calls, 2); // 429 is the most-retryable status — it MUST retry
+});
+
+test("upload — 429 then 202: the retry succeeds → uploaded", async () => {
+  let calls = 0;
+  const r = await uploadSarifToCodeScanning(CI, SARIF, { fetchImpl: async () => { calls++; return okRes(calls === 1 ? 429 : 202); }, sleepImpl: async () => {} });
+  assert.equal(r, "uploaded");
+  assert.equal(calls, 2);
+});
+
+test("upload — honors Retry-After on a 429 backoff", async () => {
+  let sleptMs = null; let calls = 0;
+  const res429 = { ok: false, status: 429, headers: { get: (k) => (String(k).toLowerCase() === "retry-after" ? "2" : null) } };
+  await uploadSarifToCodeScanning(CI, SARIF, {
+    fetchImpl: async () => { calls++; return res429; },
+    sleepImpl: async (ms) => { sleptMs = ms; },
+  });
+  assert.equal(sleptMs, 2000); // Retry-After: 2 → 2000ms (not the 750ms default)
+});

@@ -3,6 +3,29 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.7.6] — 2026-09-19
+
+Hardening from an adversarial review of the v0.7.2–0.7.5 GitHub-native work.
+
+### Fixed
+- **The SARIF result cap no longer drops the most critical findings.** When a repo exceeds the 25 000-result limit,
+  results are now sorted by severity before truncating, so `error`-level findings (SQLi, crypto, secrets…) are kept and
+  only the lowest-severity ones are dropped — previously the cap kept insertion order, so criticals (built last) were
+  sliced off first while low-severity notes survived.
+- **Code Scanning upload retries on 429 (rate limit), not just 5xx**, and honors a `Retry-After` header — the most
+  transient, most-retryable status was previously treated as a permanent failure.
+- **The SARIF `uri` is now sanitized** (control characters stripped, like `message.text` already was), so a
+  server-controlled path can't carry control bytes into the consumer's Security tab. `ident()` is control-stripped too.
+- **`--strict --gate` no-verdict runs now emit outputs.** A fail-closed run (exit 1) with no server verdict used to
+  write nothing to `$GITHUB_OUTPUT`, so a downstream `if: outputs.blocked == 'true'` read an empty string and could
+  deploy anyway. A `verdict=no-verdict` / `blocked` sentinel is now emitted before every no-verdict early return.
+- **The truncation warning is precise** — it fires only on genuine overflow (counting real candidates) and names the
+  true count, instead of false-firing at exactly the cap.
+
+### Changed
+- The 403 message no longer assumes a missing permission: it notes the scope may already be granted and GitHub could be
+  rate-limiting.
+
 ## [0.7.5] — 2026-09-18
 
 ### Changed
