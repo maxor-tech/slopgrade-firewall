@@ -3,6 +3,23 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.7.8] — 2026-09-19
+
+Runner-safety hardening of the paid pro-extractor path, from a wider adversarial security review.
+
+### Security
+- **The closed-source pro bundle is fetched ONLY from the canonical origin.** A custom `SLOPGRADE_ORIGIN` (staging, or
+  an attacker who set `SLOPGRADE_ALLOW_CUSTOM_ORIGIN`) now falls back to the free packs instead of downloading and
+  executing code from that origin — closing an RCE-via-custom-origin path.
+- **The pro response is size-capped before parsing.** The body is read through a bounded reader (and a `content-length`
+  pre-check) so an oversized/compromised response can no longer OOM the runner (`res.json()` was unbounded).
+- **The bundle is written to a private (0700) unique temp dir with an exclusive (`wx`) flag and removed after import**,
+  closing the predictable-filename symlink/TOCTOU race on shared self-hosted runners.
+
+### Notes
+- These reduce the blast radius of the pro path; the primary control — an Ed25519 signature over the bundle with a
+  pinned public key (so a compromised server / MITM can't ship runnable code at all) — is tracked as the next step.
+
 ## [0.7.7] — 2026-09-19
 
 ### Fixed

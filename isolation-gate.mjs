@@ -18,7 +18,7 @@
 //     /api/ci/pro-extractors (OIDC-proved entitlement), sha256-verified, and run HERE — same zero-egress contract,
 //     a second egress boundary (sanitizeProFingerprints), fail-open to the free packs (loadProPacks below).
 import { pathToFileURL } from "node:url";
-import { writeFileSync, readFileSync, appendFileSync } from "node:fs";
+import { writeFileSync, readFileSync, appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -52,9 +52,9 @@ import { buildWrapperRegistries, resolveImportedWrappers } from "./src/taint-int
 import { firewallVerdict } from "./src/gate-verdict.mjs";
 import { postFindingReview, resolvePrContext } from "./src/pr-suggest.mjs";
 import {
-  resolveOrigin, classifyEnv, validVerdict, sanitizeLogLine, sanitizeFingerprint, sanitizePackFingerprints,
+  resolveOrigin, DEFAULT_ORIGIN, classifyEnv, validVerdict, sanitizeLogLine, sanitizeFingerprint, sanitizePackFingerprints,
   parseLeak, findingLocation, buildSarif, collectPackBlocks, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
-  validProBundleResponse, runProPacks, sanitizeProFingerprints, FREE_PACK_COUNT, MAX_SARIF_RESULTS,
+  validProBundleResponse, runProPacks, sanitizeProFingerprints, FREE_PACK_COUNT, MAX_SARIF_RESULTS, MAX_PRO_BUNDLE_BYTES,
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs,
 } from "./src/client-lib.mjs";
 
@@ -66,6 +66,22 @@ const line = (msg) => console.log(sanitizeLogLine(msg));
 
 async function timedFetch(url, opts) {
   return fetch(url, { ...opts, signal: AbortSignal.timeout(TIMEOUT_MS) });
+}
+
+/** Read a response body to a string with a HARD byte cap — a compromised/oversized pro-bundle response must not OOM the
+ *  runner (res.json() buffers unbounded). Streams the body and aborts past `maxBytes`; falls back to text() if no stream. */
+async function readCappedText(res, maxBytes) {
+  const reader = res.body && typeof res.body.getReader === "function" ? res.body.getReader() : null;
+  if (!reader) { const t = await res.text(); if (Buffer.byteLength(t, "utf8") > maxBytes) throw new Error("response exceeds size cap"); return t; }
+  const chunks = []; let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > maxBytes) { try { await reader.cancel(); } catch { /* ignore */ } throw new Error("response exceeds size cap"); }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 /** Mint the zero-secret OIDC token for `origin` as audience. Returns null on any failure (caller fails open). */
@@ -107,22 +123,35 @@ async function postVerdict(origin, body) {
  */
 async function loadProPacks(origin, oidcToken, root, rel) {
   const none = (note) => ({ wire: {}, packCount: 0, version: null, note });
+  // The pro bundle is closed-source code EXECUTED in the runner (import). Fetch it ONLY from the canonical origin — a
+  // custom origin (staging, or an attacker who set SLOPGRADE_ALLOW_CUSTOM_ORIGIN) must never hand us code to run.
+  if (origin !== DEFAULT_ORIGIN) return none(" (free tier — pro extractors only from the canonical origin)");
   let res;
   try {
     res = await timedFetch(`${origin}/api/ci/pro-extractors`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ oidcToken }) });
   } catch (e) { ghWarn(`pro extractors unreachable (${errMsg(e)}) — running the ${FREE_PACK_COUNT} free packs.`); return none(" (free tier — pro extractors unreachable)"); }
   if (res.status === 402) return none(" (free tier)");
   if (!res.ok) { ghWarn(`pro extractors refused (HTTP ${res.status}) — running the ${FREE_PACK_COUNT} free packs.`); return none(" (free tier — pro extractors refused)"); }
+  // Bound the RAW body BEFORE parsing (res.json() is unbounded → an oversized/compromised response could OOM the runner).
   let j;
-  try { j = await res.json(); } catch { ghWarn("pro extractors: malformed response — running the free packs."); return none(" (free tier — pro extractors malformed)"); }
+  try {
+    const cap = MAX_PRO_BUNDLE_BYTES + 65_536; // the bundle cap + a little JSON-envelope slack
+    const cl = Number(res.headers && typeof res.headers.get === "function" ? res.headers.get("content-length") : NaN);
+    if (Number.isFinite(cl) && cl > cap) throw new Error(`content-length ${cl} exceeds cap`);
+    j = JSON.parse(await readCappedText(res, cap));
+  } catch (e) { ghWarn(`pro extractors: oversized or malformed response (${errMsg(e)}) — running the free packs.`); return none(" (free tier — pro extractors malformed)"); }
   const check = validProBundleResponse(j, (s) => createHash("sha256").update(s).digest("hex"));
   if (!check.ok) { ghWarn(`pro extractors rejected (${check.reason}) — running the ${FREE_PACK_COUNT} free packs.`); return none(" (free tier — pro extractors rejected)"); }
-  let mod;
+  // Write to a PRIVATE (0700) unique temp dir with the EXCLUSIVE flag (no symlink-follow, no clobber), import, then
+  // remove the dir — closes the predictable-name symlink/TOCTOU race on shared self-hosted runners.
+  let mod, dir;
   try {
-    const file = join(tmpdir(), `slopgrade-pro-${j.sha256.slice(0, 16)}.mjs`);
-    writeFileSync(file, j.bundle, "utf8");
+    dir = mkdtempSync(join(tmpdir(), "slopgrade-pro-"));
+    const file = join(dir, "bundle.mjs");
+    writeFileSync(file, j.bundle, { encoding: "utf8", flag: "wx" });
     mod = await import(pathToFileURL(file).href);
   } catch (e) { ghWarn(`pro extractors failed to load (${errMsg(e)}) — running the free packs.`); return none(" (free tier — pro extractors failed to load)"); }
+  finally { if (dir) { try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort cleanup */ } } }
   const packs = Array.isArray(mod?.PRO_PACKS) ? mod.PRO_PACKS : [];
   // The pro walk set adds the infra formats (yaml/tf/json/Dockerfile…) the free CODE_EXTS walk never reads.
   const proFiles = mod?.PRO_WALK_EXTS instanceof RegExp ? walk(root, mod.PRO_WALK_EXTS) : walk(root, CODE_EXTS);

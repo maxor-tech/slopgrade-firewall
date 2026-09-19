@@ -56,10 +56,18 @@ const PRO_BUNDLE = [
   "];",
 ].join("\n");
 const sha = (s) => createHash("sha256").update(s).digest("hex");
-const proResponse = (overrides = {}) => ({
-  ok: true, status: 200,
-  json: async () => ({ ok: true, gateLevel: "paid", version: "test-1", sha256: sha(PRO_BUNDLE), packs: ["demoProFingerprint", "demoSqlFingerprint"], bundle: PRO_BUNDLE, ...overrides }),
-});
+const proResponse = (overrides = {}) => {
+  // Model a real Response: the client reads the body with a bounded stream/text() reader (not res.json()), so the mock
+  // must expose text() + a content-length header, exactly like fetch's Response.
+  const body = { ok: true, gateLevel: "paid", version: "test-1", sha256: sha(PRO_BUNDLE), packs: ["demoProFingerprint", "demoSqlFingerprint"], bundle: PRO_BUNDLE, ...overrides };
+  const text = JSON.stringify(body);
+  return {
+    ok: true, status: 200,
+    headers: { get: (k) => (String(k).toLowerCase() === "content-length" ? String(Buffer.byteLength(text, "utf8")) : null) },
+    json: async () => body,
+    text: async () => text,
+  };
+};
 
 const VERDICT = {
   ok: true, pattern: "none", tenantKey: null, conformancePct: null, hardLeaks: 0, byId: 0, reliable: false,
@@ -124,6 +132,29 @@ test("a pro bundle whose sha256 does not match is REJECTED : nothing evaluated, 
     assert.match(text, /22 detector packs \(free tier — pro extractors rejected\)/);
     assert.equal(JSON.parse(calls[2].opts.body).demoProFingerprint, undefined);
   }, proResponse({ sha256: sha("something else") }));
+});
+
+test("an OVERSIZED pro response is rejected BEFORE parse (size cap) — free packs, the runner never OOMs", async () => {
+  const huge = {
+    ok: true, status: 200,
+    headers: { get: (k) => (String(k).toLowerCase() === "content-length" ? String(50 * 1024 * 1024) : null) },
+    json: async () => ({}), text: async () => "{}",
+  };
+  await withStubbedNetwork(VERDICT, async ({ calls, out }) => {
+    const code = await main(["--gate"], CI_ENV);
+    assert.equal(code, 0);
+    assert.match(out.join("\n"), /oversized or malformed response/);
+    assert.equal(JSON.parse(calls[2].opts.body).demoProFingerprint, undefined); // pro bundle never evaluated
+  }, huge);
+});
+
+test("the pro bundle is fetched ONLY from the canonical origin — a custom origin gets free packs, never runs fetched code", async () => {
+  await withStubbedNetwork(VERDICT, async ({ calls, out }) => {
+    const code = await main(["--gate"], { ...CI_ENV, SLOPGRADE_ORIGIN: "https://evil.example", SLOPGRADE_ALLOW_CUSTOM_ORIGIN: "1" });
+    assert.equal(code, 0);
+    assert.ok(calls.every((c) => !c.url.endsWith("/api/ci/pro-extractors")), "a custom origin must never be asked for the closed-source pro bundle");
+    assert.match(out.join("\n"), /only from the canonical origin/);
+  }, proResponse());
 });
 
 test("a 5xx / unreachable pro endpoint never costs the verdict (fail-open to the free packs)", async () => {
