@@ -3,6 +3,13 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.2] — 2026-09-26
+
+### Fixed
+- **Wrong price in the CI log and the README.** Both said « $8–29/repo/mo (volume pricing) »; the price is graduated —
+  $24/repo/mo for repos 1–4, $15 for 5–10, $11 for 11–20 (20 repos = $296/mo) — or Team $299/mo flat for unlimited
+  repos (source: slopgrade `lib/pricing.ts` FIREWALL_TIERS / TEAM_FLAT). 14-day free trial, no card, unchanged.
+
 ## [0.9.1] — 2026-09-26
 
 ### Fixed

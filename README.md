@@ -184,7 +184,7 @@ public repos and on your first private repo. The **hosted** [slopGrade Firewall]
 Your **first private repo** blocks for free on the same classes as a public repo. **Further** private repos run
 advisory-only: for each class you see how many findings there are and one located sample, and the build is never
 blocked. Every class, the full list, the rule names and the block on them are the hosted gate:
-**$8–29/repo/mo** (volume pricing) — **14-day free trial, no card**. Users unlimited; billed per repo, never per
+**$24/repo/mo for repos 1–4, $15 for 5–10, $11 for 11–20** (graduated — 20 repos = $296/mo), or **Team $299/mo flat** for unlimited repos — **14-day free trial, no card**. Users unlimited; billed per repo, never per
 seat. → **[slopgrade.ai/firewall](https://www.slopgrade.ai/firewall)**
 
 ## Show it in your README
