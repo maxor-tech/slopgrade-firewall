@@ -25,8 +25,9 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: maxor-tech/slopgrade-firewall@<sha>   # pin the commit SHA (a tag can be re-pointed; a SHA cannot)
         with:
-          # firewall-mode: "gate"      # DEFAULT — block on a hard leak or a blocking finding (public repos are gated
-          #                              free on cross-tenant leaks; a non-entitled repo stays advisory, never blocked)
+          # firewall-mode: "gate"      # DEFAULT — block on a hard leak or a blocking finding. Free: public repos and your
+          #                              FIRST private repo block on cross-tenant + the 22 OSS classes; other repos
+          #                              without a paid slot stay advisory, never blocked
           # firewall-mode: "advisory"  # opt into report-only: report leaks, never block
           # firewall-mode: "off"       # disable
           # strict: "true"             # with gate: fail the build if no verdict is available (default: fail open)
@@ -50,7 +51,7 @@ The step exposes the verdict so a later step can act on it (post to Slack, gate 
 | `hard-leaks` | `2` | count of hard cross-tenant leaks |
 | `blocking-findings` | `3` | count of blocking (critical/high) security findings |
 | `conformance` | `94.2` | tenant-scoping conformance %, or empty |
-| `entitled` | `true` | public free gate or a paid slot |
+| `entitled` | `true` | the gate is active: public repo, your free private repo, or a paid slot |
 | `sarif-uploaded` | `true` | were findings sent to Code Scanning this run? |
 
 ```yaml
@@ -97,9 +98,11 @@ marked ✓ (the four unmarked — XXE, insecure deserialization, hardcoded secre
    clean run uploads an empty report, so fixed alerts auto-resolve. Omit the permission (or `upload-sarif: "false"`)
    to skip it — the upload quietly no-ops, never breaking the build.
 5. **Exit** — `advisory` always exits 0 (reports only). `gate` (the default) blocks (exit 1) **only** on a `reliable`
-   cross-tenant hard leak in an entitled repo, **or** a blocking (critical/high) detector finding. A non-entitled repo
-   in `gate` mode stays advisory — the paywall fails open, so a free repo is never blocked. The whole decision is the
-   pure, tested [`firewallVerdict`](./src/gate-verdict.mjs).
+   cross-tenant hard leak in an entitled repo, **or** a blocking (critical/high) detector finding the server counted
+   for this repo, **or** (opt-in `deep-scan-block`) a new deep-scan finding. **Entitled** = a public repo, your **first
+   private repo** (the free allocation — both block on cross-tenant + the 22 OSS classes), or a paid slot (every
+   calibrated class). Any other repo in `gate` mode stays advisory — the paywall fails open, it is never blocked. The
+   whole decision is the pure, tested [`firewallVerdict`](./src/gate-verdict.mjs).
 
 > **Fork PRs (external contributors):** GitHub gives the `pull_request` event a **read-only** `GITHUB_TOKEN` on runs
 > from a fork, whatever `permissions:` you declare. The gate still runs (verdict + exit code are unaffected), but the
@@ -148,7 +151,7 @@ shell=True)`). It is the **only** mode in which file contents leave your runner,
 ## Fail-open, always
 
 A missing OIDC token, a timeout (each call bounded at 20s), a network failure, or a server error **never** breaks
-your build. The only `exit 1` is a real, `reliable`, hard leak in `gate` mode on an entitled repo. For teams that
+your build. The only `exit 1` is a real finding in `gate` mode on an entitled repo (step 5 above). For teams that
 would rather the control not silently self-disable, `strict: "true"` fails **closed** when no verdict is available.
 
 ## What leaves your runner (and what does not)
@@ -164,21 +167,23 @@ would rather the control not silently self-disable, `strict: "true"` fails **clo
 
 ## Free vs hosted
 
-The free tier is a real, standalone control — 10 classes, intra-function, zero-egress, and it never blocks a free
-repo. The **hosted** [slopGrade Firewall](https://www.slopgrade.ai/firewall) adds what a local client cannot:
+The free tier is a real, standalone control — 10 classes, intra-function, zero-egress — and it **blocks for free** on
+public repos and on your first private repo. The **hosted** [slopGrade Firewall](https://www.slopgrade.ai/firewall) adds what a local client cannot:
 
 | | Free (this repo) | Hosted |
 |---|---|---|
 | Detection classes | the 10 highest-severity (22 packs) | the full detector catalog (~120 packs) — the extra extractors stream to **your runner** at run time (client ≥ 0.7.0) ; your code still never leaves |
 | Dataflow | intra-function | cross-function + cross-file (interprocedural taint) |
 | False-positive suppression | commodity context checks | calibrated on a large private corpus |
-| Findings shown | per class : the **count** + **one located sample** (`file:line`, rule name withheld) | every finding, rule name + detail |
-| **Private** repos | **advisory only** — never blocked | **blocking gate** |
-| **Public** repos | cross-tenant gate blocks, free ; detector classes advisory (count + sample) | blocking gate on every class |
+| Findings shown | the 22 OSS classes : every finding ; the other classes : the **count** + **one located sample** (`file:line`, rule name withheld) | every finding, rule name + detail |
+| **Public** repos | cross-tenant gate + the 22 OSS classes **block, free** | blocking gate on every calibrated class |
+| **Your first private repo** | cross-tenant gate + the 22 OSS classes **block, free** (one per account) | blocking gate on every calibrated class |
+| **Other private repos** | **advisory only** — never blocked | **blocking gate** on every calibrated class |
 | Verified auto-fix + inline PR feed | feed : the located sample per class | full feed + verified auto-fix |
 
-On a **private** repo the free tier runs advisory-only: for each class you see how many findings there are and one
-located sample, and the build is never blocked. The full list, the rule names and the block are the hosted gate:
+Your **first private repo** blocks for free on the same classes as a public repo. **Further** private repos run
+advisory-only: for each class you see how many findings there are and one located sample, and the build is never
+blocked. Every class, the full list, the rule names and the block on them are the hosted gate:
 **$8–29/repo/mo** (volume pricing) — **14-day free trial, no card**. Users unlimited; billed per repo, never per
 seat. → **[slopgrade.ai/firewall](https://www.slopgrade.ai/firewall)**
 
