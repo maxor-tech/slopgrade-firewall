@@ -3,6 +3,29 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.8.0] — 2026-09-26
+
+The hosted taint engine, as an opt-in: cross-function flows the intra-function packs cannot see.
+
+### Added
+- **`deep-scan` input / `--deep-scan` flag (default `false`, paid repos).** Sends the source of a bounded set of
+  sink-bearing files (≤ 40 files / 2M chars — extractor-hit files first, then files with a sink marker; a file with no
+  sink marker is never sent) to `https://app.slopgrade.ai/api/ci/heisen`, which forwards it to the heisen taint engine
+  and drops it (never logged, never stored). Findings follow a request value to its sink **across functions**.
+  Measured on a paid sandbox with all 122 packs loaded: a request → helper → `check_output(shell=True)` flow reported
+  by no pack is found by the deep scan.
+- `--print-payload` lists the files the deep scan would send (`deepScan.files`), so the audit promise covers it.
+
+### Security
+- **The one mode that sends code is off unless you turn it on**, goes only to the canonical origin (never a custom
+  `SLOPGRADE_ORIGIN`), and a server answer can only annotate a file this run actually sent. README, action and package
+  descriptions now say « no source egress **by default** ».
+
+### Behavior
+- Advisory: deep-scan findings annotate as warnings and never fail the check (calibration window). A finding on a line
+  another pack already reported is counted as a confirmation, not annotated twice. `402` (not paid), 5xx, network or a
+  malformed answer are warnings — the verdict and exit code are never affected.
+
 ## [0.7.9] — 2026-09-19
 
 The primary control for the paid pro-extractor path: cryptographic authenticity, not just integrity.
