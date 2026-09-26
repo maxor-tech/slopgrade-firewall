@@ -1,10 +1,10 @@
 name: "slopGrade Firewall"
-description: "Deterministic tenant-isolation leak detection for CI — $0, zero source egress by default (opt-in deep-scan excepted), zero secrets (GitHub OIDC). Advisory free for every public repo; the blocking gate is free for open-source."
+description: "Deterministic tenant-isolation leak detection for CI — $0, zero source egress by default (opt-in deep-scan excepted), zero secrets (GitHub OIDC). The blocking gate is free for public repos and your first private repo (cross-tenant + the 22 OSS classes)."
 author: "Maxor Global LLC"
 branding: { icon: "shield", color: "green" }
 inputs:
   firewall-mode:
-    description: "gate (DEFAULT — blocks the check on a hard cross-tenant leak OR a blocking security finding (injection/crypto/secrets…), when the repo is entitled: public is free for the cross-tenant gate, a paid slot unlocks the detector packs; a non-entitled repo stays advisory, never blocked) | advisory (reports everything, never blocks) | off. Findings post as an inline PR comment feed when the caller grants `permissions: pull-requests: write`."
+    description: "gate (DEFAULT — blocks the check on a hard cross-tenant leak OR a blocking security finding (injection/crypto/secrets…), when the repo is entitled: public repos and your first private repo block free on cross-tenant + the 22 OSS classes, a paid slot unlocks every calibrated class; any other repo stays advisory, never blocked) | advisory (reports everything, never blocks) | off. Findings post as an inline PR comment feed when the caller grants `permissions: pull-requests: write`."
     required: false
     default: "gate"
   strict:
