@@ -1,9 +1,10 @@
 # slopGrade Firewall — CI security-leak detection
 
 The **open-source client** of the [slopGrade Firewall](https://www.slopgrade.ai/firewall). It runs in your CI,
-detects high-severity security leaks in the diff. **Your source code and file contents never leave your runner** —
-only a structural fingerprint (table/column names + `{file, line, kind}` locations, no code) is posted for
-classification. This repository is the exact code that runs in your runner: **audit every line before you pin it.**
+detects high-severity security leaks in the diff. **By default, your source code and file contents never leave your
+runner** — only a structural fingerprint (table/column names + `{file, line, kind}` locations, no code) is posted for
+classification. The one exception is the opt-in [`deep-scan`](#deep-scan--opt-in-paid-the-one-mode-that-sends-code)
+(off unless you turn it on). This repository is the exact code that runs in your runner: **audit every line before you pin it.**
 
 ## Add it to your repo
 
@@ -31,6 +32,8 @@ jobs:
           # strict: "true"             # with gate: fail the build if no verdict is available (default: fail open)
           # upload-sarif: "false"          # opt out of the Code Scanning upload (default: true — needs security-events: write)
           # sarif-file: "firewall.sarif"   # ALSO write the SARIF to a file (for a build artifact); upload runs regardless
+          # deep-scan: "true"              # OPT-IN, paid: ALSO send the source of sink-bearing files to the hosted taint
+          #                                  engine (cross-function flows). Default false — see "Deep scan" below
 ```
 
 Or run it directly: `node isolation-gate.mjs --print-payload` (audit exactly what would leave the runner).
@@ -119,6 +122,25 @@ is dropped). `--print-payload` inside CI performs the same ask, so what it print
 the paid tier. Every run prints a coverage line — `N detector packs (free tier | paid) · M files scanned` — so a
 clean run is never mistaken for a run that scanned nothing.
 
+### Deep scan — opt-in, paid, the one mode that sends code
+
+`deep-scan: "true"` (client ≥ 0.8.0, default **false**) adds slopGrade's hosted **taint engine** (heisen): it follows a
+request value from the line it is read to the line it reaches a sink, **across functions** — the flows the
+intra-function packs above cannot see (e.g. a request parameter passed to a helper that runs `check_output(…,
+shell=True)`). It is the **only** mode in which file contents leave your runner, so it is off unless you set it:
+
+- **What is sent** — the source of at most **40 files / 2M characters**: first the files where an extractor already
+  found a sink, then any Python / JS-TS / Go / Java / Ruby file containing a sink marker (shell, eval, SQL, file,
+  redirect, outbound request, template, unsafe deserializer). A file with no sink marker is never sent.
+  `--print-payload` lists the exact files (under `deepScan.files`) before anything is sent.
+- **Where** — only to the canonical `https://app.slopgrade.ai/api/ci/heisen` (never to a custom origin), with the same
+  OIDC proof. Server-side the code is forwarded to the engine and **dropped** — never logged, never stored; only
+  `file:line`, the CWE and the engine's one-line evidence are kept for your `/ci` history.
+- **Who** — paid repos. A non-paid repo gets `402`: a warning, nothing is analysed, the run is unaffected.
+- **Advisory** — findings annotate as **warnings** (log, PR review, SARIF) and never fail the check while the engine is
+  in its calibration window. A finding on a line another pack already reported is counted as a confirmation, not
+  annotated twice. Any failure (timeout, 5xx, malformed answer) is a warning — the verdict is never affected.
+
 ## Fail-open, always
 
 A missing OIDC token, a timeout (each call bounded at 20s), a network failure, or a server error **never** breaks
@@ -127,8 +149,9 @@ would rather the control not silently self-disable, `strict: "true"` fails **clo
 
 ## What leaves your runner (and what does not)
 
-- **File contents never leave.** The client reads files locally and emits only source-derived **metadata**: file
-  paths and `{file, line, kind}` — never the code, never a secret value. Audit it: `node isolation-gate.mjs
+- **File contents never leave — unless you opt into `deep-scan`.** By default the client reads files locally and emits
+  only source-derived **metadata**: file paths and `{file, line, kind}` — never the code, never a secret value. With
+  `deep-scan: "true"` the source of the bounded, listed set of sink-bearing files is sent (see *Deep scan* above). Audit it: `node isolation-gate.mjs
   --print-payload` prints the exact payload that would be posted, then exits without contacting the server.
 - **No stored secret.** Identity is a short-lived, GitHub-signed OIDC token, audience-bound to the server origin.
 - **Endpoint is fixed.** A custom `SLOPGRADE_ORIGIN` is refused (the run goes dry) unless you explicitly set

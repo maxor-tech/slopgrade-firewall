@@ -1,5 +1,5 @@
 name: "slopGrade Firewall"
-description: "Deterministic tenant-isolation leak detection for CI — $0, zero source egress, zero secrets (GitHub OIDC). Advisory free for every public repo; the blocking gate is free for open-source."
+description: "Deterministic tenant-isolation leak detection for CI — $0, zero source egress by default (opt-in deep-scan excepted), zero secrets (GitHub OIDC). Advisory free for every public repo; the blocking gate is free for open-source."
 author: "Maxor Global LLC"
 branding: { icon: "shield", color: "green" }
 inputs:
