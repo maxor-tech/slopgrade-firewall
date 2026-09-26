@@ -47,3 +47,14 @@ test("packBlocking accepts a string count (env/JSON passthrough) → blocks", ()
   assert.equal(v.block, true);
   assert.equal(v.kind, "gate-blocked");
 });
+
+test("deep-scan-block: a NEW deep-scan finding blocks in gate mode, never in advisory; absent defaults to 0", () => {
+  assert.deepEqual(firewallVerdict({ gateMode: true, reliable: false, hardLeaks: 0, gateEntitled: true, packBlocking: 0, deepBlocking: 1 }),
+    { block: true, kind: "gate-blocked" });
+  assert.deepEqual(firewallVerdict({ gateMode: false, reliable: false, hardLeaks: 0, gateEntitled: true, deepBlocking: 3 }),
+    { block: false, kind: "advisory" }, "advisory never blocks, even when the owner opted into deep-scan-block");
+  assert.deepEqual(firewallVerdict({ gateMode: true, reliable: false, hardLeaks: 0, gateEntitled: true, packBlocking: 0 }),
+    { block: false, kind: "gate-pass" }, "no deepBlocking field (opt-in off / old client) → unchanged");
+  assert.deepEqual(firewallVerdict({ gateMode: true, reliable: false, hardLeaks: 0, gateEntitled: true, deepBlocking: 0 }),
+    { block: false, kind: "gate-pass" });
+});

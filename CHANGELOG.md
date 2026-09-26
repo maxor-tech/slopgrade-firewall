@@ -3,6 +3,21 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.0] — 2026-09-26
+
+Blocking on the deep scan — your choice, with the cost stated.
+
+### Added
+- **`deep-scan-block` input / `--deep-scan-block` flag (default `false`).** With `deep-scan: "true"` and
+  `firewall-mode: gate`, a **new** deep-scan finding (a `file:line` no detector pack reported) fails the check: it
+  annotates as an error, counts in the `blocking-findings` output, and the block message names it. Measured block
+  precision of the taint engine on held-out labeled code: 68/72 (~94%); 17/21 on the strictest slice (CodeQL Python).
+- A finding that only confirms a line a pack already reported never counts twice.
+
+### Unchanged
+- Default behavior: the deep scan stays advisory; without `deep-scan`, no source leaves the runner. `--deep-scan-block`
+  without `--deep-scan` is ignored with a warning. Advisory mode never blocks.
+
 ## [0.8.0] — 2026-09-26
 
 The hosted taint engine, as an opt-in: cross-function flows the intra-function packs cannot see.

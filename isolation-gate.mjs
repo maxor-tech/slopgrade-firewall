@@ -170,16 +170,18 @@ async function loadProPacks(origin, oidcToken, root, rel) {
 }
 
 const HELP = `slopGrade Firewall — CI leak detection (free tier: 10 flagship classes · paid repos: the full catalogue, extracted in your runner)
-Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <path>] [--deep-scan] [--help]
+Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <path>] [--deep-scan [--deep-scan-block]] [--help]
   --gate           block (exit 1) on a reliable hard leak in an entitled repo (default: advisory, never blocks)
   --strict         with --gate, fail CLOSED (exit 1) when no server verdict is available (default: fail open)
   --print-payload  print the exact structural fingerprint that would be sent, then exit (audit what leaves the runner)
   --sarif <path>   also write a SARIF report of the leaks (upload with github/codeql-action/upload-sarif)
   --deep-scan      OPT-IN, paid repos: ALSO send the SOURCE of the sink-bearing files (≤ 40) to the hosted taint engine
                    (heisen). The only mode where code leaves the runner; --print-payload lists the files. Advisory.
+  --deep-scan-block  OPT-IN, with --deep-scan and --gate: a NEW deep-scan finding (one no pack reported) BLOCKS the build.
+                   Measured block precision ~94% on held-out labeled code (~1 false block in 17) — off by default.
   --help           show this help
 Exit codes: 1 only on a gate-blocked verdict (or --strict with no verdict); 0 otherwise (fail open).`;
-const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan"]);
+const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-block"]);
 
 export async function main(argv = [], env = process.env) {
   if (argv.includes("--help")) { console.log(HELP); return 0; }
@@ -190,6 +192,8 @@ export async function main(argv = [], env = process.env) {
   const strict = argv.includes("--strict");
   const printPayload = argv.includes("--print-payload");
   const deepScan = argv.includes("--deep-scan");
+  const deepBlock = deepScan && argv.includes("--deep-scan-block");
+  if (argv.includes("--deep-scan-block") && !deepScan) console.log("::warning title=slopGrade Firewall::--deep-scan-block has no effect without --deep-scan (deep-scan: \"true\").");
   const root = env.GITHUB_WORKSPACE || process.cwd();
   const noVerdict = () => (strict && gateMode ? 1 : 0);
 
@@ -343,7 +347,7 @@ export async function main(argv = [], env = process.env) {
 
   // 5b. OPT-IN deep scan (heisen taint engine) — source only ever goes to the CANONICAL origin, like the pro bundle
   //     only ever comes from it. Fail-open on every path: a deep-scan hiccup never touches the verdict above.
-  let deepRows = [], deepLine = null;
+  let deepRows = [], deepLine = null, deepBlocking = 0;
   if (deep) {
     if (origin !== DEFAULT_ORIGIN) ghWarn("deep scan skipped — source is only ever sent to the canonical slopGrade origin.");
     else if (!deep.units.length) deepLine = "no sink-bearing file in an engine-modelled language — nothing sent.";
@@ -404,12 +408,16 @@ export async function main(argv = [], env = process.env) {
 
   if (deepLine !== null) {
     const { fresh, confirmed } = splitAgainstFeed(deepRows, feed);
-    line(`
-slopGrade Firewall — deep scan (heisen taint engine, advisory): ${deepLine}${deepRows.length ? ` · ${fresh.length} new finding(s), ${confirmed.length} confirming an existing one` : " · 0 finding(s)"}`);
+    // Opt-in `deep-scan-block`: a NEW finding (no pack reported that line) is blocking (high) and counts toward the gate;
+    // otherwise it stays an advisory warning. A confirming row is never re-annotated (its pack already reported it).
+    deepBlocking = deepBlock ? fresh.length : 0;
+    const mode = deepBlock ? "blocking — opted in" : "advisory";
+    line(`\nslopGrade Firewall — deep scan (heisen taint engine, ${mode}): ${deepLine}${deepRows.length ? ` · ${fresh.length} new finding(s), ${confirmed.length} confirming an existing one` : " · 0 finding(s)"}`);
     for (const f of fresh) {
-      console.log(`::warning file=${wfFile(f.file)},line=${f.line} title=slopGrade Firewall deep scan::[${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(f.detail)}`);
-      line(`    - ${sanitizeLogLine(f.file)}:${f.line}  [${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(f.detail)}`);
-      feed.push(f);
+      const row = deepBlock ? { ...f, severity: "high" } : f;
+      console.log(`::${deepBlock ? "error" : "warning"} file=${wfFile(row.file)},line=${row.line} title=slopGrade Firewall deep scan::[${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}`);
+      line(`    - ${sanitizeLogLine(row.file)}:${row.line}  [${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}`);
+      feed.push(row);
     }
   }
 
@@ -455,14 +463,14 @@ slopGrade Firewall — deep scan (heisen taint engine, advisory): ${deepLine}${d
   // 7. Exit decision — the PURE, tested free/paid boundary. Blocks on --gate + EITHER a reliable+entitled cross-tenant
   // hard leak OR >=1 blocking detector finding (packBlocking, critical|high — already server-paywalled to 0 unless
   // entitled). The build-block message NAMES the real reason(s).
-  const decision = firewallVerdict({ gateMode, reliable: v.reliable, hardLeaks: v.hardLeaks, gateEntitled: v.gateEntitled, packBlocking: v.packBlocking });
+  const decision = firewallVerdict({ gateMode, reliable: v.reliable, hardLeaks: v.hardLeaks, gateEntitled: v.gateEntitled, packBlocking: v.packBlocking, deepBlocking });
   // Action outputs — surface the verdict + counts to downstream steps (a Slack alert, gating another job, a badge).
   // Fail-soft, no-op off CI. Emitted here (once the verdict is known) — the no-verdict early returns above set none.
   emitOutputs(env, {
     verdict: decision.kind,                    // advisory | gate-blocked | gate-unpaid | gate-pass
     blocked: decision.block === true,          // did the gate fail the build?
     "hard-leaks": Number(v.hardLeaks) || 0,
-    "blocking-findings": Number(v.packBlocking) || 0,
+    "blocking-findings": (Number(v.packBlocking) || 0) + deepBlocking,
     conformance: v.conformancePct == null ? "" : Number(v.conformancePct).toFixed(1),
     entitled: v.gateEntitled === true,
     "sarif-uploaded": sarifUploaded === "uploaded",
@@ -479,6 +487,7 @@ slopGrade Firewall — deep scan (heisen taint engine, advisory): ${deepLine}${d
     const reasons = [];
     if (v.reliable && v.hardLeaks > 0 && v.gateEntitled) reasons.push(`${v.hardLeaks} hard cross-tenant leak(s)`);
     if (Number(v.packBlocking) > 0) reasons.push(`${v.packBlocking} blocking security finding(s) (injection/crypto/secrets…)`);
+    if (deepBlocking > 0) reasons.push(`${deepBlocking} deep-scan finding(s) (deep-scan-block opted in)`);
     console.log(`::error title=slopGrade Firewall::${reasons.join(" + ") || `${v.hardLeaks} hard cross-tenant leak(s)`} — build blocked.`);
     return 1;
   }
