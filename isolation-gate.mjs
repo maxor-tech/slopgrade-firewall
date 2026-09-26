@@ -498,7 +498,7 @@ export async function main(argv = [], env = process.env) {
     return 1;
   }
   if (decision.kind === "gate-unpaid") {
-    line(`\nslopGrade Firewall: ${v.hardLeaks} hard leak(s) found, but this repo is ADVISORY (no paid gate) — non-blocking. Enable the gate to block ($8–29/repo/mo · 14-day free trial, no card): ${origin}/ci`);
+    line(`\nslopGrade Firewall: ${v.hardLeaks} hard leak(s) found, but this repo is ADVISORY (no paid gate) — non-blocking. Enable the gate to block (from $24/repo/mo, graduated down to $11 · Team $299/mo unlimited · 14-day free trial, no card): ${origin}/ci`);
     return 0;
   }
   line(`\nslopGrade Firewall: ${gateMode ? "no blocking hard leaks." : "advisory (non-blocking)."}`);
