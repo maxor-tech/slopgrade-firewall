@@ -57,7 +57,7 @@ import {
   validProBundleResponse, verifyBundleSig, PRO_BUNDLE_PUBKEY, runProPacks, sanitizeProFingerprints, FREE_PACK_COUNT, MAX_SARIF_RESULTS, MAX_PRO_BUNDLE_BYTES,
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs,
 } from "./src/client-lib.mjs";
-import { sinkFiles, selectDeepUnits, requestDeepScan, heisenFeed, splitAgainstFeed } from "./src/deep-scan.mjs";
+import { sinkFiles, selectDeepUnits, requestDeepScan, heisenFeed, splitAgainstFeed, isPaidVerdict, deepScanNudge } from "./src/deep-scan.mjs";
 
 const CODE_EXTS = /\.(py|ts|tsx|js|jsx|mjs|cjs|sql|rb|go|php|prisma|java|cs|rs|c|cc|cpp|h|hpp|kt|scala|ex|exs)$/;
 const TIMEOUT_MS = 20_000;
@@ -341,9 +341,15 @@ export async function main(argv = [], env = process.env) {
   // for a genuinely-free repo. But if the server's verdict says this repo IS entitled (`gateEntitled`) while the pro
   // bundle did NOT load (pro.packCount === 0), the entitlement chain broke (livemode drift / unassigned slot / unlinked
   // repo) and a PAYING customer is silently getting only the free packs. We KNOW it's paid here, so say so LOUDLY.
-  if (v.gateEntitled === true && pro.packCount === 0) {
+  // « Paid » = gateLevel "paid" (isPaidVerdict): `gateEntitled` is ALSO true for public and free-oss repos, which never
+  // get the pro bundle — keying on it told every public repo « this repo is PAID » on every run.
+  const paid = isPaidVerdict(v);
+  if (paid && pro.packCount === 0) {
     ghWarn(`this repo is PAID (entitled) but the pro extractors did not load — you are getting only the ${FREE_PACK_COUNT} free packs, not the full catalogue. Check the repo's slot assignment + plan at ${origin}/ci (or re-run — a transient server error also lands here).`);
   }
+  // A paid repo that has not opted into the deep scan hears about it where it already looks — the CI log.
+  const nudge = deepScanNudge({ deepScan, paid });
+  if (nudge) console.log(`::notice title=slopGrade Firewall::${sanitizeLogLine(nudge)}`);
 
   // 5b. OPT-IN deep scan (heisen taint engine) — source only ever goes to the CANONICAL origin, like the pro bundle
   //     only ever comes from it. Fail-open on every path: a deep-scan hiccup never touches the verdict above.

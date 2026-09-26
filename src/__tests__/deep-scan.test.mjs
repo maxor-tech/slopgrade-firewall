@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  sinkFiles, selectDeepUnits, validHeisenResponse, evidenceLine, heisenFeed, requestDeepScan, splitAgainstFeed,
+  sinkFiles, selectDeepUnits, validHeisenResponse, evidenceLine, heisenFeed, requestDeepScan, splitAgainstFeed, deepScanNudge, isPaidVerdict,
   DEEP_MAX_UNITS, DEEP_MAX_UNIT_CHARS, DEEP_MAX_TOTAL_CHARS,
 } from "../deep-scan.mjs";
 
@@ -94,4 +94,21 @@ test("splitAgainstFeed: a deep-scan row on a location another pack already repor
   const { fresh, confirmed } = splitAgainstFeed(rows, feed);
   assert.deepEqual(fresh.map((r) => r.line), [22]);
   assert.deepEqual(confirmed.map((r) => r.line), [10]);
+});
+
+test("isPaidVerdict: gateLevel is exact — public / free-oss are entitled but NOT paid; gateEntitled only as a fallback", () => {
+  assert.equal(isPaidVerdict({ gateLevel: "paid", gateEntitled: true }), true);
+  assert.equal(isPaidVerdict({ gateLevel: "public", gateEntitled: true }), false, "a public repo is entitled, not paid");
+  assert.equal(isPaidVerdict({ gateLevel: "free-oss", gateEntitled: true }), false, "the free private repo is not paid");
+  assert.equal(isPaidVerdict({ gateLevel: "none", gateEntitled: false }), false);
+  assert.equal(isPaidVerdict({ gateEntitled: true }), true, "old server without gateLevel: previous behavior");
+  assert.equal(isPaidVerdict(null), false);
+});
+
+test("deepScanNudge: only a PAID repo without the deep scan is invited", () => {
+  const msg = deepScanNudge({ deepScan: false, paid: true });
+  assert.match(msg, /deep-scan: "true"/);
+  assert.match(msg, /Opt-in/);
+  assert.equal(deepScanNudge({ deepScan: true, paid: true }), null, "already on");
+  assert.equal(deepScanNudge({ deepScan: false, paid: false }), null, "public / free-oss / none: the deep scan would 402");
 });

@@ -3,6 +3,20 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.1] — 2026-09-26
+
+### Fixed
+- **Public and free-private repos were told « this repo is PAID … the pro extractors did not load » on every run.**
+  The guard keyed on `gateEntitled`, which is also true for public and free-oss repos (they have the free gate, never the
+  paid catalogue). It now keys on the server's exact `gateLevel === "paid"` (falls back to `gateEntitled` for a server
+  that predates it).
+- README / action.yml: the free tier **does** block — on public repos and on your first private repo (cross-tenant +
+  the 22 OSS classes). The previous text said private repos never block.
+
+### Added
+- A paid repo that has not opted into the deep scan gets one `::notice` in the CI log saying how to enable it. Public
+  and free-oss repos are never invited (the deep scan would answer them `402`).
+
 ## [0.9.0] — 2026-09-26
 
 Blocking on the deep scan — your choice, with the cost stated.
