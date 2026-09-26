@@ -34,6 +34,7 @@ jobs:
           # sarif-file: "firewall.sarif"   # ALSO write the SARIF to a file (for a build artifact); upload runs regardless
           # deep-scan: "true"              # OPT-IN, paid: ALSO send the source of sink-bearing files to the hosted taint
           #                                  engine (cross-function flows). Default false — see "Deep scan" below
+          # deep-scan-block: "true"        # with deep-scan + gate: a NEW deep-scan finding fails the check (default false)
 ```
 
 Or run it directly: `node isolation-gate.mjs --print-payload` (audit exactly what would leave the runner).
@@ -137,9 +138,12 @@ shell=True)`). It is the **only** mode in which file contents leave your runner,
   OIDC proof. Server-side the code is forwarded to the engine and **dropped** — never logged, never stored; only
   `file:line`, the CWE and the engine's one-line evidence are kept for your `/ci` history.
 - **Who** — paid repos. A non-paid repo gets `402`: a warning, nothing is analysed, the run is unaffected.
-- **Advisory** — findings annotate as **warnings** (log, PR review, SARIF) and never fail the check while the engine is
-  in its calibration window. A finding on a line another pack already reported is counted as a confirmation, not
-  annotated twice. Any failure (timeout, 5xx, malformed answer) is a warning — the verdict is never affected.
+- **Advisory by default, blocking if you choose** — findings annotate as **warnings** (log, PR review, SARIF) and never
+  fail the check. Set `deep-scan-block: "true"` (with `firewall-mode: gate`) to make a **new** deep-scan finding — one no
+  detector pack reported — **fail the check**. What that costs, measured on labeled code the engine was not tuned on:
+  its blocks are right **68 of 72 (~94%)** overall, **17 of 21** on the strictest slice (CodeQL Python) — roughly one
+  false block in 17. A finding on a line another pack already reported is counted as a confirmation, not annotated or
+  counted twice. Any failure (timeout, 5xx, malformed answer) is a warning — the verdict is never affected.
 
 ## Fail-open, always
 
