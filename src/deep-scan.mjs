@@ -95,6 +95,27 @@ export function splitAgainstFeed(rows, feed) {
 }
 
 /**
+ * Is this repo on the PAID tier? The server's `gateLevel` ("paid" | "public" | "free-oss" | "none") is exact;
+ * `gateEntitled` is also true for public and free-oss repos (they have the free gate but not the paid catalogue), so it
+ * is only a fallback for a server that predates `gateLevel`.
+ */
+export function isPaidVerdict(v) {
+  if (v && typeof v.gateLevel === "string") return v.gateLevel === "paid";
+  return !!v && v.gateEntitled === true;
+}
+
+/**
+ * The one-line invitation a PAID repo sees when it has not opted into the deep scan — in the CI log, where the owner
+ * already looks (no new screen). Public / free-oss repos are never invited (the deep scan would answer them 402).
+ * null = nothing to say.
+ */
+export function deepScanNudge({ deepScan, paid }) {
+  if (deepScan || paid !== true) return null;
+  return "Deep scan available on this paid repo: add `deep-scan: \"true\"` to follow request values across functions "
+    + "(flows the packs above cannot see). Opt-in — the one mode that sends source; see the Action README.";
+}
+
+/**
  * POST the units; `post(url, body)` → {status, json()} is injected (timedFetch in the client). Returns
  * {state: "ok", response} | {state: "plan-required"} | {state: "unavailable", status?} — never throws.
  */
