@@ -57,6 +57,7 @@ import {
   validProBundleResponse, verifyBundleSig, PRO_BUNDLE_PUBKEY, runProPacks, sanitizeProFingerprints, FREE_PACK_COUNT, MAX_SARIF_RESULTS, MAX_PRO_BUNDLE_BYTES,
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs,
 } from "./src/client-lib.mjs";
+import { sinkFiles, selectDeepUnits, requestDeepScan, heisenFeed } from "./src/deep-scan.mjs";
 
 const CODE_EXTS = /\.(py|ts|tsx|js|jsx|mjs|cjs|sql|rb|go|php|prisma|java|cs|rs|c|cc|cpp|h|hpp|kt|scala|ex|exs)$/;
 const TIMEOUT_MS = 20_000;
@@ -169,14 +170,16 @@ async function loadProPacks(origin, oidcToken, root, rel) {
 }
 
 const HELP = `slopGrade Firewall — CI leak detection (free tier: 10 flagship classes · paid repos: the full catalogue, extracted in your runner)
-Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <path>] [--help]
+Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <path>] [--deep-scan] [--help]
   --gate           block (exit 1) on a reliable hard leak in an entitled repo (default: advisory, never blocks)
   --strict         with --gate, fail CLOSED (exit 1) when no server verdict is available (default: fail open)
   --print-payload  print the exact structural fingerprint that would be sent, then exit (audit what leaves the runner)
   --sarif <path>   also write a SARIF report of the leaks (upload with github/codeql-action/upload-sarif)
+  --deep-scan      OPT-IN, paid repos: ALSO send the SOURCE of the sink-bearing files (≤ 40) to the hosted taint engine
+                   (heisen). The only mode where code leaves the runner; --print-payload lists the files. Advisory.
   --help           show this help
 Exit codes: 1 only on a gate-blocked verdict (or --strict with no verdict); 0 otherwise (fail open).`;
-const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif"]);
+const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan"]);
 
 export async function main(argv = [], env = process.env) {
   if (argv.includes("--help")) { console.log(HELP); return 0; }
@@ -186,6 +189,7 @@ export async function main(argv = [], env = process.env) {
   const gateMode = argv.includes("--gate");
   const strict = argv.includes("--strict");
   const printPayload = argv.includes("--print-payload");
+  const deepScan = argv.includes("--deep-scan");
   const root = env.GITHUB_WORKSPACE || process.cwd();
   const noVerdict = () => (strict && gateMode ? 1 : 0);
 
@@ -269,6 +273,10 @@ export async function main(argv = [], env = process.env) {
   // leaves the runner is PROVABLE — a future extractor bug can't grow a source-bearing hit field. This is exactly
   // what --print-payload shows AND what is POSTed, so the audit and the wire agree byte-for-byte.
   const wirePacks = sanitizePackFingerprints(packFingerprints);
+  // OPT-IN deep scan: the files that WOULD leave (source), chosen from the sink-bearing files only. Computed up front so
+  // --print-payload can list them — the audit promise extends to the one mode that sends code.
+  const deep = deepScan ? selectDeepUnits(sinkFiles(packFingerprints), (p) => readFileSync(join(root, p), "utf8")) : null;
+  const deepAudit = deep ? { deepScan: { note: "SOURCE of these files is sent (opt-in --deep-scan)", files: deep.units.map((u) => u.path), chars: deep.chars, skipped: deep.skipped } } : {};
 
   // 2. EXFILTRATION guard — a custom origin would mint a token for an attacker audience. Run DRY unless opted in.
   const { origin, blocked } = resolveOrigin(env);
@@ -279,7 +287,7 @@ export async function main(argv = [], env = process.env) {
   // server (as always). Inside CI it also asks for the pro extractors first (a paid repo runs ~100 more packs), so the
   // printed payload stays byte-for-byte what the POST would carry — the audit promise holds on the paid tier too.
   const serverReachable = !blocked && envState === "ci-ready" && !!sha;
-  if (printPayload && !serverReachable) { console.log(JSON.stringify({ fingerprint, ...wirePacks }, null, 2)); return 0; }
+  if (printPayload && !serverReachable) { console.log(JSON.stringify({ fingerprint, ...wirePacks, ...deepAudit }, null, 2)); return 0; }
   if (blocked) {
     // A dry run is a NO-VERDICT path: --strict must fail closed here too (it promised "exit 1 when no verdict").
     ghWarn(`custom SLOPGRADE_ORIGIN (${origin}) — running DRY: no token minted, nothing uploaded. Set SLOPGRADE_ALLOW_CUSTOM_ORIGIN=1 to allow.`);
@@ -313,7 +321,7 @@ export async function main(argv = [], env = process.env) {
   // The coverage line — printed on EVERY run, clean or not : a run that scanned N files with P packs and found nothing
   // must be distinguishable from a run that scanned nothing (release-audit B-P1-7).
   line(`slopGrade Firewall: ${FREE_PACK_COUNT + pro.packCount} detector packs${pro.note} · ${files.length} files scanned.`);
-  if (printPayload) { console.log(JSON.stringify({ fingerprint, ...wireAll }, null, 2)); return 0; }
+  if (printPayload) { console.log(JSON.stringify({ fingerprint, ...wireAll, ...deepAudit }, null, 2)); return 0; }
 
   // 5. POST (time-bounded; body size-capped).
   const body = JSON.stringify({ oidcToken, sha, fingerprint, ...wireAll, clientVersion: CLIENT_VERSION, fingerprintVersion: FINGERPRINT_VERSION, ...(pro.version ? { proVersion: pro.version } : {}) });
@@ -331,6 +339,24 @@ export async function main(argv = [], env = process.env) {
   // repo) and a PAYING customer is silently getting only the free packs. We KNOW it's paid here, so say so LOUDLY.
   if (v.gateEntitled === true && pro.packCount === 0) {
     ghWarn(`this repo is PAID (entitled) but the pro extractors did not load — you are getting only the ${FREE_PACK_COUNT} free packs, not the full catalogue. Check the repo's slot assignment + plan at ${origin}/ci (or re-run — a transient server error also lands here).`);
+  }
+
+  // 5b. OPT-IN deep scan (heisen taint engine) — source only ever goes to the CANONICAL origin, like the pro bundle
+  //     only ever comes from it. Fail-open on every path: a deep-scan hiccup never touches the verdict above.
+  let deepRows = [], deepLine = null;
+  if (deep) {
+    if (origin !== DEFAULT_ORIGIN) ghWarn("deep scan skipped — source is only ever sent to the canonical slopGrade origin.");
+    else if (!deep.units.length) deepLine = "no sink-bearing file in an engine-modelled language — nothing sent.";
+    else {
+      const post = (url, body) => timedFetch(url, { method: "POST", headers: { "content-type": "application/json" }, body });
+      const r = await requestDeepScan(post, origin, oidcToken, sha, deep.units);
+      if (r.state === "plan-required") ghWarn(`deep scan is a paid feature — no source was analysed. Enable it: ${origin}/ci`);
+      else if (r.state === "unavailable") ghWarn(`deep scan unavailable (${r.status}) — verdict unaffected.`);
+      else {
+        deepRows = heisenFeed(r.response.findings, deep.units.map((u) => u.path));
+        deepLine = `${r.response.scanned} file(s) analysed${deep.skipped ? ` (+${deep.skipped} over the cap, not sent)` : ""}${r.response.unanswered ? ` · ${r.response.unanswered} unanswered (partial)` : ""} · ${deepRows.length} finding(s)`;
+      }
+    }
   }
 
   // 6. Human-readable report (server strings sanitized before hitting the log).
@@ -374,6 +400,16 @@ export async function main(argv = [], env = process.env) {
     }
     for (const f of findings.slice(0, 10)) line(`    - ${sanitizeLogLine(f.table ?? "")}  [${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(f.detail && String(f.detail).trim() ? f.detail : "(detail withheld on the free tier)")}`);
     if (block.hidden > 0) line(`    ... +${block.hidden} more hidden — enable the gate to see them all: ${origin}/ci`);
+  }
+
+  if (deepLine !== null) {
+    line(`
+slopGrade Firewall — deep scan (heisen taint engine, advisory): ${deepLine}`);
+    for (const f of deepRows) {
+      console.log(`::warning file=${wfFile(f.file)},line=${f.line} title=slopGrade Firewall deep scan::[${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(f.detail)}`);
+      line(`    - ${sanitizeLogLine(f.file)}:${f.line}  [${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(f.detail)}`);
+      feed.push(f);
+    }
   }
 
   // The finding feed — posted as ONE PR review (the summary in its body + every on-diff finding inline), so the PR
