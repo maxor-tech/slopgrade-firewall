@@ -57,7 +57,7 @@ import {
   validProBundleResponse, verifyBundleSig, PRO_BUNDLE_PUBKEY, runProPacks, sanitizeProFingerprints, FREE_PACK_COUNT, MAX_SARIF_RESULTS, MAX_PRO_BUNDLE_BYTES,
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs,
 } from "./src/client-lib.mjs";
-import { sinkFiles, selectDeepUnits, requestDeepScan, heisenFeed } from "./src/deep-scan.mjs";
+import { sinkFiles, selectDeepUnits, requestDeepScan, heisenFeed, splitAgainstFeed } from "./src/deep-scan.mjs";
 
 const CODE_EXTS = /\.(py|ts|tsx|js|jsx|mjs|cjs|sql|rb|go|php|prisma|java|cs|rs|c|cc|cpp|h|hpp|kt|scala|ex|exs)$/;
 const TIMEOUT_MS = 20_000;
@@ -275,7 +275,7 @@ export async function main(argv = [], env = process.env) {
   const wirePacks = sanitizePackFingerprints(packFingerprints);
   // OPT-IN deep scan: the files that WOULD leave (source), chosen from the sink-bearing files only. Computed up front so
   // --print-payload can list them — the audit promise extends to the one mode that sends code.
-  const deep = deepScan ? selectDeepUnits(sinkFiles(packFingerprints), (p) => readFileSync(join(root, p), "utf8")) : null;
+  const deep = deepScan ? selectDeepUnits(files.map(rel), (p) => readFileSync(join(root, p), "utf8"), sinkFiles(packFingerprints)) : null;
   const deepAudit = deep ? { deepScan: { note: "SOURCE of these files is sent (opt-in --deep-scan)", files: deep.units.map((u) => u.path), chars: deep.chars, skipped: deep.skipped } } : {};
 
   // 2. EXFILTRATION guard — a custom origin would mint a token for an attacker audience. Run DRY unless opted in.
@@ -354,7 +354,7 @@ export async function main(argv = [], env = process.env) {
       else if (r.state === "unavailable") ghWarn(`deep scan unavailable (${r.status}) — verdict unaffected.`);
       else {
         deepRows = heisenFeed(r.response.findings, deep.units.map((u) => u.path));
-        deepLine = `${r.response.scanned} file(s) analysed${deep.skipped ? ` (+${deep.skipped} over the cap, not sent)` : ""}${r.response.unanswered ? ` · ${r.response.unanswered} unanswered (partial)` : ""} · ${deepRows.length} finding(s)`;
+        deepLine = `${r.response.scanned} file(s) analysed${deep.skipped ? ` (+${deep.skipped} over the cap, not sent)` : ""}${r.response.unanswered ? ` · ${r.response.unanswered} unanswered (partial)` : ""}`;
       }
     }
   }
@@ -403,9 +403,10 @@ export async function main(argv = [], env = process.env) {
   }
 
   if (deepLine !== null) {
+    const { fresh, confirmed } = splitAgainstFeed(deepRows, feed);
     line(`
-slopGrade Firewall — deep scan (heisen taint engine, advisory): ${deepLine}`);
-    for (const f of deepRows) {
+slopGrade Firewall — deep scan (heisen taint engine, advisory): ${deepLine}${deepRows.length ? ` · ${fresh.length} new finding(s), ${confirmed.length} confirming an existing one` : " · 0 finding(s)"}`);
+    for (const f of fresh) {
       console.log(`::warning file=${wfFile(f.file)},line=${f.line} title=slopGrade Firewall deep scan::[${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(f.detail)}`);
       line(`    - ${sanitizeLogLine(f.file)}:${f.line}  [${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(f.detail)}`);
       feed.push(f);

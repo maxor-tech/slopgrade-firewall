@@ -4,8 +4,10 @@
 // THIS IS THE ONE PATH THAT SENDS SOURCE. The default Firewall run never does (structural fingerprint only). With the
 // deep scan enabled, the CONTENTS of a bounded set of files are POSTed to the canonical slopGrade origin
 // (/api/ci/heisen), which forwards them to the hosted heisen-slop taint engine and drops them (never logged, never
-// persisted). Which files: only those where the free extractors already saw a security sink — the files a request→sink
-// flow can live in — capped at DEEP_MAX_UNITS files / DEEP_MAX_TOTAL_CHARS characters. `--print-payload` lists them.
+// persisted). Which files: those where the free extractors recorded a hit FIRST, then any other file that contains a
+// security-sink marker (SINK_HINT) — the free extractors are intra-function, so a request→sink flow through a helper
+// leaves NO hit, and that is exactly the flow the taint engine adds. A file with no sink marker is never sent. Capped
+// at DEEP_MAX_UNITS files / DEEP_MAX_TOTAL_CHARS characters. `--print-payload` lists them.
 //
 // ADVISORY: the server returns `blocking: 0` while the engine is in its calibration window, so these findings annotate
 // as warnings and never fail the check.
@@ -14,6 +16,10 @@ export const DEEP_SCAN_EXTS = /\.(py|js|jsx|mjs|cjs|ts|tsx|go|java|rb)$/i;
 export const DEEP_MAX_UNITS = 40;
 export const DEEP_MAX_UNIT_CHARS = 200_000;
 export const DEEP_MAX_TOTAL_CHARS = 2_000_000;
+// A cheap lexical pre-filter: the sinks the taint engines model (shell, eval, SQL, file, redirect, outbound request,
+// template, unsafe deserialization) across Python / JS-TS / Go / Java / Ruby. Over-inclusive by design — it only decides
+// what MAY be sent; the engine decides what is a finding.
+export const SINK_HINT = /\b(?:os\.system|popen|subprocess|spawn|exec(?:Sync|File|ute|Command)?\s*\(|eval\s*\(|child_process|Runtime\.getRuntime|ProcessBuilder|exec\.Command|query\s*\(|raw\s*\(|send_?[fF]ile|redirect(?:_to)?\s*\(|render_template_string|innerHTML|requests\.|urlopen|httpx|axios|fetch\s*\(|http\.Get|pickle\.loads?|yaml\.load|Marshal\.load|readFile|open\s*\(|File\s*\()/;
 
 /** Paths (repo-relative) of every file a pack fingerprint recorded hits for — the sink-bearing files. Sorted. */
 export function sinkFiles(packFingerprints) {
@@ -27,19 +33,23 @@ export function sinkFiles(packFingerprints) {
 }
 
 /**
- * The units to send: sink-bearing files with an engine-modelled extension, read via `read(path)` (null = unreadable),
- * skipping empty / oversize files, stopping at the file and character caps. `skipped` counts the files left out so the
- * log can say the scan was bounded instead of implying full coverage.
+ * The units to send, in priority order: the `hitPaths` (extractor hits) first, then the other `paths` whose source
+ * matches SINK_HINT. Engine-modelled extensions only; read via `read(path)` (null / throw = unreadable); empty /
+ * oversize files skipped; stops at the file and character caps. `skipped` counts candidate files left out so the log can
+ * say the scan was bounded instead of implying full coverage.
  */
-export function selectDeepUnits(paths, read) {
+export function selectDeepUnits(paths, read, hitPaths = []) {
   const units = [];
   let total = 0, skipped = 0;
-  for (const path of paths) {
+  const hits = new Set(hitPaths);
+  const ordered = [...new Set([...hitPaths, ...[...paths].sort()])];
+  for (const path of ordered) {
     if (!DEEP_SCAN_EXTS.test(path)) continue;
-    if (units.length >= DEEP_MAX_UNITS) { skipped++; continue; }
     let code = null;
     try { code = read(path); } catch { code = null; }
-    if (typeof code !== "string" || !code || code.length > DEEP_MAX_UNIT_CHARS || total + code.length > DEEP_MAX_TOTAL_CHARS) { skipped++; continue; }
+    if (typeof code !== "string" || !code) { if (hits.has(path)) skipped++; continue; }
+    if (!hits.has(path) && !SINK_HINT.test(code)) continue; // no sink marker → never sent
+    if (units.length >= DEEP_MAX_UNITS || code.length > DEEP_MAX_UNIT_CHARS || total + code.length > DEEP_MAX_TOTAL_CHARS) { skipped++; continue; }
     total += code.length;
     units.push({ path, code });
   }
@@ -71,6 +81,17 @@ export function heisenFeed(findings, sentPaths) {
   return findings.filter((f) => sent.has(f.path)).map((f) => ({
     file: f.path, line: evidenceLine(f.evidence), pack: "heisen", rule: f.cwe, detail: f.evidence, severity: "medium",
   }));
+}
+
+/**
+ * Split deep-scan rows into the NEW ones (a location no other pack already reported) and the ones that only CONFIRM an
+ * existing finding (same file:line). Confirmations are counted, not re-annotated — one sink, one annotation.
+ */
+export function splitAgainstFeed(rows, feed) {
+  const seen = new Set(feed.map((f) => `${f.file}:${f.line}`));
+  const fresh = [], confirmed = [];
+  for (const r of rows) (seen.has(`${r.file}:${r.line}`) ? confirmed : fresh).push(r);
+  return { fresh, confirmed };
 }
 
 /**
