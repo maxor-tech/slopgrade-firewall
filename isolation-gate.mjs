@@ -53,7 +53,7 @@ import { firewallVerdict } from "./src/gate-verdict.mjs";
 import { postFindingReview, resolvePrContext } from "./src/pr-suggest.mjs";
 import {
   resolveOrigin, DEFAULT_ORIGIN, classifyEnv, validVerdict, sanitizeLogLine, sanitizeFingerprint, sanitizePackFingerprints,
-  parseLeak, findingLocation, buildSarif, collectPackBlocks, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
+  parseLeak, leakText, findingLocation, buildSarif, collectPackBlocks, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
   validProBundleResponse, verifyBundleSig, PRO_BUNDLE_PUBKEY, runProPacks, sanitizeProFingerprints, FREE_PACK_COUNT, MAX_SARIF_RESULTS, MAX_PRO_BUNDLE_BYTES,
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs,
 } from "./src/client-lib.mjs";
@@ -375,7 +375,7 @@ export async function main(argv = [], env = process.env) {
   line(`  conformance   : ${v.conformancePct == null ? "n/a" : v.conformancePct.toFixed(1) + "%"}`);
   line(`  hard leaks    : ${v.hardLeaks}${v.byId ? `  (+${v.byId} by-id conditional)` : ""}`);
   line(`  mode          : ${v.reliable ? "GATE-able (explicit scoping)" : "ADVISORY (ORM — dataflow ceiling)"}`);
-  for (const l of (Array.isArray(v.leaks) ? v.leaks : []).slice(0, 10)) line(`    - ${l}`);
+  for (const l of (Array.isArray(v.leaks) ? v.leaks : []).slice(0, 10)) line(`    - ${leakText(l)}`);
   if (v.hiddenLeaks > 0) line(`    ... +${v.hiddenLeaks} more leak(s) hidden — see them all and block them in CI: ${origin}/ci`);
 
   const feed = []; // normalized {file,line,rule,detail,severity} for the inline PR comment feed (CodeRabbit-style)

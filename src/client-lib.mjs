@@ -4,7 +4,7 @@ import { gzipSync } from "node:zlib"; // builtin, pure (no I/O) — for the Code
 import { verify as edVerify, createPublicKey } from "node:crypto"; // builtin — Ed25519 verify of the pro-bundle signature.
 
 export const DEFAULT_ORIGIN = "https://app.slopgrade.ai";
-export const CLIENT_VERSION = "0.9.2"; // keep in lock-step with package.json (pinned by client-lib.test.mjs)
+export const CLIENT_VERSION = "0.9.3"; // keep in lock-step with package.json (pinned by client-lib.test.mjs)
 export const FINGERPRINT_VERSION = 1;
 export const MAX_PAYLOAD_BYTES = 8 * 1024 * 1024; // 8MB hard cap on the POST body (clear error, not an opaque 413)
 /** The pro-extractor bundle a PAID repo receives from /api/ci/pro-extractors — bounded like every other input. */
@@ -145,6 +145,11 @@ export function sanitizeFingerprint(fp) {
     rls: {
       on: (Array.isArray(fp?.rls?.on) ? fp.rls.on : []).map(ident),
       policy: (Array.isArray(fp?.rls?.policy) ? fp.rls.policy : []).map(ident),
+      // client-role GRANT / REVOKE facts (table names only, same ident() coercion) — the server needs them to tell a
+      // server-only table (revoked / never granted) from a client-reachable one; dropping them here made every REVOKE'd
+      // table read as a gate #1 hard leak on the free tier.
+      granted: (Array.isArray(fp?.rls?.granted) ? fp.rls.granted : []).map(ident),
+      revoked: (Array.isArray(fp?.rls?.revoked) ? fp.rls.revoked : []).map(ident),
     },
     queries: q.map((x) => ({
       kind: x.kind, table: x.table, verb: x.verb, method: x.method,
@@ -305,8 +310,27 @@ export function sanitizeProFingerprints(packs, { maxDepth = 6, maxItems = 200000
   return clean;
 }
 
-/** Parse a verdict leak line ("path:line  [table]  reason") into {file, line, message}; {file:null} if unparseable. */
+/** A leak's human label: the server sends OBJECTS {kind, table, file?, line?, method?} (brain conformance), older servers
+ *  sent strings. Never `[object Object]`. */
+export function leakText(l) {
+  if (l && typeof l === "object") {
+    const where = typeof l.file === "string" && l.file ? `${l.file}${Number(l.line) > 0 ? `:${Number(l.line)}` : ""} ` : "";
+    return sanitizeLogLine(`${where}${[l.kind, l.table, l.method].filter((x) => typeof x === "string" && x).join(" ") || "cross-tenant isolation leak"}`);
+  }
+  return sanitizeLogLine(String(l));
+}
+
+/** Parse a verdict leak into {file, line, message}; {file:null} when it has no source location (a table-level RLS leak).
+ *  Accepts the OBJECT form {kind, table, file, line} (current server) and the legacy string "path:line  reason" — the
+ *  object form used to stringify to "[object Object]", which silently dropped every located leak from the annotations,
+ *  the SARIF upload and the PR review. */
 export function parseLeak(s) {
+  if (s && typeof s === "object") {
+    const message = sanitizeLogLine([s.kind, s.table, s.method].filter((x) => typeof x === "string" && x).join(" ") || "cross-tenant isolation leak");
+    return typeof s.file === "string" && s.file
+      ? { file: s.file, line: Math.max(1, Number(s.line) || 1), message }
+      : { file: null, line: 0, message };
+  }
   const m = /^(.+?):(\d+)\s+(.*)$/.exec(String(s).trim());
   if (!m) return { file: null, line: 0, message: sanitizeLogLine(String(s)) };
   return { file: m[1], line: Number(m[2]), message: sanitizeLogLine(m[3] || "cross-tenant isolation leak") };

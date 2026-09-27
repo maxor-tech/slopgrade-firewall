@@ -3,6 +3,21 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.3] — 2026-09-26
+
+Found by running slopGrade on its own repo.
+
+### Fixed
+- **Server-only tables were reported as cross-tenant hard leaks on the free tier.** The client never extracted the
+  client-role `GRANT … TO anon|authenticated|public` / `REVOKE … FROM …` facts, and the egress boundary
+  (`sanitizeFingerprint`) dropped `rls.granted` / `rls.revoked` anyway — so the server could never tell a REVOKE'd,
+  server-only table from a client-reachable one. Both are now extracted (table names only, the same metadata class as
+  `rls.on` / `rls.policy`) and whitelisted through the boundary with the same coercion.
+- **Located cross-tenant leaks vanished from annotations, SARIF, the PR review and the Step Summary.** The server
+  sends leaks as objects `{kind, table, file, line}`; the client parsed them as strings, so the log printed
+  `[object Object]` and no leak ever got a location. `parseLeak` / `leakText` now read the object form (the legacy
+  string form still works).
+
 ## [0.9.2] — 2026-09-26
 
 ### Fixed

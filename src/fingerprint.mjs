@@ -44,6 +44,13 @@ export function buildFingerprint(files, root = "") {
   const signals = { schemaPath: 0, rlsPolicy: 0, rlsSupabase: 0 };
   const tableCols = {};                       // table → [columns] (arrays, serializable)
   const rlsOn = new Set(), policy = new Set();
+  // CLIENT-ROLE access (anon/authenticated/public): a table revoked from those roles — or never granted to them in a
+  // repo that uses the explicit GRANT model — is SERVER-ONLY (unreachable by a client). The server uses it to NOT read
+  // « RLS enabled without a policy » as a leak when the data is in fact locked (deny-all + no grant). PostgREST speaks
+  // as anon/authenticated; no grant → no access. Table NAMES only — the same metadata class as rls.on / rls.policy.
+  const granted = new Set(), revoked = new Set();
+  const CLIENT_ROLE = /\b(?:anon|authenticated|public)\b/i;      // the roles a PostgREST client assumes
+  const NON_TABLE_OBJ = /^(?:function|sequence|schema|procedure|routine|database|table|tables|foreign|large|type|domain)$/i;
   const queries = [];
   for (const f of files) {
     try { if (statSync(f).size > MAX_FILE_BYTES) continue; } catch { continue; }
@@ -67,6 +74,14 @@ export function buildFingerprint(files, root = "") {
     for (const { table, cols } of created.concat(/\.prisma$/.test(f) || /\bmodel\s+\w+\s*\{/.test(t) ? extractPrismaModels(t) : [])) tableCols[table] = [...cols];
     for (const m of sqlBlob.matchAll(/ALTER\s+TABLE\s+(?:ONLY\s+)?["'`]?(?:public\.)?([a-z_][a-z0-9_]*)["'`]?\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY/gi)) rlsOn.add(m[1].toLowerCase());
     for (const m of sqlBlob.matchAll(/CREATE\s+POLICY\s+[^;]*?\bON\s+["'`]?(?:public\.)?([a-z_][a-z0-9_]*)/gi)) policy.add(m[1].toLowerCase());
+    // GRANT … ON <table> TO <roles> — a table granted to a client role (reachable through the PostgREST API).
+    for (const m of sqlBlob.matchAll(/\bGRANT\s+[^;]*?\bON\s+(?:TABLE\s+)?["'`]?(?:public\.)?([a-z_][a-z0-9_]*)["'`]?\s+TO\s+([^;]+)/gi)) {
+      if (!NON_TABLE_OBJ.test(m[1]) && CLIENT_ROLE.test(m[2])) granted.add(m[1].toLowerCase());
+    }
+    // REVOKE … ON <table> FROM <roles> — a table explicitly withdrawn from the client roles (server-only lock).
+    for (const m of sqlBlob.matchAll(/\bREVOKE\s+[^;]*?\bON\s+(?:TABLE\s+)?["'`]?(?:public\.)?([a-z_][a-z0-9_]*)["'`]?\s+FROM\s+([^;]+)/gi)) {
+      if (!NON_TABLE_OBJ.test(m[1]) && CLIENT_ROLE.test(m[2])) revoked.add(m[1].toLowerCase());
+    }
 
     const isAdmin = ADMIN_CTX.test(f);
     // (a) SQL execute() — linear scan for the search_path state (schema-per-tenant) + the where id-columns.
@@ -92,5 +107,5 @@ export function buildFingerprint(files, root = "") {
       queries.push({ kind: "prisma", table: model, method, whereIdCols: idColsOf(body), hasIdConstraint: /\bid\b\s*:|\buid\b\s*:|\bslug\b\s*:|\btoken\b\s*:/i.test(body), isBulk: /findMany|updateMany|deleteMany/i.test(method), isAdmin, file: relOf(f, root), line: lineOf(t, index) });
     }
   }
-  return { signals, tableCols, rls: { on: [...rlsOn], policy: [...policy] }, queries };
+  return { signals, tableCols, rls: { on: [...rlsOn], policy: [...policy], granted: [...granted], revoked: [...revoked] }, queries };
 }
