@@ -49,7 +49,9 @@ The step exposes the verdict so a later step can act on it (post to Slack, gate 
 | `verdict` | `gate-blocked` | `advisory` · `gate-blocked` · `gate-unpaid` · `gate-pass` |
 | `blocked` | `true` | did the gate fail the build? |
 | `hard-leaks` | `2` | count of hard cross-tenant leaks |
-| `blocking-findings` | `3` | count of blocking (critical/high) security findings |
+| `blocking-findings` | `3` | count of blocking (critical/high) findings the gate counted — on a PR, only those it introduced |
+| `new-findings` | `1` | on a PR: findings on the lines this PR added or changed (empty off-PR) |
+| `preexisting-blocking` | `12` | on a PR: blocking findings that were already there — reported, never block the PR (empty off-PR) |
 | `conformance` | `94.2` | tenant-scoping conformance %, or empty |
 | `entitled` | `true` | the gate is active: public repo, your free private repo, or a paid slot |
 | `sarif-uploaded` | `true` | were findings sent to Code Scanning this run? |
@@ -87,10 +89,13 @@ marked ✓ (the four unmarked — XXE, insecure deserialization, hardcoded secre
 2. **Server verdict** — the fingerprint is posted to `https://app.slopgrade.ai/api/ci/isolation`, which classifies
    and measures, then returns the verdict. The classification heuristics run **server-side** and are intentionally
    **not** in this repository.
-3. **Feed** — when the run is on a PR and the workflow grants `pull-requests: write`, every finding is posted as an
-   **inline review comment** on its exact `file:line`, plus one summary comment updated in place (deduped, so a re-run
-   updates instead of spamming). It posts with your **own** `GITHUB_TOKEN`, to your own PR — findings never reach
-   slopGrade. Omit the permission to skip the feed.
+3. **Feed — judged on the PR, not on your backlog** — on a pull request the client reads the PR's diff and splits every
+   finding into **introduced** (on a line this PR added or changed), **already in a file you changed**, and
+   **existing debt elsewhere**. The review leads with what the PR introduced (inline on those lines); the debt is a
+   count and a link, not a wall. With `pull-requests: write`, it is posted as ONE review (one notification), deduped on
+   re-runs. It posts with your **own** `GITHUB_TOKEN`, to your own PR — findings never reach slopGrade. Omit the
+   permission to skip the feed. Reading the diff of a **private** repo needs `pull-requests: read` (or `write`);
+   without it the run says so and judges the whole repo, as before.
 4. **Code Scanning** — when the workflow grants `security-events: write`, the same findings are uploaded to your
    repo's **Security tab** as a SARIF report, so they also appear **inline on the PR "Files changed" tab**, tracked
    across commits and dismissible — GitHub's native security surface, **free on public repos**. No extra step to wire
@@ -103,6 +108,11 @@ marked ✓ (the four unmarked — XXE, insecure deserialization, hardcoded secre
    private repo** (the free allocation — both block on cross-tenant + the 22 OSS classes), or a paid slot (every
    calibrated class). Any other repo in `gate` mode stays advisory — the paywall fails open, it is never blocked. The
    whole decision is the pure, tested [`firewallVerdict`](./src/gate-verdict.mjs).
+   **Clean as you code:** on a pull request those counts are **scoped to what the PR introduced** — pre-existing debt
+   is reported but never blocks the PR, so adopting the gate on a repo with a backlog doesn't block its next PR on
+   findings nobody touched. Push runs, and a PR whose diff can't be read, keep the whole-repo counts. A blocking
+   finding the client can't locate is counted against the PR (never assumed old), except unlocated cross-tenant leaks
+   on a PR that touches no schema file (SQL / migration / ORM schema) — [`scopedBlocking`](./src/pr-suggest.mjs).
 
 > **Fork PRs (external contributors):** GitHub gives the `pull_request` event a **read-only** `GITHUB_TOKEN` on runs
 > from a fork, whatever `permissions:` you declare. The gate still runs (verdict + exit code are unaffected), but the

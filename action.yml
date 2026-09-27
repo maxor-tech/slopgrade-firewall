@@ -38,8 +38,14 @@ outputs:
     description: "count of hard cross-tenant leaks in the verdict."
     value: ${{ steps.firewall.outputs.hard-leaks }}
   blocking-findings:
-    description: "count of blocking (critical/high) security findings the gate would fail on."
+    description: "count of blocking (critical/high) findings the gate counted — on a pull request, only those the PR introduced."
     value: ${{ steps.firewall.outputs.blocking-findings }}
+  new-findings:
+    description: "on a pull request: findings on the lines the PR added or changed (empty on push runs)."
+    value: ${{ steps.firewall.outputs.new-findings }}
+  preexisting-blocking:
+    description: "on a pull request: blocking findings that already existed — reported, never block the PR (empty on push runs)."
+    value: ${{ steps.firewall.outputs.preexisting-blocking }}
   conformance:
     description: "tenant-scoping conformance percent (e.g. 94.2), or empty when not applicable."
     value: ${{ steps.firewall.outputs.conformance }}

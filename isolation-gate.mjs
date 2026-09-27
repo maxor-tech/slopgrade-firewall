@@ -50,7 +50,7 @@ import { extractCryptoFingerprint } from "./src/crypto-extract.mjs";
 // OSS shim: the interprocedural pass is stubbed (returns empty) → the taint detectors run INTRA-function only.
 import { buildWrapperRegistries, resolveImportedWrappers } from "./src/taint-interproc.mjs";
 import { firewallVerdict } from "./src/gate-verdict.mjs";
-import { postFindingReview, resolvePrContext } from "./src/pr-suggest.mjs";
+import { postFindingReview, resolvePrContext, fetchPrDiff, classifyAgainstDiff, scopedBlocking, diffSummaryMarkdown } from "./src/pr-suggest.mjs";
 import {
   resolveOrigin, DEFAULT_ORIGIN, classifyEnv, validVerdict, sanitizeLogLine, sanitizeFingerprint, sanitizePackFingerprints,
   parseLeak, leakText, findingLocation, buildSarif, collectPackBlocks, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
@@ -171,7 +171,8 @@ async function loadProPacks(origin, oidcToken, root, rel) {
 
 const HELP = `slopGrade Firewall — CI leak detection (free tier: 10 flagship classes · paid repos: the full catalogue, extracted in your runner)
 Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <path>] [--deep-scan [--deep-scan-block]] [--help]
-  --gate           block (exit 1) on a reliable hard leak in an entitled repo (default: advisory, never blocks)
+  --gate           block (exit 1) on a reliable hard leak in an entitled repo (default: advisory, never blocks) ;
+                   on a pull request, only what the PR introduced counts (pre-existing debt is reported, never blocks)
   --strict         with --gate, fail CLOSED (exit 1) when no server verdict is available (default: fail open)
   --print-payload  print the exact structural fingerprint that would be sent, then exit (audit what leaves the runner)
   --sarif <path>   also write a SARIF report of the leaks (upload with github/codeql-action/upload-sarif)
@@ -427,13 +428,33 @@ export async function main(argv = [], env = process.env) {
     }
   }
 
+  // « Clean as you code » (0.10.0) — on a pull request, split the feed by what THIS PR is responsible for (introduced on
+  // its changed lines / already in a file it touched / debt elsewhere) and gate on the introduced part only. A 6-file PR
+  // used to get the repo's whole backlog (26 findings, 0 of them its own) and, in gate mode, be blocked by it. Push runs
+  // and an unreadable diff keep the whole-repo behaviour (said out loud), so a diff hiccup never waves a finding through.
+  const readEvent = () => { try { return JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8")); } catch { return null; } };
+  const prCtx = resolvePrContext(env, readEvent);
+  const ghToken = env.GITHUB_TOKEN || env.FW_GH_TOKEN;
+  let prDiff = null;
+  if (prCtx && ghToken) {
+    const d = await fetchPrDiff(prCtx, ghToken, fetch, (m) => ghWarn(`${m} — this run judges the whole repo instead of this PR's changes.`));
+    if (d.ok) prDiff = d;
+  }
+  const classified = prDiff ? classifyAgainstDiff(feed, prDiff) : null;
+  if (classified) {
+    const n = (s) => classified.filter((f) => f.scope === s).length;
+    line(`\nslopGrade Firewall — this PR: ${n("introduced")} introduced · ${n("touched")} already in the files it changed · ${n("debt")} pre-existing elsewhere (${prDiff.files.size} file(s) in the diff).`);
+  }
+
   // The finding feed — posted as ONE PR review (the summary in its body + every on-diff finding inline), so the PR
   // author gets ONE notification, not one email per finding (F8 2026-09-14 : a findings-heavy PR emailed ~40 times).
   // Fail-open + dedup so a re-run adds only new findings, never a wall of comments (pr-suggest.mjs).
   if (feed.length) {
-    const deps = { readEvent: () => { try { return JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8")); } catch { return null; } }, log: (m) => line(m), warn: (m) => ghWarn(m) };
+    const deps = { readEvent, log: (m) => line(m), warn: (m) => ghWarn(m), diff: prDiff };
     const blocking = feed.filter((f) => f.severity === "high" || f.severity === "critical").length;
-    const summary = `## 🛡 slopGrade Firewall\n\n**${blocking}** blocking (critical/high) · ${feed.length - blocking} advisory · ${feed.length} finding(s) located.\n\nBlocking findings fail the check when the gate is enabled on this repo. See all findings + enable the gate: ${origin}/ci`;
+    const summary = classified
+      ? diffSummaryMarkdown(classified, { origin, gateMode })
+      : `## 🛡 slopGrade Firewall\n\n**${blocking}** blocking (critical/high) · ${feed.length - blocking} advisory · ${feed.length} finding(s) located.\n\nBlocking findings fail the check when the gate is enabled on this repo. See all findings + enable the gate: ${origin}/ci`;
     const review = await postFindingReview(env, feed, summary, deps);
     if (review.review !== "skipped" || review.comments) line(`\nslopGrade Firewall — ${review.comments} finding(s) inline in ONE PR review (${review.review}) — one notification, not one per finding.`);
   }
@@ -469,14 +490,22 @@ export async function main(argv = [], env = process.env) {
   // 7. Exit decision — the PURE, tested free/paid boundary. Blocks on --gate + EITHER a reliable+entitled cross-tenant
   // hard leak OR >=1 blocking detector finding (packBlocking, critical|high — already server-paywalled to 0 unless
   // entitled). The build-block message NAMES the real reason(s).
-  const decision = firewallVerdict({ gateMode, reliable: v.reliable, hardLeaks: v.hardLeaks, gateEntitled: v.gateEntitled, packBlocking: v.packBlocking, deepBlocking });
+  // On a PR with a readable diff the counts are SCOPED to what the PR introduced (scopedBlocking) ; otherwise the
+  // server's whole-repo counts, exactly as before.
+  const scoped = classified ? scopedBlocking(v, classified, { deepBlocking, diff: prDiff }) : null;
+  const gateHard = scoped ? scoped.hardLeaks : Number(v.hardLeaks) || 0;
+  const gatePack = scoped ? scoped.packBlocking : Number(v.packBlocking) || 0;
+  const gateDeep = scoped ? scoped.deepBlocking : deepBlocking;
+  const decision = firewallVerdict({ gateMode, reliable: v.reliable, hardLeaks: gateHard, gateEntitled: v.gateEntitled, packBlocking: gatePack, deepBlocking: gateDeep });
   // Action outputs — surface the verdict + counts to downstream steps (a Slack alert, gating another job, a badge).
   // Fail-soft, no-op off CI. Emitted here (once the verdict is known) — the no-verdict early returns above set none.
   emitOutputs(env, {
     verdict: decision.kind,                    // advisory | gate-blocked | gate-unpaid | gate-pass
     blocked: decision.block === true,          // did the gate fail the build?
     "hard-leaks": Number(v.hardLeaks) || 0,
-    "blocking-findings": (Number(v.packBlocking) || 0) + deepBlocking,
+    "blocking-findings": gatePack + gateDeep,  // what the decision counted (PR-scoped on a pull request)
+    "new-findings": classified ? classified.filter((f) => f.scope === "introduced").length : "",
+    "preexisting-blocking": scoped ? scoped.preexistingBlocking : "",
     conformance: v.conformancePct == null ? "" : Number(v.conformancePct).toFixed(1),
     entitled: v.gateEntitled === true,
     "sarif-uploaded": sarifUploaded === "uploaded",
@@ -485,17 +514,21 @@ export async function main(argv = [], env = process.env) {
   // PR review it also shows on push runs (no PR to comment on). Clickable file:line via the PR head sha (blob base).
   // Fail-soft: it never changes the verdict or breaks the build (no summary file / write error → silently skipped).
   try {
-    const prCtx = resolvePrContext(env, () => { try { return JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8")); } catch { return null; } });
     const blobBase = githubBlobBase(env, (prCtx && prCtx.headSha) || env.GITHUB_SHA || null);
-    emitStepSummary(env, stepSummaryMarkdown(v, { origin, blobBase, decision: decision.kind }), appendFileSync);
+    const scope = classified ? { introduced: classified.filter((f) => f.scope === "introduced").length, blocking: gateHard + gatePack + gateDeep, preexistingBlocking: scoped.preexistingBlocking } : null;
+    emitStepSummary(env, stepSummaryMarkdown(v, { origin, blobBase, decision: decision.kind, scope }), appendFileSync);
   } catch (e) { ghWarn(`step summary skipped (${errMsg(e)}).`); }
+  const ofPr = scoped ? " introduced by this PR" : "";
   if (decision.kind === "gate-blocked") {
     const reasons = [];
-    if (v.reliable && v.hardLeaks > 0 && v.gateEntitled) reasons.push(`${v.hardLeaks} hard cross-tenant leak(s)`);
-    if (Number(v.packBlocking) > 0) reasons.push(`${v.packBlocking} blocking security finding(s) (injection/crypto/secrets…)`);
-    if (deepBlocking > 0) reasons.push(`${deepBlocking} deep-scan finding(s) (deep-scan-block opted in)`);
-    console.log(`::error title=slopGrade Firewall::${reasons.join(" + ") || `${v.hardLeaks} hard cross-tenant leak(s)`} — build blocked.`);
+    if (v.reliable && gateHard > 0 && v.gateEntitled) reasons.push(`${gateHard} hard cross-tenant leak(s)${ofPr}`);
+    if (gatePack > 0) reasons.push(`${gatePack} blocking security finding(s)${ofPr} (injection/crypto/secrets…)`);
+    if (gateDeep > 0) reasons.push(`${gateDeep} deep-scan finding(s)${ofPr} (deep-scan-block opted in)`);
+    console.log(`::error title=slopGrade Firewall::${reasons.join(" + ") || `${gateHard} hard cross-tenant leak(s)`} — build blocked.`);
     return 1;
+  }
+  if (gateMode && scoped && scoped.preexistingBlocking > 0) {
+    line(`\nslopGrade Firewall: ${scoped.preexistingBlocking} pre-existing blocking finding(s) this PR did not introduce — reported, not blocking (the gate blocks only what a PR adds). Burn the debt down: ${origin}/ci`);
   }
   if (decision.kind === "gate-unpaid") {
     line(`\nslopGrade Firewall: ${v.hardLeaks} hard leak(s) found, but this repo is ADVISORY (no paid gate) — non-blocking. Enable the gate to block (from $24/repo/mo, graduated down to $11 · Team $299/mo unlimited · 14-day free trial, no card): ${origin}/ci`);
