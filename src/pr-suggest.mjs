@@ -89,10 +89,15 @@ export const SUMMARY_MARKER = "<!-- slopgrade-firewall:summary -->";
 const SEV_ICON = { critical: "🔴", high: "🔴", medium: "🟡", low: "⚪" };
 
 /** A plain finding review-comment body: severity icon + rule + detail + the dedup marker. Never a ```suggestion```. */
-export function findingCommentBody({ rule, detail, severity }) {
+export function findingCommentBody({ rule, detail, severity, fix }) {
   const icon = SEV_ICON[String(severity || "").toLowerCase()] || "🔎";
   const head = `${icon} **slopGrade Firewall** · ${rule || "finding"}${severity ? ` · ${severity}` : ""}`;
-  return `${detail ? `${head}\n\n${detail}` : head}\n\n${FINDING_MARKER}`;
+  // A verified one-click fix (src/autofix.mjs) rides IN the finding's own comment → GitHub shows « Commit suggestion »
+  // right on it. The suggestion replaces exactly the commented line, which is the line the fix was computed from.
+  const suggestion = fix && typeof fix.after === "string"
+    ? `\n\n**One-click fix** — ${fix.note || "verified secure rewrite"}. Verified in your runner: the finding no longer matches.\n\n\`\`\`suggestion\n${fix.after}\n\`\`\``
+    : "";
+  return `${detail ? `${head}\n\n${detail}` : head}${suggestion}\n\n${FINDING_MARKER}`;
 }
 
 /** Map normalized findings [{file,line,rule,detail,severity}] -> review-comment payloads. Pure; drops any without a
@@ -262,7 +267,7 @@ const esc = (s, max = 200) => {
 };
 // The detail often repeats the location (« path:line — … ») that the row already shows as code : drop that prefix.
 const detailOf = (f) => String(f.detail ?? "").replace(new RegExp(`^\\s*${String(f.file ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:${Number(f.line) || 0}\\s*[—-]?\\s*`), "");
-const rowLine = (f) => { const d = detailOf(f); return `- ${SEV_ICON[String(f.severity || "").toLowerCase()] || "🔎"} \`${esc(f.file)}:${f.line}\` · **${esc(f.rule || "finding")}**${d ? ` — ${esc(d, 160)}` : ""}`; };
+const rowLine = (f) => { const d = detailOf(f); return `- ${SEV_ICON[String(f.severity || "").toLowerCase()] || "🔎"} \`${esc(f.file)}:${f.line}\` · **${esc(f.rule || "finding")}**${f.fix ? " · 🔧 one-click fix" : ""}${d ? ` — ${esc(d, 160)}` : ""}`; };
 const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 /**

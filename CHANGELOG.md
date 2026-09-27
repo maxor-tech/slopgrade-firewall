@@ -6,6 +6,13 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 ## [0.10.1] — 2026-09-27
 
 ### Added
+- **One-click fixes.** A finding with a deterministic, line-local secure rewrite — TLS verification off (`verify=False`,
+  `rejectUnauthorized: false`, `NODE_TLS_REJECT_UNAUTHORIZED=0`, `InsecureSkipVerify: true`, `danger_accept_invalid_…(true)`),
+  debug on in production (`app.run(debug=True)`, `<compilation debug="true">`) or `yaml.load` — gets a GitHub
+  « Commit suggestion » inside its inline PR comment. Computed and **verified in your runner** (the finding's own detector
+  no longer matches the rewritten line, and only a short span of the line changes) ; nothing leaves. New input
+  `fix: suggest` (default) | `off`. The slopGrade /ci page already promised « N of these findings have a verified fix » —
+  this is the client half it was pointing at.
 - **Server kill switch for the PR-scoped gate.** The « clean as you code » rule lives in the Action and users pin tags,
   so a bad rule used to need a new release every user adopts. The server can now answer `gateScope: "repo"` to put
   every client ≥ 0.10.1 back on whole-repo counts at once (the introduced / debt split is still shown, and the review

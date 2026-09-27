@@ -58,6 +58,7 @@ import {
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs,
 } from "./src/client-lib.mjs";
 import { sinkFiles, selectDeepUnits, requestDeepScan, heisenFeed, splitAgainstFeed, isPaidVerdict, deepScanNudge } from "./src/deep-scan.mjs";
+import { fixableHitIndex, attachFixes } from "./src/autofix.mjs";
 
 const CODE_EXTS = /\.(py|ts|tsx|js|jsx|mjs|cjs|sql|rb|go|php|prisma|java|cs|rs|c|cc|cpp|h|hpp|kt|scala|ex|exs)$/;
 const TIMEOUT_MS = 20_000;
@@ -182,7 +183,7 @@ Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <p
                    Measured block precision ~94% on held-out labeled code (~1 false block in 17) — off by default.
   --help           show this help
 Exit codes: 1 only on a gate-blocked verdict (or --strict with no verdict); 0 otherwise (fail open).`;
-const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-block"]);
+const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-block", "--no-fix"]);
 
 export async function main(argv = [], env = process.env) {
   if (argv.includes("--help")) { console.log(HELP); return 0; }
@@ -194,6 +195,7 @@ export async function main(argv = [], env = process.env) {
   const printPayload = argv.includes("--print-payload");
   const deepScan = argv.includes("--deep-scan");
   const deepBlock = deepScan && argv.includes("--deep-scan-block");
+  const noFix = argv.includes("--no-fix"); // one-click fix suggestions are ON by default (input `fix: off` opts out)
   if (argv.includes("--deep-scan-block") && !deepScan) console.log("::warning title=slopGrade Firewall::--deep-scan-block has no effect without --deep-scan (deep-scan: \"true\").");
   const root = env.GITHUB_WORKSPACE || process.cwd();
   const noVerdict = () => (strict && gateMode ? 1 : 0);
@@ -426,6 +428,14 @@ export async function main(argv = [], env = process.env) {
       line(`    - ${sanitizeLogLine(row.file)}:${row.line}  [${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}`);
       feed.push(row);
     }
+  }
+
+  // One-click fixes (0.10.1) — a verified, line-local secure rewrite rides in the finding's inline comment as a GitHub
+  // « Commit suggestion ». Computed from the runner's own checkout + its own (sanitized) hits : nothing leaves.
+  if (!noFix && feed.length) {
+    const safeRel = (f) => typeof f === "string" && f && !f.startsWith("/") && !/^[a-zA-Z]:/.test(f) && !f.split(/[\\/]/).includes("..");
+    const fixes = attachFixes(feed, fixableHitIndex(wireAll), (file, ln) => (safeRel(file) ? readFileSync(join(root, file), "utf8").split(/\r?\n/)[ln - 1] ?? null : null));
+    if (fixes) line(`\nslopGrade Firewall — ${fixes} one-click fix(es), verified in your runner — posted as « Commit suggestion » on the PR line.`);
   }
 
   // « Clean as you code » (0.10.0) — on a pull request, split the feed by what THIS PR is responsible for (introduced on
