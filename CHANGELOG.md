@@ -3,6 +3,30 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.10.0] — 2026-09-26
+
+Found by running slopGrade on its own repo : a 6-file PR got the repo's whole backlog — 26 findings, none on its own
+lines, zero inline — and in gate mode would have been blocked by findings nobody in the PR touched.
+
+### Changed
+- **Clean as you code — the gate judges a pull request on what it introduced.** On a PR the client reads the diff
+  and splits every finding into **introduced** (on a line the PR added or changed), **already in a file it changed**,
+  and **existing debt elsewhere**. The blocking counts are scoped to the introduced part (`scopedBlocking`): pre-existing
+  debt is reported, never blocks the PR. Push runs, and a PR whose diff can't be read (e.g. a private repo without
+  `pull-requests: read`), keep the whole-repo counts and say so. Fail-closed where it matters: a blocking finding the
+  client can't locate counts against the PR — except unlocated cross-tenant leaks (the server locates at most 20) on a
+  PR that touches no schema file, which would otherwise block every PR of a repo with a leak backlog.
+- **The PR review leads with the PR.** « This PR introduces N findings » (inline on its lines), then the ones already in
+  the files it changed, then the debt as one count + a link — instead of « 26 finding(s) located ».
+- **Step Summary** says what the gate counted on a PR (« Blocked — 1 blocking finding introduced by this PR »), plus the
+  pre-existing blocking count, never the repo-wide totals it did not block on.
+
+### Added
+- Outputs `new-findings` and `preexisting-blocking` (empty off-PR). `blocking-findings` is now what the decision
+  counted (PR-scoped on a pull request).
+- The PR diff is read across all pages (GitHub's 3000-file cap), not the first 100 files, and once per run — the
+  inline feed reuses it.
+
 ## [0.9.3] — 2026-09-26
 
 Found by running slopGrade on its own repo.

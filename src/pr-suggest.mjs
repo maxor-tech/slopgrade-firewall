@@ -139,22 +139,157 @@ export function parseAddedLines(patch) {
   return lines;
 }
 
-/** GET the PR's changed files → a Set of commentable "path:line" (present on the diff RIGHT side). FAIL-OPEN: any
- *  error → empty Set, and the caller then posts a body-only review (the summary still lands, no inline). */
-async function diffAddedLocs(ctx, token, fetchImpl, warn) {
-  const locs = new Set();
+/** Parse a unified-diff `patch` → the RIGHT-side line numbers this PR actually ADDED or CHANGED ('+' lines only).
+ *  Stricter than parseAddedLines (which also admits unchanged context lines, commentable but not authored by the PR):
+ *  this is the set « introduced by this PR » is measured against. PURE. */
+export function parseChangedLines(patch) {
+  const lines = new Set();
+  if (typeof patch !== "string") return lines;
+  let right = 0;
+  for (const l of patch.split("\n")) {
+    const h = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(l);
+    if (h) { right = Number(h[1]); continue; }
+    if (right === 0) continue;
+    if (l.startsWith("-") || l.startsWith("\\")) continue;
+    if (l.startsWith("+")) lines.add(right);
+    if (l.startsWith("+") || l.startsWith(" ")) right++;
+  }
+  return lines;
+}
+
+// GitHub lists at most 3000 files per PR (30 pages × 100) — the whole diff GitHub will ever give us.
+const MAX_DIFF_PAGES = 30;
+
+/**
+ * GET the PR's changed files (ALL pages) → the diff facts both the inline feed and the « introduced by this PR » split
+ * need. FAIL-OPEN: any error → `ok: false` (the caller keeps the whole-repo behaviour and says so).
+ *   commentable  "path:line" on the RIGHT side (added + context) — the only lines an inline comment is accepted on
+ *   changed      "path:line" the PR added/changed ('+' lines)
+ *   files        every path the PR touches
+ *   unpatched    paths GitHub sent WITHOUT a patch (binary / too large) — changed, lines unknown
+ */
+export async function fetchPrDiff(ctx, token, fetchImpl = fetch, warn = () => {}) {
+  const diff = { ok: false, commentable: new Set(), changed: new Set(), files: new Set(), unpatched: new Set() };
   try {
-    const res = await fetchImpl(`https://api.github.com/repos/${ctx.owner}/${ctx.name}/pulls/${ctx.number}/files?per_page=100`, {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "slopgrade-firewall" },
-    });
-    if (!res || !res.ok) return locs;
-    const files = await res.json();
-    for (const f of Array.isArray(files) ? files : []) {
-      if (!f || typeof f.filename !== "string" || typeof f.patch !== "string") continue;
-      for (const ln of parseAddedLines(f.patch)) locs.add(`${f.filename}:${ln}`);
+    for (let page = 1; page <= MAX_DIFF_PAGES; page++) {
+      const res = await fetchImpl(`https://api.github.com/repos/${ctx.owner}/${ctx.name}/pulls/${ctx.number}/files?per_page=100&page=${page}`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "slopgrade-firewall" },
+      });
+      if (!res || !res.ok) { warn(`could not read the PR diff (HTTP ${res ? res.status : "?"}).`); return { ...diff, ok: false }; }
+      const files = await res.json();
+      const arr = Array.isArray(files) ? files : [];
+      for (const f of arr) {
+        if (!f || typeof f.filename !== "string") continue;
+        if (f.status === "removed") continue; // a deleted file can't carry a finding on the head side
+        diff.files.add(f.filename);
+        if (typeof f.patch !== "string") { diff.unpatched.add(f.filename); continue; }
+        for (const ln of parseAddedLines(f.patch)) diff.commentable.add(`${f.filename}:${ln}`);
+        for (const ln of parseChangedLines(f.patch)) diff.changed.add(`${f.filename}:${ln}`);
+      }
+      if (arr.length < 100) return { ...diff, ok: true };
     }
-    return locs;
-  } catch (e) { warn(`could not read the PR diff (${e instanceof Error ? e.message : String(e)}) — inline feed skipped, summary still posts.`); return locs; }
+    return { ...diff, ok: true };
+  } catch (e) { warn(`could not read the PR diff (${e instanceof Error ? e.message : String(e)}).`); return { ...diff, ok: false }; }
+}
+
+/**
+ * « Clean as you code » — split the finding feed by what THIS PR is responsible for. PURE.
+ *   introduced  on a line the PR added/changed, or anywhere in a file GitHub sent without a patch (can't prove it old)
+ *   touched     in a file the PR changed, on a line it did not change (pre-existing, but in the author's hands now)
+ *   debt        everywhere else — pre-existing repo debt this PR did not cause
+ * A row with no usable location is `introduced`: an unattributable finding is never waved through as « old ».
+ */
+export function classifyAgainstDiff(feed, diff) {
+  return (Array.isArray(feed) ? feed : []).map((f) => {
+    const file = f && typeof f.file === "string" ? f.file : "";
+    let scope = "debt";
+    if (!file || !Number.isInteger(f.line)) scope = "introduced";
+    else if (diff.changed.has(`${file}:${f.line}`) || diff.unpatched.has(file)) scope = "introduced";
+    else if (diff.files.has(file)) scope = "touched";
+    return { ...f, scope };
+  });
+}
+
+const isBlockingSev = (f) => f && (f.severity === "high" || f.severity === "critical");
+
+// A file that can change a repo's tenant-isolation posture : SQL / migrations / an ORM schema.
+const SCHEMA_FILE = /\.(sql|prisma)$|(^|\/)(migrations?|schema)(\/|\.)/i;
+
+/**
+ * The blocking counts the gate decides on, scoped to what the PR introduced. PURE. `v` is the server verdict; the
+ * located feed rows are classified. A blocking count the server reported but the feed could NOT locate:
+ *   • detector packs → attributed to the PR (fail-closed: an unlocatable finding is never assumed to be old debt);
+ *   • cross-tenant hard leaks → attributed to the PR only when it touches a schema file (SQL / migration / ORM schema).
+ *     The server locates at most 20 leaks, so on a repo with a large leak backlog the overflow is unlocated by
+ *     construction — attributing it unconditionally would block every PR on old debt, the exact thing this avoids.
+ */
+export function scopedBlocking(v, classified, { deepBlocking = 0, diff = null } = {}) {
+  const rows = Array.isArray(classified) ? classified : [];
+  const ct = rows.filter((f) => f.pack === "cross-tenant");
+  const packs = rows.filter((f) => f.pack !== "cross-tenant" && f.pack !== "heisen" && isBlockingSev(f));
+  const deep = rows.filter((f) => f.pack === "heisen" && isBlockingSev(f));
+  const hard = Number(v && v.hardLeaks) || 0, packBlocking = Number(v && v.packBlocking) || 0;
+  const touchesSchema = !!(diff && diff.files && [...diff.files].some((p) => SCHEMA_FILE.test(p)));
+  const unlocatedHard = touchesSchema ? Math.max(0, hard - ct.length) : 0;
+  const unlocatedPack = Math.max(0, packBlocking - packs.length);
+  const intro = (a) => a.filter((f) => f.scope === "introduced").length;
+  return {
+    hardLeaks: intro(ct) + unlocatedHard,
+    packBlocking: intro(packs) + unlocatedPack,
+    deepBlocking: Math.min(Number(deepBlocking) || 0, intro(deep)),
+    preexistingBlocking: (ct.length - intro(ct)) + (packs.length - intro(packs)) + (deep.length - intro(deep))
+      + (touchesSchema ? 0 : Math.max(0, hard - ct.length)),
+  };
+}
+
+// Server-supplied text goes into markdown : no HTML, no table break, no new line ; long text is cut on a word boundary
+// with an ellipsis (a 200-char hard slice left « …use/ » mid-word on the first real run).
+const esc = (s, max = 200) => {
+  const t = String(s ?? "").replace(/[<>]/g, "").replace(/\|/g, "\\|").replace(/\r?\n/g, " ").trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max), sp = cut.lastIndexOf(" ");
+  return `${(sp > max * 0.6 ? cut.slice(0, sp) : cut).replace(/[\s,;:—-]+$/, "")}…`;
+};
+// The detail often repeats the location (« path:line — … ») that the row already shows as code : drop that prefix.
+const detailOf = (f) => String(f.detail ?? "").replace(new RegExp(`^\\s*${String(f.file ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:${Number(f.line) || 0}\\s*[—-]?\\s*`), "");
+const rowLine = (f) => { const d = detailOf(f); return `- ${SEV_ICON[String(f.severity || "").toLowerCase()] || "🔎"} \`${esc(f.file)}:${f.line}\` · **${esc(f.rule || "finding")}**${d ? ` — ${esc(d, 160)}` : ""}`; };
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+
+/**
+ * The PR review body, led by what THIS PR introduced — not by the repo's whole backlog. PURE.
+ * `classified` = classifyAgainstDiff output ; `gateMode` = the check blocks at all ; `origin` = the /ci link base.
+ */
+export function diffSummaryMarkdown(classified, { origin = "https://app.slopgrade.ai", gateMode = false, cap = 10 } = {}) {
+  const rows = Array.isArray(classified) ? classified : [];
+  const by = (s) => rows.filter((f) => f.scope === s);
+  const introduced = by("introduced"), touched = by("touched"), debt = by("debt");
+  const blockingNew = introduced.filter(isBlockingSev).length;
+  const out = ["## 🛡 slopGrade Firewall", ""];
+  if (introduced.length) {
+    out.push(`### This PR introduces ${plural(introduced.length, "finding")}${blockingNew ? ` · ${blockingNew} blocking` : ""}`, "");
+    out.push(...introduced.slice(0, cap).map(rowLine));
+    if (introduced.length > cap) out.push(`- _…and ${introduced.length - cap} more (inline on the diff + in the Security tab)_`);
+  } else {
+    out.push("### ✅ This PR introduces no new finding");
+  }
+  if (touched.length) {
+    out.push("", `**Already in the files you changed** (pre-existing, not introduced here) — ${plural(touched.length, "finding")}:`, "");
+    out.push(...touched.slice(0, cap).map(rowLine));
+    if (touched.length > cap) out.push(`- _…and ${touched.length - cap} more_`);
+  }
+  if (debt.length) {
+    out.push("", `**Existing debt elsewhere in the repo** — ${plural(debt.length, "finding")} this PR did not cause. [Review and burn it down →](${origin}/ci)`);
+  }
+  out.push("", gateMode
+    ? "<sub>The gate blocks only on critical/high findings this PR introduces — pre-existing debt is reported, never blocks your PR.</sub>"
+    : `<sub>Advisory mode — nothing blocks. [Enable the gate](${origin}/ci) to block new critical/high findings before they merge.</sub>`);
+  return out.join("\n");
+}
+
+/** Back-compat helper : the commentable "path:line" set only. FAIL-OPEN (empty Set → body-only review). */
+async function diffAddedLocs(ctx, token, fetchImpl, warn) {
+  const d = await fetchPrDiff(ctx, token, fetchImpl, (m) => warn(`${m} — inline feed skipped, summary still posts.`));
+  return d.commentable;
 }
 
 /**
@@ -168,14 +303,15 @@ async function diffAddedLocs(ctx, token, fetchImpl, warn) {
  * with no NEW on-diff findings still posts a body-only review so the summary lands (one comment, updated picture).
  * FAIL-OPEN + returns { comments, review: "posted"|"skipped" }. Never throws.
  */
-export async function postFindingReview(env, findings, summaryBody, { fetchImpl = fetch, readEvent, log = () => {}, warn = () => {}, max = 30 } = {}) {
+export async function postFindingReview(env, findings, summaryBody, { fetchImpl = fetch, readEvent, log = () => {}, warn = () => {}, max = 30, diff = null } = {}) {
   const token = env.GITHUB_TOKEN || env.FW_GH_TOKEN;
   if (!token) { warn("no GITHUB_TOKEN — cannot post the PR review (add `permissions: pull-requests: write`)."); return { comments: 0, review: "skipped" }; }
   const ctx = resolvePrContext(env, readEvent || (() => null));
   if (!ctx) { log("not a pull_request event with a resolvable PR — skipping the PR review."); return { comments: 0, review: "skipped" }; }
+  // A diff the caller already fetched (for the introduced/debt split) is reused — one diff read per run, not two.
   const [already, onDiff] = await Promise.all([
     existingFindingLocs(ctx, token, fetchImpl, warn),
-    diffAddedLocs(ctx, token, fetchImpl, warn),
+    diff && diff.ok ? Promise.resolve(diff.commentable) : diffAddedLocs(ctx, token, fetchImpl, warn),
   ]);
   const comments = buildFindingComments(findings, ctx.headSha)
     .filter((c) => !already.has(`${c.path}:${c.line}`) && onDiff.has(`${c.path}:${c.line}`))

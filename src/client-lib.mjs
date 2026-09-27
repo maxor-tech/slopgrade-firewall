@@ -4,7 +4,7 @@ import { gzipSync } from "node:zlib"; // builtin, pure (no I/O) — for the Code
 import { verify as edVerify, createPublicKey } from "node:crypto"; // builtin — Ed25519 verify of the pro-bundle signature.
 
 export const DEFAULT_ORIGIN = "https://app.slopgrade.ai";
-export const CLIENT_VERSION = "0.9.3"; // keep in lock-step with package.json (pinned by client-lib.test.mjs)
+export const CLIENT_VERSION = "0.10.0"; // keep in lock-step with package.json (pinned by client-lib.test.mjs)
 export const FINGERPRINT_VERSION = 1;
 export const MAX_PAYLOAD_BYTES = 8 * 1024 * 1024; // 8MB hard cap on the POST body (clear error, not an opaque 413)
 /** The pro-extractor bundle a PAID repo receives from /api/ci/pro-extractors — bounded like every other input. */
@@ -450,12 +450,18 @@ function fileLink(blobBase, file, lineNo) {
  * (data-driven via collectPackBlocks, so a pack the server adds tomorrow renders today) + the "see all / enable"
  * CTA. Pure. `decision` is the firewallVerdict kind (gate-blocked | gate-unpaid | pass).
  */
-export function stepSummaryMarkdown(v, { origin = DEFAULT_ORIGIN, blobBase = null, decision = "pass" } = {}) {
+export function stepSummaryMarkdown(v, { origin = DEFAULT_ORIGIN, blobBase = null, decision = "pass", scope = null } = {}) {
   const hard = Number(v && v.hardLeaks) || 0;
   const packBlocking = Number(v && v.packBlocking) || 0;
   const head = "## 🛡️ slopGrade Firewall — tenant isolation";
+  // `scope` (a pull request with a readable diff, 0.10.0) : the gate counted only what THIS PR introduced — the banner
+  // must say so, never the repo-wide totals it did not block on.
+  const scoped = scope && typeof scope === "object";
+  const sBlocking = scoped ? Number(scope.blocking) || 0 : 0;
   const verdict = decision === "gate-blocked"
-    ? `### ❌ Blocked — ${hard} hard cross-tenant leak${hard === 1 ? "" : "s"}${packBlocking > 0 ? ` · ${packBlocking} blocking finding${packBlocking === 1 ? "" : "s"}` : ""}`
+    ? (scoped
+      ? `### ❌ Blocked — ${sBlocking} blocking finding${sBlocking === 1 ? "" : "s"} introduced by this PR`
+      : `### ❌ Blocked — ${hard} hard cross-tenant leak${hard === 1 ? "" : "s"}${packBlocking > 0 ? ` · ${packBlocking} blocking finding${packBlocking === 1 ? "" : "s"}` : ""}`)
     : decision === "gate-unpaid"
       ? `### ⚠️ Advisory — ${hard} hard leak${hard === 1 ? "" : "s"} found, not blocking on the free tier`
       : hard > 0
@@ -463,7 +469,9 @@ export function stepSummaryMarkdown(v, { origin = DEFAULT_ORIGIN, blobBase = nul
         : "### ✅ Clean — no blocking cross-tenant leaks";
   const facts = `- **Pattern** \`${(v && v.pattern) || "n/a"}\`${v && v.tenantKey ? ` · **Tenant key** \`${v.tenantKey}\`` : ""}\n`
     + `- **Conformance** ${v && v.conformancePct == null ? "n/a" : Number(v.conformancePct).toFixed(1) + "%"}`
-    + (Number(v && v.byId) > 0 ? `\n- **+${v.byId}** conditional by-id access${Number(v.byId) === 1 ? "" : "es"} (review)` : "");
+    + (Number(v && v.byId) > 0 ? `\n- **+${v.byId}** conditional by-id access${Number(v.byId) === 1 ? "" : "es"} (review)` : "")
+    + (scoped ? `\n- **This PR** ${Number(scope.introduced) || 0} new finding${Number(scope.introduced) === 1 ? "" : "s"}`
+      + (Number(scope.preexistingBlocking) > 0 ? ` · ${scope.preexistingBlocking} pre-existing blocking (reported, never blocks this PR)` : "") : "");
   const leaks = (Array.isArray(v && v.leaks) ? v.leaks : []).slice(0, 20).map(parseLeak).filter((p) => p.file);
   const leakTable = leaks.length
     ? "\n\n| Cross-tenant leak |\n|:--|\n" + leaks.map((p) => `| ${fileLink(blobBase, p.file, p.line)} |`).join("\n")
