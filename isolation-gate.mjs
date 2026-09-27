@@ -50,7 +50,7 @@ import { extractCryptoFingerprint } from "./src/crypto-extract.mjs";
 // OSS shim: the interprocedural pass is stubbed (returns empty) → the taint detectors run INTRA-function only.
 import { buildWrapperRegistries, resolveImportedWrappers } from "./src/taint-interproc.mjs";
 import { firewallVerdict } from "./src/gate-verdict.mjs";
-import { postFindingReview, resolvePrContext, fetchPrDiff, classifyAgainstDiff, scopedBlocking, diffSummaryMarkdown } from "./src/pr-suggest.mjs";
+import { postFindingReview, resolvePrContext, fetchPrDiff, classifyAgainstDiff, scopedBlocking, diffSummaryMarkdown, gateScopeOf } from "./src/pr-suggest.mjs";
 import {
   resolveOrigin, DEFAULT_ORIGIN, classifyEnv, validVerdict, sanitizeLogLine, sanitizeFingerprint, sanitizePackFingerprints,
   parseLeak, leakText, findingLocation, buildSarif, collectPackBlocks, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
@@ -453,7 +453,7 @@ export async function main(argv = [], env = process.env) {
     const deps = { readEvent, log: (m) => line(m), warn: (m) => ghWarn(m), diff: prDiff };
     const blocking = feed.filter((f) => f.severity === "high" || f.severity === "critical").length;
     const summary = classified
-      ? diffSummaryMarkdown(classified, { origin, gateMode })
+      ? diffSummaryMarkdown(classified, { origin, gateMode, wholeRepo: gateScopeOf(v) === "repo" })
       : `## 🛡 slopGrade Firewall\n\n**${blocking}** blocking (critical/high) · ${feed.length - blocking} advisory · ${feed.length} finding(s) located.\n\nBlocking findings fail the check when the gate is enabled on this repo. See all findings + enable the gate: ${origin}/ci`;
     const review = await postFindingReview(env, feed, summary, deps);
     if (review.review !== "skipped" || review.comments) line(`\nslopGrade Firewall — ${review.comments} finding(s) inline in ONE PR review (${review.review}) — one notification, not one per finding.`);
@@ -492,7 +492,10 @@ export async function main(argv = [], env = process.env) {
   // entitled). The build-block message NAMES the real reason(s).
   // On a PR with a readable diff the counts are SCOPED to what the PR introduced (scopedBlocking) ; otherwise the
   // server's whole-repo counts, exactly as before.
-  const scoped = classified ? scopedBlocking(v, classified, { deepBlocking, diff: prDiff }) : null;
+  // Server kill switch (0.10.1) : `gateScope: "repo"` → whole-repo counts even on a PR (the split is still shown).
+  const scopeOverride = classified && gateScopeOf(v) === "repo";
+  if (scopeOverride) line(`\nslopGrade Firewall: the server set the gate to judge the whole repo on this run (PR scoping paused).`);
+  const scoped = classified && !scopeOverride ? scopedBlocking(v, classified, { deepBlocking, diff: prDiff }) : null;
   const gateHard = scoped ? scoped.hardLeaks : Number(v.hardLeaks) || 0;
   const gatePack = scoped ? scoped.packBlocking : Number(v.packBlocking) || 0;
   const gateDeep = scoped ? scoped.deepBlocking : deepBlocking;

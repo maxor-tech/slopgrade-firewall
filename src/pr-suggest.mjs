@@ -212,6 +212,16 @@ export function classifyAgainstDiff(feed, diff) {
 
 const isBlockingSev = (f) => f && (f.severity === "high" || f.severity === "critical");
 
+/**
+ * Server kill switch for the PR-scoped gate (0.10.1). The « clean as you code » rule is decided HERE, in the Action —
+ * users pin tags, so without this a bad rule could only be undone by a new release every user must adopt. The server
+ * can answer `gateScope: "repo"` to put every client ≥ 0.10.1 back on whole-repo counts at once. Anything else (absent,
+ * "pr", garbage) keeps the default PR scope. PURE.
+ */
+export function gateScopeOf(v) {
+  return v && v.gateScope === "repo" ? "repo" : "pr";
+}
+
 // A file that can change a repo's tenant-isolation posture : SQL / migrations / an ORM schema.
 const SCHEMA_FILE = /\.(sql|prisma)$|(^|\/)(migrations?|schema)(\/|\.)/i;
 
@@ -259,7 +269,7 @@ const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
  * The PR review body, led by what THIS PR introduced — not by the repo's whole backlog. PURE.
  * `classified` = classifyAgainstDiff output ; `gateMode` = the check blocks at all ; `origin` = the /ci link base.
  */
-export function diffSummaryMarkdown(classified, { origin = "https://app.slopgrade.ai", gateMode = false, cap = 10 } = {}) {
+export function diffSummaryMarkdown(classified, { origin = "https://app.slopgrade.ai", gateMode = false, cap = 10, wholeRepo = false } = {}) {
   const rows = Array.isArray(classified) ? classified : [];
   const by = (s) => rows.filter((f) => f.scope === s);
   const introduced = by("introduced"), touched = by("touched"), debt = by("debt");
@@ -280,7 +290,9 @@ export function diffSummaryMarkdown(classified, { origin = "https://app.slopgrad
   if (debt.length) {
     out.push("", `**Existing debt elsewhere in the repo** — ${plural(debt.length, "finding")} this PR did not cause. [Review and burn it down →](${origin}/ci)`);
   }
-  out.push("", gateMode
+  out.push("", gateMode && wholeRepo
+    ? "<sub>The gate is temporarily judging the whole repo on this run — pre-existing critical/high findings can block it.</sub>"
+    : gateMode
     ? "<sub>The gate blocks only on critical/high findings this PR introduces — pre-existing debt is reported, never blocks your PR.</sub>"
     : `<sub>Advisory mode — nothing blocks. [Enable the gate](${origin}/ci) to block new critical/high findings before they merge.</sub>`);
   return out.join("\n");

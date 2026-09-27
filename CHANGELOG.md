@@ -3,6 +3,18 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.10.1] — 2026-09-27
+
+### Added
+- **Server kill switch for the PR-scoped gate.** The « clean as you code » rule lives in the Action and users pin tags,
+  so a bad rule used to need a new release every user adopts. The server can now answer `gateScope: "repo"` to put
+  every client ≥ 0.10.1 back on whole-repo counts at once (the introduced / debt split is still shown, and the review
+  says the gate is temporarily judging the whole repo). Absent / any other value keeps the PR scope.
+
+### Changed
+- `action.yml` description shortened to fit the GitHub Marketplace listing (was ~280 chars) ; the `firewall-mode`
+  input now says that on a pull request only what the PR introduces counts.
+
 ## [0.10.0] — 2026-09-26
 
 Found by running slopGrade on its own repo : a 6-file PR got the repo's whole backlog — 26 findings, none on its own
