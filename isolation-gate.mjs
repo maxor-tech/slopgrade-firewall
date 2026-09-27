@@ -180,7 +180,7 @@ Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <p
   --deep-scan      OPT-IN, paid repos: ALSO send the SOURCE of the sink-bearing files (≤ 40) to the hosted taint engine
                    (heisen). The only mode where code leaves the runner; --print-payload lists the files. Advisory.
   --deep-scan-block  OPT-IN, with --deep-scan and --gate: a NEW deep-scan finding (one no pack reported) BLOCKS the build.
-                   Measured block precision ~94% on held-out labeled code (~1 false block in 17) — off by default.
+                   Block precision: ~94% on benchmark code, ~69-73% on real-world CVE code (~1 false block in 3-4) — off by default.
   --help           show this help
 Exit codes: 1 only on a gate-blocked verdict (or --strict with no verdict); 0 otherwise (fail open).`;
 const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-block", "--no-fix"]);

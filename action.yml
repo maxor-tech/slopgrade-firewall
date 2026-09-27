@@ -24,7 +24,7 @@ inputs:
     required: false
     default: "false"
   deep-scan-block:
-    description: "OPT-IN (default false; needs deep-scan: \"true\" and firewall-mode: gate). A NEW deep-scan finding — one no detector pack reported — BLOCKS the check instead of annotating a warning. Measured block precision of the taint engine: ~94% on held-out labeled code (about 1 false block in 17), so it stays off unless you choose it."
+    description: "OPT-IN (default false; needs deep-scan: \"true\" and firewall-mode: gate). A NEW deep-scan finding — one no detector pack reported — BLOCKS the check instead of annotating a warning. Measured block precision of the taint engine: ~94% on labeled benchmark code, but ~69-73% on real-world CVE code (about 1 false block in 3-4, mostly project-specific validators it does not recognise) — so it stays off unless you choose it."
     required: false
     default: "false"
   fix:
