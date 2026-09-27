@@ -154,9 +154,12 @@ shell=True)`). It is the **only** mode in which file contents leave your runner,
 - **Who** — paid repos. A non-paid repo gets `402`: a warning, nothing is analysed, the run is unaffected.
 - **Advisory by default, blocking if you choose** — findings annotate as **warnings** (log, PR review, SARIF) and never
   fail the check. Set `deep-scan-block: "true"` (with `firewall-mode: gate`) to make a **new** deep-scan finding — one no
-  detector pack reported — **fail the check**. What that costs, measured on labeled code the engine was not tuned on:
-  its blocks are right **68 of 72 (~94%)** overall, **17 of 21** on the strictest slice (CodeQL Python) — roughly one
-  false block in 17. A finding on a line another pack already reported is counted as a confirmation, not annotated or
+  detector pack reported — **fail the check**. What that costs depends on the code, so here are both numbers:
+  on labeled **benchmark** code the engine was not tuned on, its blocks are right **68 of 72 (~94%)**; on **real-world
+  CVE code** (GitHub advisories, the vulnerable and the fixed version of the same file — 49 blocks adjudicated one by
+  one, 2026-09-27) they are right **69–73%** of the time — roughly **one false block in three to four**. Most false blocks
+  come from a project's own validation function (`validateId(x)`, `isPathAllowed(x)`) that the engine does not
+  recognise. That is why it is off by default: enable it where a false block is cheaper than a missed flow. A finding on a line another pack already reported is counted as a confirmation, not annotated or
   counted twice. Any failure (timeout, 5xx, malformed answer) is a warning — the verdict is never affected.
 
 ## Fail-open, always

@@ -3,6 +3,16 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.10.2] — 2026-09-27
+
+### Changed
+- **Honest precision for `deep-scan-block`.** The README, the `deep-scan-block` input description and `--help` quoted
+  only the benchmark number (~94%, « about 1 false block in 17 »). Measured on real-world CVE code — GitHub advisory
+  files in their vulnerable and fixed versions, 49 blocks adjudicated one by one — the taint engine's blocks are right
+  69–73% of the time (about 1 false block in 3–4), mostly because a project's own validation function is not
+  recognised. Both numbers are now stated. No behavior change: the deep scan stays advisory by default and blocking
+  stays opt-in.
+
 ## [0.10.1] — 2026-09-27
 
 ### Added
