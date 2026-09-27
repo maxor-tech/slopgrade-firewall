@@ -242,8 +242,17 @@ export function scopedBlocking(v, classified, { deepBlocking = 0, diff = null } 
   };
 }
 
-const esc = (s) => String(s ?? "").replace(/[<>]/g, "").replace(/\|/g, "\\|").replace(/\r?\n/g, " ").slice(0, 200);
-const rowLine = (f) => `- ${SEV_ICON[String(f.severity || "").toLowerCase()] || "🔎"} \`${esc(f.file)}:${f.line}\` · **${esc(f.rule || "finding")}**${f.detail ? ` — ${esc(f.detail)}` : ""}`;
+// Server-supplied text goes into markdown : no HTML, no table break, no new line ; long text is cut on a word boundary
+// with an ellipsis (a 200-char hard slice left « …use/ » mid-word on the first real run).
+const esc = (s, max = 200) => {
+  const t = String(s ?? "").replace(/[<>]/g, "").replace(/\|/g, "\\|").replace(/\r?\n/g, " ").trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max), sp = cut.lastIndexOf(" ");
+  return `${(sp > max * 0.6 ? cut.slice(0, sp) : cut).replace(/[\s,;:—-]+$/, "")}…`;
+};
+// The detail often repeats the location (« path:line — … ») that the row already shows as code : drop that prefix.
+const detailOf = (f) => String(f.detail ?? "").replace(new RegExp(`^\\s*${String(f.file ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:${Number(f.line) || 0}\\s*[—-]?\\s*`), "");
+const rowLine = (f) => { const d = detailOf(f); return `- ${SEV_ICON[String(f.severity || "").toLowerCase()] || "🔎"} \`${esc(f.file)}:${f.line}\` · **${esc(f.rule || "finding")}**${d ? ` — ${esc(d, 160)}` : ""}`; };
 const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 /**

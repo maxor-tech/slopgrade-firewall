@@ -115,6 +115,15 @@ test("the review body escapes finding text (no HTML / table break / newline inje
   assert.ok(!/\nNEWLINE/.test(body), "a detail cannot start a new markdown line");
 });
 
+test("the review row drops a detail's repeated `file:line` prefix and cuts long text on a word, with an ellipsis", () => {
+  const detail = "scripts/p.mjs:5 — a Node eval / child_process.exec / new Function built from a request value — attacker input runs as code or a shell command (RCE). Never pass user input to eval/exec or a shell; use a fixed command and pass arguments as an array";
+  const body = diffSummaryMarkdown([{ scope: "introduced", file: "scripts/p.mjs", line: 5, rule: "command-injection", detail, severity: "high" }]);
+  const row = body.split("\n").find((l) => l.startsWith("- 🔴"));
+  assert.match(row, /^- 🔴 `scripts\/p\.mjs:5` · \*\*command-injection\*\* — a Node eval/, "location not repeated");
+  assert.match(row, /…$/, "long detail ends with an ellipsis");
+  assert.ok(!/eval\/…$/.test(row) && !/\s…$/.test(row), "cut on a word boundary");
+});
+
 test("postFindingReview reuses a diff the caller already fetched (one diff read per run)", async () => {
   const env = { GITHUB_TOKEN: "t", GITHUB_REPOSITORY: "o/r", GITHUB_EVENT_NAME: "pull_request" };
   const gets = [];
