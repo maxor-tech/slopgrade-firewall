@@ -89,10 +89,15 @@ export const SUMMARY_MARKER = "<!-- slopgrade-firewall:summary -->";
 const SEV_ICON = { critical: "🔴", high: "🔴", medium: "🟡", low: "⚪" };
 
 /** A plain finding review-comment body: severity icon + rule + detail + the dedup marker. Never a ```suggestion```. */
-export function findingCommentBody({ rule, detail, severity }) {
+export function findingCommentBody({ rule, detail, severity, fix }) {
   const icon = SEV_ICON[String(severity || "").toLowerCase()] || "🔎";
   const head = `${icon} **slopGrade Firewall** · ${rule || "finding"}${severity ? ` · ${severity}` : ""}`;
-  return `${detail ? `${head}\n\n${detail}` : head}\n\n${FINDING_MARKER}`;
+  // A verified one-click fix (src/autofix.mjs) rides IN the finding's own comment → GitHub shows « Commit suggestion »
+  // right on it. The suggestion replaces exactly the commented line, which is the line the fix was computed from.
+  const suggestion = fix && typeof fix.after === "string"
+    ? `\n\n**One-click fix** — ${fix.note || "verified secure rewrite"}. Verified in your runner: the finding no longer matches.\n\n\`\`\`suggestion\n${fix.after}\n\`\`\``
+    : "";
+  return `${detail ? `${head}\n\n${detail}` : head}${suggestion}\n\n${FINDING_MARKER}`;
 }
 
 /** Map normalized findings [{file,line,rule,detail,severity}] -> review-comment payloads. Pure; drops any without a
@@ -212,6 +217,16 @@ export function classifyAgainstDiff(feed, diff) {
 
 const isBlockingSev = (f) => f && (f.severity === "high" || f.severity === "critical");
 
+/**
+ * Server kill switch for the PR-scoped gate (0.10.1). The « clean as you code » rule is decided HERE, in the Action —
+ * users pin tags, so without this a bad rule could only be undone by a new release every user must adopt. The server
+ * can answer `gateScope: "repo"` to put every client ≥ 0.10.1 back on whole-repo counts at once. Anything else (absent,
+ * "pr", garbage) keeps the default PR scope. PURE.
+ */
+export function gateScopeOf(v) {
+  return v && v.gateScope === "repo" ? "repo" : "pr";
+}
+
 // A file that can change a repo's tenant-isolation posture : SQL / migrations / an ORM schema.
 const SCHEMA_FILE = /\.(sql|prisma)$|(^|\/)(migrations?|schema)(\/|\.)/i;
 
@@ -252,14 +267,14 @@ const esc = (s, max = 200) => {
 };
 // The detail often repeats the location (« path:line — … ») that the row already shows as code : drop that prefix.
 const detailOf = (f) => String(f.detail ?? "").replace(new RegExp(`^\\s*${String(f.file ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:${Number(f.line) || 0}\\s*[—-]?\\s*`), "");
-const rowLine = (f) => { const d = detailOf(f); return `- ${SEV_ICON[String(f.severity || "").toLowerCase()] || "🔎"} \`${esc(f.file)}:${f.line}\` · **${esc(f.rule || "finding")}**${d ? ` — ${esc(d, 160)}` : ""}`; };
+const rowLine = (f) => { const d = detailOf(f); return `- ${SEV_ICON[String(f.severity || "").toLowerCase()] || "🔎"} \`${esc(f.file)}:${f.line}\` · **${esc(f.rule || "finding")}**${f.fix ? " · 🔧 one-click fix" : ""}${d ? ` — ${esc(d, 160)}` : ""}`; };
 const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 /**
  * The PR review body, led by what THIS PR introduced — not by the repo's whole backlog. PURE.
  * `classified` = classifyAgainstDiff output ; `gateMode` = the check blocks at all ; `origin` = the /ci link base.
  */
-export function diffSummaryMarkdown(classified, { origin = "https://app.slopgrade.ai", gateMode = false, cap = 10 } = {}) {
+export function diffSummaryMarkdown(classified, { origin = "https://app.slopgrade.ai", gateMode = false, cap = 10, wholeRepo = false } = {}) {
   const rows = Array.isArray(classified) ? classified : [];
   const by = (s) => rows.filter((f) => f.scope === s);
   const introduced = by("introduced"), touched = by("touched"), debt = by("debt");
@@ -280,7 +295,9 @@ export function diffSummaryMarkdown(classified, { origin = "https://app.slopgrad
   if (debt.length) {
     out.push("", `**Existing debt elsewhere in the repo** — ${plural(debt.length, "finding")} this PR did not cause. [Review and burn it down →](${origin}/ci)`);
   }
-  out.push("", gateMode
+  out.push("", gateMode && wholeRepo
+    ? "<sub>The gate is temporarily judging the whole repo on this run — pre-existing critical/high findings can block it.</sub>"
+    : gateMode
     ? "<sub>The gate blocks only on critical/high findings this PR introduces — pre-existing debt is reported, never blocks your PR.</sub>"
     : `<sub>Advisory mode — nothing blocks. [Enable the gate](${origin}/ci) to block new critical/high findings before they merge.</sub>`);
   return out.join("\n");

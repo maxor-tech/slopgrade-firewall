@@ -50,7 +50,7 @@ import { extractCryptoFingerprint } from "./src/crypto-extract.mjs";
 // OSS shim: the interprocedural pass is stubbed (returns empty) → the taint detectors run INTRA-function only.
 import { buildWrapperRegistries, resolveImportedWrappers } from "./src/taint-interproc.mjs";
 import { firewallVerdict } from "./src/gate-verdict.mjs";
-import { postFindingReview, resolvePrContext, fetchPrDiff, classifyAgainstDiff, scopedBlocking, diffSummaryMarkdown } from "./src/pr-suggest.mjs";
+import { postFindingReview, resolvePrContext, fetchPrDiff, classifyAgainstDiff, scopedBlocking, diffSummaryMarkdown, gateScopeOf } from "./src/pr-suggest.mjs";
 import {
   resolveOrigin, DEFAULT_ORIGIN, classifyEnv, validVerdict, sanitizeLogLine, sanitizeFingerprint, sanitizePackFingerprints,
   parseLeak, leakText, findingLocation, buildSarif, collectPackBlocks, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
@@ -58,6 +58,7 @@ import {
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs,
 } from "./src/client-lib.mjs";
 import { sinkFiles, selectDeepUnits, requestDeepScan, heisenFeed, splitAgainstFeed, isPaidVerdict, deepScanNudge } from "./src/deep-scan.mjs";
+import { fixableHitIndex, attachFixes } from "./src/autofix.mjs";
 
 const CODE_EXTS = /\.(py|ts|tsx|js|jsx|mjs|cjs|sql|rb|go|php|prisma|java|cs|rs|c|cc|cpp|h|hpp|kt|scala|ex|exs)$/;
 const TIMEOUT_MS = 20_000;
@@ -182,7 +183,7 @@ Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <p
                    Measured block precision ~94% on held-out labeled code (~1 false block in 17) — off by default.
   --help           show this help
 Exit codes: 1 only on a gate-blocked verdict (or --strict with no verdict); 0 otherwise (fail open).`;
-const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-block"]);
+const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-block", "--no-fix"]);
 
 export async function main(argv = [], env = process.env) {
   if (argv.includes("--help")) { console.log(HELP); return 0; }
@@ -194,6 +195,7 @@ export async function main(argv = [], env = process.env) {
   const printPayload = argv.includes("--print-payload");
   const deepScan = argv.includes("--deep-scan");
   const deepBlock = deepScan && argv.includes("--deep-scan-block");
+  const noFix = argv.includes("--no-fix"); // one-click fix suggestions are ON by default (input `fix: off` opts out)
   if (argv.includes("--deep-scan-block") && !deepScan) console.log("::warning title=slopGrade Firewall::--deep-scan-block has no effect without --deep-scan (deep-scan: \"true\").");
   const root = env.GITHUB_WORKSPACE || process.cwd();
   const noVerdict = () => (strict && gateMode ? 1 : 0);
@@ -428,6 +430,14 @@ export async function main(argv = [], env = process.env) {
     }
   }
 
+  // One-click fixes (0.10.1) — a verified, line-local secure rewrite rides in the finding's inline comment as a GitHub
+  // « Commit suggestion ». Computed from the runner's own checkout + its own (sanitized) hits : nothing leaves.
+  if (!noFix && feed.length) {
+    const safeRel = (f) => typeof f === "string" && f && !f.startsWith("/") && !/^[a-zA-Z]:/.test(f) && !f.split(/[\\/]/).includes("..");
+    const fixes = attachFixes(feed, fixableHitIndex(wireAll), (file, ln) => (safeRel(file) ? readFileSync(join(root, file), "utf8").split(/\r?\n/)[ln - 1] ?? null : null));
+    if (fixes) line(`\nslopGrade Firewall — ${fixes} one-click fix(es), verified in your runner — posted as « Commit suggestion » on the PR line.`);
+  }
+
   // « Clean as you code » (0.10.0) — on a pull request, split the feed by what THIS PR is responsible for (introduced on
   // its changed lines / already in a file it touched / debt elsewhere) and gate on the introduced part only. A 6-file PR
   // used to get the repo's whole backlog (26 findings, 0 of them its own) and, in gate mode, be blocked by it. Push runs
@@ -453,7 +463,7 @@ export async function main(argv = [], env = process.env) {
     const deps = { readEvent, log: (m) => line(m), warn: (m) => ghWarn(m), diff: prDiff };
     const blocking = feed.filter((f) => f.severity === "high" || f.severity === "critical").length;
     const summary = classified
-      ? diffSummaryMarkdown(classified, { origin, gateMode })
+      ? diffSummaryMarkdown(classified, { origin, gateMode, wholeRepo: gateScopeOf(v) === "repo" })
       : `## 🛡 slopGrade Firewall\n\n**${blocking}** blocking (critical/high) · ${feed.length - blocking} advisory · ${feed.length} finding(s) located.\n\nBlocking findings fail the check when the gate is enabled on this repo. See all findings + enable the gate: ${origin}/ci`;
     const review = await postFindingReview(env, feed, summary, deps);
     if (review.review !== "skipped" || review.comments) line(`\nslopGrade Firewall — ${review.comments} finding(s) inline in ONE PR review (${review.review}) — one notification, not one per finding.`);
@@ -492,7 +502,10 @@ export async function main(argv = [], env = process.env) {
   // entitled). The build-block message NAMES the real reason(s).
   // On a PR with a readable diff the counts are SCOPED to what the PR introduced (scopedBlocking) ; otherwise the
   // server's whole-repo counts, exactly as before.
-  const scoped = classified ? scopedBlocking(v, classified, { deepBlocking, diff: prDiff }) : null;
+  // Server kill switch (0.10.1) : `gateScope: "repo"` → whole-repo counts even on a PR (the split is still shown).
+  const scopeOverride = classified && gateScopeOf(v) === "repo";
+  if (scopeOverride) line(`\nslopGrade Firewall: the server set the gate to judge the whole repo on this run (PR scoping paused).`);
+  const scoped = classified && !scopeOverride ? scopedBlocking(v, classified, { deepBlocking, diff: prDiff }) : null;
   const gateHard = scoped ? scoped.hardLeaks : Number(v.hardLeaks) || 0;
   const gatePack = scoped ? scoped.packBlocking : Number(v.packBlocking) || 0;
   const gateDeep = scoped ? scoped.deepBlocking : deepBlocking;

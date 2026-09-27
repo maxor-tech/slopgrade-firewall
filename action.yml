@@ -1,10 +1,10 @@
 name: "slopGrade Firewall"
-description: "Deterministic tenant-isolation leak detection for CI — $0, zero source egress by default (opt-in deep-scan excepted), zero secrets (GitHub OIDC). The blocking gate is free for public repos and your first private repo (cross-tenant + the 22 OSS classes)."
+description: "Blocks cross-tenant leaks, injection and secrets a pull request introduces. Source never leaves your runner. Free."
 author: "Maxor Global LLC"
 branding: { icon: "shield", color: "green" }
 inputs:
   firewall-mode:
-    description: "gate (DEFAULT — blocks the check on a hard cross-tenant leak OR a blocking security finding (injection/crypto/secrets…), when the repo is entitled: public repos and your first private repo block free on cross-tenant + the 22 OSS classes, a paid slot unlocks every calibrated class; any other repo stays advisory, never blocked) | advisory (reports everything, never blocks) | off. Findings post as an inline PR comment feed when the caller grants `permissions: pull-requests: write`."
+    description: "gate (DEFAULT — blocks the check on a hard cross-tenant leak OR a blocking security finding (injection/crypto/secrets…), when the repo is entitled: public repos and your first private repo block free on cross-tenant + the 22 OSS classes, a paid slot unlocks every calibrated class; any other repo stays advisory, never blocked ; on a pull request only what the PR introduces counts — pre-existing debt is reported, never blocks) | advisory (reports everything, never blocks) | off. Findings post as an inline PR comment feed when the caller grants `permissions: pull-requests: write`."
     required: false
     default: "gate"
   strict:
@@ -27,6 +27,10 @@ inputs:
     description: "OPT-IN (default false; needs deep-scan: \"true\" and firewall-mode: gate). A NEW deep-scan finding — one no detector pack reported — BLOCKS the check instead of annotating a warning. Measured block precision of the taint engine: ~94% on held-out labeled code (about 1 false block in 17), so it stays off unless you choose it."
     required: false
     default: "false"
+  fix:
+    description: "suggest (DEFAULT) — a finding with a deterministic secure rewrite (TLS verification off, debug on, yaml.load…) gets a GitHub « Commit suggestion » in its inline PR comment, verified in your runner (the finding no longer matches ; nothing leaves) | off."
+    required: false
+    default: "suggest"
 outputs:
   verdict:
     description: "advisory | gate-blocked | gate-unpaid | gate-pass — the exit decision (empty if no server verdict was reached)."
@@ -74,6 +78,7 @@ runs:
         FW_UPLOAD_SARIF: ${{ inputs.upload-sarif }}
         FW_DEEP_SCAN: ${{ inputs.deep-scan }}
         FW_DEEP_SCAN_BLOCK: ${{ inputs.deep-scan-block }}
+        FW_FIX: ${{ inputs.fix }}
         # The caller's OWN GITHUB_TOKEN, used for two consumer-side surfaces, both posting to the caller's OWN repo and
         # never reaching slopGrade: the inline PR comment feed (`permissions: pull-requests: write`) and the Code
         # Scanning SARIF upload (`permissions: security-events: write`). Missing either permission = that surface
@@ -95,4 +100,5 @@ runs:
         [ -n "${FW_SARIF}" ] && ARGS+=(--sarif "${FW_SARIF}")
         [ "${FW_DEEP_SCAN}" = "true" ] && ARGS+=(--deep-scan)
         [ "${FW_DEEP_SCAN_BLOCK}" = "true" ] && ARGS+=(--deep-scan-block)
+        [ "${FW_FIX}" = "off" ] && ARGS+=(--no-fix)
         node "$FW_CLI" "${ARGS[@]}"

@@ -36,6 +36,7 @@ jobs:
           # deep-scan: "true"              # OPT-IN, paid: ALSO send the source of sink-bearing files to the hosted taint
           #                                  engine (cross-function flows). Default false — see "Deep scan" below
           # deep-scan-block: "true"        # with deep-scan + gate: a NEW deep-scan finding fails the check (default false)
+          # fix: "off"                     # one-click « Commit suggestion » fixes on the PR (default: suggest)
 ```
 
 Or run it directly: `node isolation-gate.mjs --print-payload` (audit exactly what would leave the runner).

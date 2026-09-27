@@ -150,3 +150,12 @@ test("stepSummaryMarkdown with a PR scope says what the gate counted, never the 
   // no scope (push run) → unchanged banner
   assert.match(stepSummaryMarkdown(v, { decision: "gate-blocked" }), /Blocked — 25 hard cross-tenant leaks · 6 blocking findings/);
 });
+
+test("server kill switch (0.10.1) : gateScope \"repo\" → whole-repo gate ; anything else keeps the PR scope", async () => {
+  const { gateScopeOf } = await import("../pr-suggest.mjs");
+  assert.equal(gateScopeOf({ gateScope: "repo" }), "repo");
+  for (const v of [{}, { gateScope: "pr" }, { gateScope: "REPO" }, { gateScope: 1 }, null, undefined]) assert.equal(gateScopeOf(v), "pr");
+  const body = diffSummaryMarkdown([{ scope: "debt", file: "a.ts", line: 1, severity: "high" }], { gateMode: true, wholeRepo: true });
+  assert.match(body, /temporarily judging the whole repo/);
+  assert.ok(!/never blocks your PR/.test(body), "never promises PR scoping while it is paused");
+});
