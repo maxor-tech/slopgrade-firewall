@@ -170,6 +170,8 @@ shell=True)`). It is the **only** mode in which file contents leave your runner,
   advisories, the vulnerable file flagged AND its fix not): paired recall rises from about **1% to 9%** (JavaScript) and
   **1.5% to 5.6%** (Python) — but about **2 in 3 candidates remain after the fix**, and a clean library can show a few
   by-design flows (a template engine rendering what it is given). Use it to review a package's public API, not as a gate.
+  A candidate you reviewed is quieted with a `heisen-ignore: <reason>` comment on its sink line (client ≥ 0.10.7 also prints
+  what became of the previous run's candidates: resolved · dismissed · still open · new).
 
 ## Fail-open, always
 

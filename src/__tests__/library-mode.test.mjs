@@ -2,7 +2,27 @@
 // the manifest shapes of the measured corpus: 22 real applications (0 may read as a library) and real libraries.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { repoKind, libraryCandidates, requestDeepScan } from "../deep-scan.mjs";
+import { repoKind, libraryCandidates, requestDeepScan, candidateOutcomesLine, CANDIDATE_DISMISS_HINT } from "../deep-scan.mjs";
+
+test("libraryCandidates takes the detector's per-sink line when present (heisen-slop aea8aa9), else the evidence's", () => {
+  const ev = "library-tier (…): ast-taint: the request value read at line 2 reaches os.system() at line 3 (CWE-78)";
+  const rows = libraryCandidates([
+    { path: "a.py", cwe: "CWE-78", evidence: ev, line: 9 },
+    { path: "a.py", cwe: "CWE-78", evidence: ev },
+    { path: "a.py", cwe: "CWE-78", evidence: ev, line: 0 },
+  ], ["a.py"]);
+  assert.deepEqual(rows.map((r) => r.line), [9, 3, 3]);
+});
+
+test("candidateOutcomesLine: one line from the server's outcome counts; null when absent or malformed", () => {
+  assert.equal(candidateOutcomesLine({ new: 1, persisting: 2, resolved: 3, dismissed: 1, unscanned: 0 }),
+    "since the last library run: 3 resolved · 1 dismissed (heisen-ignore) · 2 still open · 1 new");
+  assert.match(candidateOutcomesLine({ new: 0, persisting: 0, resolved: 0, dismissed: 0, unscanned: 4 }), /4 not re-scanned$/);
+  assert.equal(candidateOutcomesLine(undefined), null, "first library run / older server: nothing printed");
+  assert.equal(candidateOutcomesLine({ new: 1, persisting: -1, resolved: 0, dismissed: 0, unscanned: 0 }), null);
+  assert.equal(candidateOutcomesLine({ new: "1", persisting: 0, resolved: 0, dismissed: 0, unscanned: 0 }), null);
+  assert.match(CANDIDATE_DISMISS_HINT, /heisen-ignore/);
+});
 
 const fsOf = (files) => (rel) => (rel in files ? files[rel] : null);
 
