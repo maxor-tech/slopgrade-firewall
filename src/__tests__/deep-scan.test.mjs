@@ -2,8 +2,9 @@
 // that a server answer cannot annotate a file we did not send, and that every failure is a no-answer (fail open).
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
-  sinkFiles, selectDeepUnits, validHeisenResponse, evidenceLine, heisenFeed, requestDeepScan, splitAgainstFeed, deepScanNudge, isPaidVerdict,
+  sinkFiles, selectDeepUnits, hasSinkMarker, validHeisenResponse, evidenceLine, heisenFeed, requestDeepScan, splitAgainstFeed, deepScanNudge, isPaidVerdict,
   DEEP_MAX_UNITS, DEEP_MAX_UNIT_CHARS, DEEP_MAX_TOTAL_CHARS,
 } from "../deep-scan.mjs";
 
@@ -30,6 +31,32 @@ test("selectDeepUnits: hit files first, then files with a sink marker; a file wi
   const r = selectDeepUnits(Object.keys(src), read, ["a.py", "big.py"]);
   assert.deepEqual(r.units.map((u) => u.path), ["a.py", "helper.py"]);
   assert.equal(r.skipped, 1, "the oversize hit file is counted as skipped");
+});
+
+test("every (language × class) the hosted engines model passes the pre-filter — no detector is unreachable", () => {
+  const fx = JSON.parse(readFileSync(new URL("./fixtures/heisen-classes.json", import.meta.url), "utf8"));
+  const cells = Object.entries(fx).filter(([k]) => k !== "_note").flatMap(([lang, m]) => Object.entries(m).map(([cls, code]) => [`${lang}:${cls}`, code]));
+  assert.ok(cells.length >= 116, `the fixture covers every modelled cell (got ${cells.length})`);
+  const missed = cells.filter(([, code]) => !hasSinkMarker(code)).map(([id]) => id);
+  assert.deepEqual(missed, [], "a class whose positive never matches SINK_HINTS is a detector no customer file can reach");
+});
+
+test("files with no security marker stay on the runner (the egress promise holds after widening)", () => {
+  const plain = [
+    "def add(a, b):\n    return a + b\n",
+    "export function formatPrice(n) { return `$${n.toFixed(2)}`; }\n",
+    "package util\nfunc Max(a, b int) int { if a > b { return a }; return b }\n",
+    "public class Point { int x; int y; Point(int x, int y) { this.x = x; this.y = y; } }\n",
+    "class Greeter\n  def hello(name)\n    \"Hello, #{name}\"\n  end\nend\n",
+    "import React from 'react';\nexport const Title = ({ children }) => <h1 className=\"title\">{children}</h1>;\n",
+  ];
+  for (const code of plain) assert.equal(hasSinkMarker(code), false, code);
+});
+
+test("selectDeepUnits: under the cap, a marker file that ALSO reads request input goes before a marker-only one", () => {
+  const src = { "a_config.py": "SESSION_COOKIE_SECURE = False", "z_view.py": "def v(request):\n    return open(request.GET['f'])" };
+  const r = selectDeepUnits(Object.keys(src), (p) => src[p]);
+  assert.deepEqual(r.units.map((u) => u.path), ["z_view.py", "a_config.py"]);
 });
 
 test("selectDeepUnits enforces the file and character caps", () => {
