@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  sinkFiles, selectDeepUnits, hasSinkMarker, validHeisenResponse, evidenceLine, heisenFeed, requestDeepScan, splitAgainstFeed, deepScanNudge, isPaidVerdict,
+  sinkFiles, selectDeepUnits, hasSinkMarker, prChangedPaths, validHeisenResponse, evidenceLine, heisenFeed, requestDeepScan, splitAgainstFeed, deepScanNudge, isPaidVerdict,
   DEEP_MAX_UNITS, DEEP_MAX_UNIT_CHARS, DEEP_MAX_TOTAL_CHARS,
 } from "../deep-scan.mjs";
 
@@ -59,6 +59,33 @@ test("selectDeepUnits: under the cap, a marker file that ALSO reads request inpu
   assert.deepEqual(r.units.map((u) => u.path), ["z_view.py", "a_config.py"]);
 });
 
+test("selectDeepUnits: on a PR, the files it changed go first — but being in the PR never widens egress", () => {
+  const src = { "a_hit.py": "import os", "b_view.py": "def v(request):\n    return open(request.GET['f'])", "z_pr.py": "SESSION_COOKIE_SECURE = False", "z_pr_plain.py": "def add(a, b):\n    return a + b" };
+  const r = selectDeepUnits(Object.keys(src), (p) => src[p], ["a_hit.py"], ["z_pr.py", "z_pr_plain.py"]);
+  assert.deepEqual(r.units.map((u) => u.path), ["z_pr.py", "a_hit.py", "b_view.py"], "PR file first; a PR file with no marker stays on the runner");
+  assert.equal(r.fromPr, 1);
+});
+
+test("selectDeepUnits: under the cap, the PR's files survive when the repo has more candidates than DEEP_MAX_UNITS", () => {
+  const many = Array.from({ length: DEEP_MAX_UNITS + 10 }, (_, i) => `a${String(i).padStart(3, "0")}.py`);
+  const r = selectDeepUnits([...many, "zz_changed.py"], () => "os.system(x)", [], ["zz_changed.py"]);
+  assert.equal(r.units[0].path, "zz_changed.py");
+  assert.equal(r.units.length, DEEP_MAX_UNITS);
+});
+
+test("prChangedPaths reads the PR's files from git (base...head), null off-PR or when git cannot answer", () => {
+  const base = "a".repeat(40), head = "b".repeat(40);
+  const ev = () => ({ pull_request: { base: { sha: base }, head: { sha: head } } });
+  let seen = null;
+  const git = (args) => { seen = args; return "src/a.py\0lib/b.js\0"; };
+  assert.deepEqual(prChangedPaths({ GITHUB_EVENT_NAME: "pull_request" }, ev, git), ["src/a.py", "lib/b.js"]);
+  assert.deepEqual(seen, ["diff", "--name-only", "--diff-filter=d", "-z", `${base}...${head}`]);
+  assert.equal(prChangedPaths({ GITHUB_EVENT_NAME: "push" }, ev, git), null, "push runs keep the repo-wide order");
+  assert.equal(prChangedPaths({ GITHUB_EVENT_NAME: "pull_request" }, () => ({ pull_request: { base: { sha: "main" }, head: { sha: head } } }), git), null, "a ref name is not a SHA — never passed to git");
+  assert.equal(prChangedPaths({ GITHUB_EVENT_NAME: "pull_request" }, ev, () => { throw new Error("bad object"); }), null, "shallow checkout → null");
+  assert.equal(prChangedPaths({ GITHUB_EVENT_NAME: "pull_request" }, () => { throw new Error("ENOENT"); }, git), null);
+});
+
 test("selectDeepUnits enforces the file and character caps", () => {
   const many = Array.from({ length: DEEP_MAX_UNITS + 5 }, (_, i) => `f${String(i).padStart(2, "0")}.py`);
   const r2 = selectDeepUnits(many, () => "os.system(x)");
@@ -72,7 +99,7 @@ test("selectDeepUnits enforces the file and character caps", () => {
 
 test("a throwing reader is a skipped hit file, never a crash", () => {
   const r = selectDeepUnits(["a.py"], () => { throw new Error("EACCES"); }, ["a.py"]);
-  assert.deepEqual(r, { units: [], skipped: 1, chars: 0 });
+  assert.deepEqual(r, { units: [], skipped: 1, chars: 0, fromPr: 0 });
 });
 
 test("validHeisenResponse accepts the route's shape and rejects anything else", () => {

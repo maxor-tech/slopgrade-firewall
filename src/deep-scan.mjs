@@ -70,33 +70,61 @@ export function sinkFiles(packFingerprints) {
   return [...out].sort();
 }
 
+const FULL_SHA = /^[0-9a-f]{40}$/;
+
 /**
- * The units to send, in priority order: the `hitPaths` (extractor hits) first, then the other `paths` carrying a sink
- * marker AND a request source (SOURCE_HINT), then the marker-only ones. Engine-modelled extensions only; read via
- * `read(path)` (null / throw = unreadable); empty / oversize files skipped; stops at the file and character caps.
- * `skipped` counts candidate files left out so the log can say the scan was bounded instead of implying full coverage.
+ * The paths THIS pull request changed, read LOCALLY from git (`base...head` = the PR's own changes since its merge-base),
+ * so the deep scan can send the PR's files first on a repo larger than the 40-file cap. No network and no token: the
+ * same answer in `--print-payload` as in the real run, so the audit list stays the list that is sent. `git(args)` →
+ * stdout, throwing on failure (injected). null when this is not a pull_request run, the event has no full SHAs, or git
+ * cannot answer (shallow checkout without the base, pull_request_target on the base ref…) — the caller then keeps the
+ * repo-wide order. Deleted files are left out (nothing to send).
  */
-export function selectDeepUnits(paths, read, hitPaths = []) {
+export function prChangedPaths(env, readEvent, git) {
+  if (env.GITHUB_EVENT_NAME !== "pull_request" && env.GITHUB_EVENT_NAME !== "pull_request_target") return null;
+  let ev = null;
+  try { ev = readEvent(); } catch { return null; }
+  const base = ev?.pull_request?.base?.sha, head = ev?.pull_request?.head?.sha;
+  if (!FULL_SHA.test(base || "") || !FULL_SHA.test(head || "")) return null;
+  try {
+    const out = git(["diff", "--name-only", "--diff-filter=d", "-z", `${base}...${head}`]);
+    return typeof out === "string" ? out.split("\0").filter(Boolean) : null;
+  } catch { return null; }
+}
+
+/**
+ * The units to send, in priority order: files THIS PR changed (`changedPaths`) first, then the `hitPaths` (extractor
+ * hits), then the other `paths` carrying a sink marker AND a request source (SOURCE_HINT), then the marker-only ones.
+ * A changed file is still sent only when it has a hit or a marker — being in the PR never widens egress. Engine-modelled
+ * extensions only; read via `read(path)` (null / throw = unreadable); empty / oversize files skipped; stops at the file
+ * and character caps. `skipped` counts candidate files left out so the log can say the scan was bounded instead of
+ * implying full coverage; `fromPr` counts the sent units the PR changed.
+ */
+export function selectDeepUnits(paths, read, hitPaths = [], changedPaths = []) {
   const hits = new Set(hitPaths);
-  const first = [], sourced = [], markerOnly = [];
+  const changed = new Set(changedPaths);
+  const pr = [], first = [], sourced = [], markerOnly = [];
   let skipped = 0;
   for (const path of [...new Set([...hitPaths, ...[...paths].sort()])]) {
     if (!DEEP_SCAN_EXTS.test(path)) continue;
     let code = null;
     try { code = read(path); } catch { code = null; }
     if (typeof code !== "string" || !code) { if (hits.has(path)) skipped++; continue; }
-    if (hits.has(path)) first.push({ path, code });
-    else if (hasSinkMarker(code)) (SOURCE_HINT.test(code) ? sourced : markerOnly).push({ path, code });
-    // no sink marker → never sent
+    const hit = hits.has(path);
+    if (!hit && !hasSinkMarker(code)) continue; // no sink marker → never sent
+    if (changed.has(path)) pr.push({ path, code });
+    else if (hit) first.push({ path, code });
+    else (SOURCE_HINT.test(code) ? sourced : markerOnly).push({ path, code });
   }
   const units = [];
-  let total = 0;
-  for (const u of [...first, ...sourced, ...markerOnly]) {
+  let total = 0, fromPr = 0;
+  for (const u of [...pr, ...first, ...sourced, ...markerOnly]) {
     if (units.length >= DEEP_MAX_UNITS || u.code.length > DEEP_MAX_UNIT_CHARS || total + u.code.length > DEEP_MAX_TOTAL_CHARS) { skipped++; continue; }
     total += u.code.length;
     units.push(u);
+    if (changed.has(u.path)) fromPr++;
   }
-  return { units, skipped, chars: total };
+  return { units, skipped, chars: total, fromPr };
 }
 
 /** Shape check of the server answer; anything else is treated as no answer (fail open). */
