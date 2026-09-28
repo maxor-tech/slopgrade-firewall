@@ -159,6 +159,54 @@ export function selectDeepUnits(paths, read, hitPaths = [], changedPaths = []) {
   return { units, skipped, chars: total, fromPr };
 }
 
+// ── Library mode (0.10.6, opt-in `library-mode: "true"`) ─────────────────────────────────────────────────────────────
+// For a PACKAGE the attack surface is its callers, so the detector's library tier (a public function's parameter
+// reaching a sink) is worth a look. Measured on the full GHSA real-CVE set (paired: the vulnerable file flagged AND its
+// fix not): JS 1.0% → 9.0%, Python 1.5% → 5.6%; ~2 of 3 candidate hits persist in the FIXED file, and a clean library
+// like jinja yields a dozen by-design API flows — hence opt-in, and shown as « to triage », never as a finding.
+const APP_DEPS_PY = /\b(?:django|flask|fastapi|starlette|aiohttp|tornado|pyramid|sanic|quart|falcon)\b/i;
+const APP_ENTRY_PY = ["manage.py", "wsgi.py", "asgi.py", "app.py"];
+
+/**
+ * Is this checkout a PUBLISHED LIBRARY or an application? Deterministic, local, reads manifests only.
+ *   JS  — package.json not private, with a published surface (files / exports / types) and no `start` script.
+ *   Py  — no web-app entry point (manage.py / wsgi / asgi / app.py at the root or one level down), and a pyproject with
+ *         [build-system] + a project name and no web-framework dependency, or a setup.py calling setup(name=…).
+ * Measured: 22 of 22 real applications → app (0 false library), 9 of 10 real libraries → library (lodash's private root
+ * manifest is a conservative miss). `read(rel)` → text | null, `dirs()` → top-level directory names (injected).
+ */
+export function repoKind(read, dirs = () => []) {
+  const pj = read("package.json");
+  if (pj !== null) {
+    let p = null;
+    try { p = JSON.parse(pj); } catch { p = null; }
+    if (p && typeof p === "object") {
+      const start = p.scripts && typeof p.scripts.start === "string";
+      if (p.private !== true && typeof p.name === "string" && !start && (p.files || p.exports || p.types || p.typings)) return { kind: "library", why: "published package.json (files/exports/types, no start script)" };
+      return { kind: "app", why: p.private === true ? "private package.json" : start ? "package.json has a start script" : "package.json declares no published surface" };
+    }
+  }
+  const entry = APP_ENTRY_PY.some((f) => read(f) !== null) || dirs().some((d) => ["manage.py", "wsgi.py", "asgi.py"].some((f) => read(`${d}/${f}`) !== null));
+  if (entry) return { kind: "app", why: "web-app entry point (manage.py / wsgi / asgi / app.py)" };
+  const pp = read("pyproject.toml");
+  if (pp !== null) {
+    const named = /^\[project\][^[]*?^name\s*=/ms.test(pp) || /^\[tool\.poetry\][^[]*?^name\s*=/ms.test(pp);
+    const deps = ((pp.match(/^\[project\][\s\S]*?^dependencies\s*=\s*\[([\s\S]*?)\]/m) || [])[1] || "") + ((pp.match(/^\[tool\.poetry\.dependencies\]([\s\S]*?)^\[/m) || [])[1] || "");
+    if (/^\[build-system\]/m.test(pp) && named && !APP_DEPS_PY.test(deps) && !/package-mode\s*=\s*false/.test(pp)) return { kind: "library", why: "pyproject with build-system + project name" };
+  }
+  const sp = read("setup.py");
+  if (sp !== null && /setup\s*\([\s\S]*?name\s*=/.test(sp) && !APP_DEPS_PY.test(sp)) return { kind: "library", why: "setup.py" };
+  return { kind: "app", why: "no published-package manifest" };
+}
+
+/** Library-tier candidates → triage rows, only on paths THIS run sent; malformed rows dropped. Never feed/gate rows. */
+export function libraryCandidates(candidates, sentPaths) {
+  const sent = new Set(sentPaths);
+  return (Array.isArray(candidates) ? candidates : [])
+    .filter((c) => c && typeof c.path === "string" && sent.has(c.path) && typeof c.cwe === "string" && /^CWE-\d{1,5}$/.test(c.cwe) && typeof c.evidence === "string")
+    .map((c) => ({ file: c.path, line: evidenceLine(c.evidence), rule: c.cwe, detail: c.evidence }));
+}
+
 /** Shape check of the server answer; anything else is treated as no answer (fail open). */
 export function validHeisenResponse(j) {
   if (!j || typeof j !== "object" || j.ok !== true || !Array.isArray(j.findings)) return false;
@@ -222,9 +270,9 @@ export function deepScanNudge({ deepScan, paid }) {
  * POST the units; `post(url, body)` → {status, json()} is injected (timedFetch in the client). Returns
  * {state: "ok", response} | {state: "plan-required"} | {state: "unavailable", status?} — never throws.
  */
-export async function requestDeepScan(post, origin, oidcToken, sha, units) {
+export async function requestDeepScan(post, origin, oidcToken, sha, units, library = false) {
   try {
-    const res = await post(`${origin}/api/ci/heisen`, JSON.stringify({ oidcToken, sha, units }));
+    const res = await post(`${origin}/api/ci/heisen`, JSON.stringify({ oidcToken, sha, units, ...(library ? { library: true } : {}) }));
     if (res.status === 402) return { state: "plan-required" };
     if (res.status < 200 || res.status >= 300) return { state: "unavailable", status: res.status };
     const j = await res.json();

@@ -18,7 +18,7 @@
 //     /api/ci/pro-extractors (OIDC-proved entitlement), sha256-verified, and run HERE — same zero-egress contract,
 //     a second egress boundary (sanitizeProFingerprints), fail-open to the free packs (loadProPacks below).
 import { pathToFileURL } from "node:url";
-import { writeFileSync, readFileSync, appendFileSync, mkdtempSync, rmSync } from "node:fs";
+import { writeFileSync, readFileSync, appendFileSync, mkdtempSync, rmSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -58,7 +58,7 @@ import {
   validProBundleResponse, verifyBundleSig, PRO_BUNDLE_PUBKEY, runProPacks, sanitizeProFingerprints, FREE_PACK_COUNT, MAX_SARIF_RESULTS, MAX_PRO_BUNDLE_BYTES,
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs,
 } from "./src/client-lib.mjs";
-import { sinkFiles, prChangedPaths, selectDeepUnits, requestDeepScan, heisenFeed, splitAgainstFeed, isPaidVerdict, deepScanNudge } from "./src/deep-scan.mjs";
+import { sinkFiles, prChangedPaths, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, heisenFeed, splitAgainstFeed, isPaidVerdict, deepScanNudge } from "./src/deep-scan.mjs";
 import { fixableHitIndex, attachFixes } from "./src/autofix.mjs";
 
 const CODE_EXTS = /\.(py|ts|tsx|js|jsx|mjs|cjs|sql|rb|go|php|prisma|java|cs|rs|c|cc|cpp|h|hpp|kt|scala|ex|exs)$/;
@@ -172,7 +172,7 @@ async function loadProPacks(origin, oidcToken, root, rel) {
 }
 
 const HELP = `slopGrade Firewall — CI leak detection (free tier: 10 flagship classes · paid repos: the full catalogue, extracted in your runner)
-Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <path>] [--deep-scan [--deep-scan-block]] [--help]
+Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <path>] [--deep-scan [--deep-scan-block] [--library-mode]] [--help]
   --gate           block (exit 1) on a reliable hard leak in an entitled repo (default: advisory, never blocks) ;
                    on a pull request, only what the PR introduced counts (pre-existing debt is reported, never blocks)
   --strict         with --gate, fail CLOSED (exit 1) when no server verdict is available (default: fail open)
@@ -181,10 +181,12 @@ Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <p
   --deep-scan      OPT-IN, paid repos: ALSO send the SOURCE of the sink-bearing files (≤ 80) to the hosted taint engine
                    (heisen). The only mode where code leaves the runner; --print-payload lists the files. Advisory.
   --deep-scan-block  OPT-IN, with --deep-scan and --gate: a NEW deep-scan finding (one no pack reported) BLOCKS the build.
+  --library-mode   OPT-IN, with --deep-scan, PACKAGE repos only: also list library-tier candidates (a public function's
+                   parameter reaching a sink) as notices to triage - never findings, never blocking.
                    Block precision: ~94% on benchmark code, ~69-73% on real-world CVE code (~1 false block in 3-4) — off by default.
   --help           show this help
 Exit codes: 1 only on a gate-blocked verdict (or --strict with no verdict); 0 otherwise (fail open).`;
-const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-block", "--no-fix"]);
+const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-block", "--library-mode", "--no-fix"]);
 
 export async function main(argv = [], env = process.env) {
   if (argv.includes("--help")) { console.log(HELP); return 0; }
@@ -196,6 +198,7 @@ export async function main(argv = [], env = process.env) {
   const printPayload = argv.includes("--print-payload");
   const deepScan = argv.includes("--deep-scan");
   const deepBlock = deepScan && argv.includes("--deep-scan-block");
+  const libraryMode = deepScan && argv.includes("--library-mode");
   const noFix = argv.includes("--no-fix"); // one-click fix suggestions are ON by default (input `fix: off` opts out)
   if (argv.includes("--deep-scan-block") && !deepScan) console.log("::warning title=slopGrade Firewall::--deep-scan-block has no effect without --deep-scan (deep-scan: \"true\").");
   const root = env.GITHUB_WORKSPACE || process.cwd();
@@ -287,7 +290,10 @@ export async function main(argv = [], env = process.env) {
   const prFiles = deepScan ? prChangedPaths(env, () => JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8")),
     (args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15_000, maxBuffer: 16 * 1024 * 1024 })) : null;
   const deep = deepScan ? selectDeepUnits(files.map(rel), (p) => readFileSync(join(root, p), "utf8"), sinkFiles(packFingerprints), prFiles ?? []) : null;
-  const deepAudit = deep ? { deepScan: { note: "SOURCE of these files is sent (opt-in --deep-scan)", files: deep.units.map((u) => u.path), chars: deep.chars, skipped: deep.skipped, fromPr: deep.fromPr } } : {};
+  // Library mode: only for a checkout that IS a published package (manifest-only, local) — an application never asks.
+  const libKind = libraryMode ? repoKind((rel) => { try { return readFileSync(join(root, rel), "utf8"); } catch { return null; } },
+    () => { try { return readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith(".")).map((e) => e.name); } catch { return []; } }) : null;
+  const deepAudit = deep ? { deepScan: { note: "SOURCE of these files is sent (opt-in --deep-scan)", files: deep.units.map((u) => u.path), chars: deep.chars, skipped: deep.skipped, fromPr: deep.fromPr, ...(libKind ? { libraryMode: libKind.kind === "library", repoKind: libKind.why } : {}) } } : {};
 
   // 2. EXFILTRATION guard — a custom origin would mint a token for an attacker audience. Run DRY unless opted in.
   const { origin, blocked } = resolveOrigin(env);
@@ -360,17 +366,18 @@ export async function main(argv = [], env = process.env) {
 
   // 5b. OPT-IN deep scan (heisen taint engine) — source only ever goes to the CANONICAL origin, like the pro bundle
   //     only ever comes from it. Fail-open on every path: a deep-scan hiccup never touches the verdict above.
-  let deepRows = [], deepLine = null, deepBlocking = 0;
+  let deepRows = [], deepLine = null, deepBlocking = 0, libRows = [];
   if (deep) {
     if (origin !== DEFAULT_ORIGIN) ghWarn("deep scan skipped — source is only ever sent to the canonical slopGrade origin.");
     else if (!deep.units.length) deepLine = "no sink-bearing file in an engine-modelled language — nothing sent.";
     else {
       const post = (url, body) => timedFetch(url, { method: "POST", headers: { "content-type": "application/json" }, body });
-      const r = await requestDeepScan(post, origin, oidcToken, sha, deep.units);
+      const r = await requestDeepScan(post, origin, oidcToken, sha, deep.units, libKind?.kind === "library");
       if (r.state === "plan-required") ghWarn(`deep scan is a paid feature — no source was analysed. Enable it: ${origin}/ci`);
       else if (r.state === "unavailable") ghWarn(`deep scan unavailable (${r.status}) — verdict unaffected.`);
       else {
         deepRows = heisenFeed(r.response.findings, deep.units.map((u) => u.path));
+        libRows = libKind?.kind === "library" ? libraryCandidates(r.response.candidates, deep.units.map((u) => u.path)) : [];
         deepLine = `${r.response.scanned} file(s) analysed${deep.fromPr ? ` (${deep.fromPr} changed by this PR, sent first)` : ""}${deep.skipped ? ` (+${deep.skipped} over the cap, not sent)` : ""}${r.response.unanswered ? ` · ${r.response.unanswered} unanswered (partial)` : ""}`;
       }
     }
@@ -431,6 +438,16 @@ export async function main(argv = [], env = process.env) {
       console.log(`::${deepBlock ? "error" : "warning"} file=${wfFile(row.file)},line=${row.line} title=slopGrade Firewall deep scan::[${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}`);
       line(`    - ${sanitizeLogLine(row.file)}:${row.line}  [${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}`);
       feed.push(row);
+    }
+  }
+  // Library mode: candidates are a SEPARATE triage list — notices, never in `feed` (so never in the gate, the PR review
+  // blocking count or SARIF). The measured caveat is printed with them, so nobody reads them as proven findings.
+  if (libKind && libKind.kind !== "library") line(`\nslopGrade Firewall — library mode requested, but this repo looks like an application (${libKind.why}) — library candidates are only listed for published packages.`);
+  if (libKind?.kind === "library" && deepLine !== null) {
+    line(`\nslopGrade Firewall — library mode: ${libRows.length} candidate(s) to triage — a public function's parameter reaches a sink. NOT proven: on real CVEs about 2 in 3 such hits remain after the fix.`);
+    for (const c of libRows.slice(0, 50)) {
+      console.log(`::notice file=${wfFile(c.file)},line=${c.line} title=slopGrade library candidate (triage)::[${sanitizeLogLine(c.rule)}] ${sanitizeLogLine(c.detail)}`);
+      line(`    - ${sanitizeLogLine(c.file)}:${c.line}  [${sanitizeLogLine(c.rule)}] candidate`);
     }
   }
 

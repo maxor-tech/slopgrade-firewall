@@ -3,6 +3,17 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.10.6] — 2026-09-28
+
+### Added
+- **Library mode** (`library-mode: "true"`, opt-in, with `deep-scan`). For a repo recognised as a **published package**
+  (from its manifest, locally — applications are never affected and the log says so), the deep scan also lists the taint
+  engine's **library-tier candidates** — a public function's parameter reaching a sink — as `::notice` annotations to
+  triage. They are never findings: not in the gate, the PR review count or SARIF. Measured on real CVEs (paired: the
+  vulnerable file flagged AND its fix not): recall about 1% → 9% (JavaScript), 1.5% → 5.6% (Python); about 2 in 3
+  candidates remain after the fix. Package detection on a 32-repo check: 22 of 22 applications stay applications, 9 of 10
+  libraries are recognised (a private monorepo root is conservatively treated as an application).
+
 ## [0.10.5] — 2026-09-28
 
 ### Changed
