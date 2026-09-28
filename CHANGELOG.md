@@ -3,6 +3,17 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.10.4] — 2026-09-28
+
+### Changed
+- **Deep scan: on a pull request, the files it changed are sent first.** The deep scan sends at most 40 files; on a
+  large repo the PR's own code could fall past the cap (a 313-candidate repo sent a new request→shell helper 36th — one
+  more request-reading file and it was never analysed). The PR's changed files are now read **locally from git**
+  (`base...head` from the event — no network, no token), so `--print-payload` still lists exactly what is sent. A changed
+  file is still sent only when it carries a security marker or an extractor hit — being in the PR never widens egress.
+  Shallow checkouts or runs where git cannot answer keep the previous order. The log says how many analysed files the
+  PR changed.
+
 ## [0.10.3] — 2026-09-28
 
 ### Fixed
