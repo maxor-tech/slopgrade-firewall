@@ -23,6 +23,10 @@ inputs:
     description: "OPT-IN, paid repos (default false). ALSO sends the SOURCE of the files where a security sink was found (at most 80 files / 2M chars) to slopGrade's hosted taint engine (heisen), which reports proven request→sink flows (injection, SSRF, path traversal, XSS…). The only mode in which code leaves the runner — the default run never sends source. Forwarded then dropped server-side (never logged, never stored). Advisory: findings annotate as warnings, never fail the check. Run with --print-payload to list the files first."
     required: false
     default: "false"
+  library-mode:
+    description: "OPT-IN (default false; needs deep-scan: \"true\"). For a repo that is a PUBLISHED PACKAGE (detected from package.json / pyproject / setup.py — applications are never affected), also list the taint engine's library-tier candidates — a public function's parameter reaching a sink — as notices to triage. Not proven findings, never blocking: on real CVEs it lifts paired recall from ~1% to ~6-9%, but about 2 in 3 candidates remain after the fix."
+    required: false
+    default: "false"
   deep-scan-block:
     description: "OPT-IN (default false; needs deep-scan: \"true\" and firewall-mode: gate). A NEW deep-scan finding — one no detector pack reported — BLOCKS the check instead of annotating a warning. Measured block precision of the taint engine: ~94% on labeled benchmark code, but ~69-73% on real-world CVE code (about 1 false block in 3-4, mostly project-specific validators it does not recognise) — so it stays off unless you choose it."
     required: false
@@ -78,6 +82,7 @@ runs:
         FW_UPLOAD_SARIF: ${{ inputs.upload-sarif }}
         FW_DEEP_SCAN: ${{ inputs.deep-scan }}
         FW_DEEP_SCAN_BLOCK: ${{ inputs.deep-scan-block }}
+        FW_LIBRARY_MODE: ${{ inputs.library-mode }}
         FW_FIX: ${{ inputs.fix }}
         # The caller's OWN GITHUB_TOKEN, used for two consumer-side surfaces, both posting to the caller's OWN repo and
         # never reaching slopGrade: the inline PR comment feed (`permissions: pull-requests: write`) and the Code
@@ -100,5 +105,6 @@ runs:
         [ -n "${FW_SARIF}" ] && ARGS+=(--sarif "${FW_SARIF}")
         [ "${FW_DEEP_SCAN}" = "true" ] && ARGS+=(--deep-scan)
         [ "${FW_DEEP_SCAN_BLOCK}" = "true" ] && ARGS+=(--deep-scan-block)
+        [ "${FW_LIBRARY_MODE}" = "true" ] && ARGS+=(--library-mode)
         [ "${FW_FIX}" = "off" ] && ARGS+=(--no-fix)
         node "$FW_CLI" "${ARGS[@]}"

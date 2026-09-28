@@ -161,6 +161,15 @@ shell=True)`). It is the **only** mode in which file contents leave your runner,
   come from a project's own validation function (`validateId(x)`, `isPathAllowed(x)`) that the engine does not
   recognise. That is why it is off by default: enable it where a false block is cheaper than a missed flow. A finding on a line another pack already reported is counted as a confirmation, not annotated or
   counted twice. Any failure (timeout, 5xx, malformed answer) is a warning — the verdict is never affected.
+- **Library mode — opt-in, packages only** (`library-mode: "true"`, client ≥ 0.10.6). For a repo that is a **published
+  package**, the attack surface is its callers, so the engine can also report **library-tier candidates**: a public
+  function's parameter reaching a sink. The package is recognised from its manifest, locally (npm: not private, publishes
+  `files`/`exports`/`types`, no `start` script; Python: a `pyproject.toml`/`setup.py` package without `manage.py`/`wsgi`/`asgi`/
+  `app.py` or a web-framework dependency) — an application is never affected, the log says so. Candidates are **notices to
+  triage**, never findings: not in the gate, the PR review count or SARIF. Honest numbers, measured on real CVEs (GitHub
+  advisories, the vulnerable file flagged AND its fix not): paired recall rises from about **1% to 9%** (JavaScript) and
+  **1.5% to 5.6%** (Python) — but about **2 in 3 candidates remain after the fix**, and a clean library can show a few
+  by-design flows (a template engine rendering what it is given). Use it to review a package's public API, not as a gate.
 
 ## Fail-open, always
 
