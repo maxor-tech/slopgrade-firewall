@@ -192,7 +192,7 @@ would rather the control not silently self-disable, `strict: "true"` fails **clo
 
 ## Free vs hosted
 
-The free tier is a real, standalone control — 10 classes, intra-function, zero-egress — and it **blocks for free** on
+The free tier is a real, standalone control — 10 classes, intra-function, your code never leaves (only the fingerprint above is sent) — and it **blocks for free** on
 public repos and on your first private repo. The **hosted** [slopGrade Firewall](https://www.slopgrade.ai/firewall) adds what a local client cannot:
 
 | | Free (this repo) | Hosted |
