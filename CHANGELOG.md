@@ -3,6 +3,21 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.10.3] — 2026-09-28
+
+### Fixed
+- **Deep scan now reaches every detector the hosted engine runs.** The lexical pre-filter that decides which files MAY
+  be sent (`deep-scan: "true"`) only knew the injection-era sinks, so 93 of the 116 (language × class) cells the hosted
+  engines model could never be reached from a file without a free-extractor hit — Go `db.Query(`, Java `executeQuery(`,
+  and every configuration rule (TLS verification off, JWT `none`, weak crypto, permissive CORS, insecure cookies, XXE,
+  CSRF off, debug mode, world-writable modes, JNDI, LDAP, XPath, NoSQL, ReDoS, prototype pollution, SSTI…). The
+  pre-filter is now one marker family per modelled class, pinned by a test that feeds one engine-verified positive per
+  cell (`src/__tests__/fixtures/heisen-classes.json`). A file with no security marker is still never sent, and the caps
+  (40 files / 2M characters) are unchanged.
+- **Under the 40-file cap, files that read request input go first.** After the extractor-hit files, a marker file that
+  also reads a request value (Flask/Django/aiohttp `request.*`, Express `req.*`, Rails `params[`, Go `r.*`, servlet
+  `getParameter`, Spring `@RequestParam`…) is sent before a marker-only one — the likeliest place for a real flow.
+
 ## [0.10.2] — 2026-09-27
 
 ### Changed
