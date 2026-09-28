@@ -20,7 +20,7 @@ inputs:
     required: false
     default: ""
   deep-scan:
-    description: "OPT-IN, paid repos (default false). ALSO sends the SOURCE of the files where a security sink was found (at most 40 files / 2M chars) to slopGrade's hosted taint engine (heisen), which reports proven request→sink flows (injection, SSRF, path traversal, XSS…). The only mode in which code leaves the runner — the default run never sends source. Forwarded then dropped server-side (never logged, never stored). Advisory: findings annotate as warnings, never fail the check. Run with --print-payload to list the files first."
+    description: "OPT-IN, paid repos (default false). ALSO sends the SOURCE of the files where a security sink was found (at most 80 files / 2M chars) to slopGrade's hosted taint engine (heisen), which reports proven request→sink flows (injection, SSRF, path traversal, XSS…). The only mode in which code leaves the runner — the default run never sends source. Forwarded then dropped server-side (never logged, never stored). Advisory: findings annotate as warnings, never fail the check. Run with --print-payload to list the files first."
     required: false
     default: "false"
   deep-scan-block:

@@ -144,7 +144,7 @@ request value from the line it is read to the line it reaches a sink, **across f
 intra-function packs above cannot see (e.g. a request parameter passed to a helper that runs `check_output(…,
 shell=True)`). It is the **only** mode in which file contents leave your runner, so it is off unless you set it:
 
-- **What is sent** — the source of at most **40 files / 2M characters**: first the files where an extractor already
+- **What is sent** — the source of at most **80 files / 2M characters**: first the files where an extractor already
   found a sink, then any Python / JS-TS / Go / Java / Ruby file containing a sink marker (shell, eval, SQL, file,
   redirect, outbound request, template, unsafe deserializer). A file with no sink marker is never sent.
   `--print-payload` lists the exact files (under `deepScan.files`) before anything is sent.

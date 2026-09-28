@@ -3,6 +3,21 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.10.5] — 2026-09-28
+
+### Changed
+- **Deep scan: the files most likely to hold a flaw are sent first, and up to 80 of them.** On a large repo the file cap
+  decided coverage, and ordering was by name inside two coarse groups. Measured on a 22-repo walk (repo-wide findings
+  that fall inside the sent files): **76% → 91%**. Now, in order: this PR's files · files an extractor already flagged ·
+  an unambiguous config rule (TLS verification off, `@csrf_exempt`, debug on, JWT unverified, ECB / weak cipher,
+  insecure cookie flag, world-writable mode, XXE-enabling parser option) · a request value AND an injection-grade sink
+  in the same file · a request value · any other marker. Inside each group, production code goes before dev-only paths
+  (examples, scripts, tests, fixtures, benchmarks, docs) — never excluded, only ranked later. Examples: outline's four
+  `rejectUnauthorized: false` files (of 942 candidates) and Ghost's admin SSRF handler were previously cut.
+- Cap raised from 40 to **80 files** (2M characters unchanged). The slopGrade route stops dispatching past its time
+  budget, so a large set degrades to « partial » in the log, never to a missing result. A file with no security marker
+  is still never sent.
+
 ## [0.10.4] — 2026-09-28
 
 ### Changed

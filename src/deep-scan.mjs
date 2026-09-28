@@ -13,7 +13,11 @@
 // as warnings and never fail the check.
 
 export const DEEP_SCAN_EXTS = /\.(py|js|jsx|mjs|cjs|ts|tsx|go|java|rb)$/i;
-export const DEEP_MAX_UNITS = 40;
+// 80 since 0.10.5 (was 40): measured on the 22-app walk, the file cap was the last coverage loss on large monorepos —
+// 76% of the repo-wide findings were inside the sent files at 40 (v0.10.4), 85% with the tiered ranking, 91% at 80
+// (Ghost 4 → 11 of 12). The route answers within its time budget (pretix, the heaviest: 40 units in 12 s, 5 s worst
+// unit on the live detector) and stops dispatching past its deadline, so a larger set degrades to « partial », never a timeout.
+export const DEEP_MAX_UNITS = 80;
 export const DEEP_MAX_UNIT_CHARS = 200_000;
 export const DEEP_MAX_TOTAL_CHARS = 2_000_000;
 // A cheap lexical pre-filter, one entry per weakness family the hosted engines model (Python / JS-TS / Go / Java /
@@ -56,7 +60,7 @@ export function hasSinkMarker(code) {
   return false;
 }
 // A request-value source (the other half of every taint class). A marker file that ALSO reads request input is the
-// likeliest to hold a real flow, so it is sent before a marker-only file when the 40-file cap bites on a large repo.
+// likeliest to hold a real flow, so it is sent before a marker-only file when the file cap bites on a large repo.
 export const SOURCE_HINT = /\brequest\.(?:args|form|values|GET|POST|FILES|files|json|get_json|data|body|query_params|cookies|headers|params|query|url|path_info|META|match_info|rel_url|post|multipart)\b|\breq\.(?:query|body|params|headers|cookies|url|originalUrl|path|files?|get)\b|\bparams\[|\br\.(?:URL|FormValue|PostFormValue|Form|PostForm|Header|Body|Cookie|MultipartForm)\b|\bc\.(?:Query|Param|PostForm|FormValue|Bind\w*)\s*\(|\bget(?:Parameter|ParameterValues|Header|QueryString|InputStream|Reader|Cookies|RequestURI|PathInfo)\s*\(|@(?:RequestParam|PathVariable|RequestBody|RequestHeader|CookieValue|QueryParam|PathParam|FormParam|HeaderParam)\b|\b(?:location|document)\.(?:hash|search|href|URL|location|cookie|referrer)\b|\bprocess\.argv\b|\bsearchParams\b|@\w+\.(?:route|get|post|put|patch|delete)\s*\(/;
 
 /** Paths (repo-relative) of every file a pack fingerprint recorded hits for — the sink-bearing files. Sorted. */
@@ -74,7 +78,7 @@ const FULL_SHA = /^[0-9a-f]{40}$/;
 
 /**
  * The paths THIS pull request changed, read LOCALLY from git (`base...head` = the PR's own changes since its merge-base),
- * so the deep scan can send the PR's files first on a repo larger than the 40-file cap. No network and no token: the
+ * so the deep scan can send the PR's files first on a repo larger than the file cap. No network and no token: the
  * same answer in `--print-payload` as in the real run, so the audit list stays the list that is sent. `git(args)` →
  * stdout, throwing on failure (injected). null when this is not a pull_request run, the event has no full SHAs, or git
  * cannot answer (shallow checkout without the base, pull_request_target on the base ref…) — the caller then keeps the
@@ -92,18 +96,43 @@ export function prChangedPaths(env, readEvent, git) {
   } catch { return null; }
 }
 
+// A config rule the engines report WITHOUT any request source, in its unambiguous shape (TLS verification off, CSRF
+// off, debug on, JWT unverified, ECB / weak cipher, insecure cookie flag, world-writable mode, XXE-enabling parser
+// option). Such a file never matches SOURCE_HINT, so on a large repo it sorted LAST and fell past the (then 40-)file cap:
+// outline (942 candidates) sent none of its 4 `rejectUnauthorized: false` files, netbox missed its `@csrf_exempt`.
+export const STRONG_PATTERN_HINT = /rejectUnauthorized\s*:\s*false|NODE_TLS_REJECT_UNAUTHORIZED|verify\s*=\s*False\b|CERT_NONE|_create_unverified_context|InsecureSkipVerify\s*[:=]\s*true|VERIFY_NONE|NoopHostnameVerifier|ALLOW_ALL_HOSTNAME_VERIFIER|@csrf_exempt|WTF_CSRF_ENABLED\s*=\s*False|csrf\(\)\s*\.\s*disable|skip_forgery_protection|\bdebug\s*=\s*True\b|\bDEBUG\s*=\s*True\b|algorithms?\s*[:=]\s*\[?\s*['"]none['"]|verify_signature['"]?\s*:\s*False|MODE_ECB|modes\.ECB|createCipher\s*\(|\b(?:secure|httpOnly|httponly)\s*[:=]\s*(?:false|False)\b|SESSION_COOKIE_SECURE\s*=\s*False|\b0o?777\b|\bnoent\s*:\s*true|resolve_entities\s*=\s*True/;
+// An injection-grade sink (shell, eval, raw SQL string, redirect, outbound URL, template from string, unsafe
+// deserializer). A file that reads a request value AND carries one of these is the likeliest real flow, so among
+// request-reading files it goes first — payload (1 362 candidates) cut its `redirect(path)` preview routes by name order.
+export const STRONG_TAINT_SINK = /\b(?:os\.system|subprocess|child_process|execSync|execFile|exec\.Command|Runtime\.getRuntime|ProcessBuilder)\b|\bexec\s*\(|\beval\s*\(|\bnew Function\s*\(|\b(?:execute|executeQuery|query|raw|Exec|QueryRow)\s*\(\s*[`'"f]?[^)]*?(?:\+|\$\{|%s|\{|format\()|\bredirect(?:_to)?\s*\(|sendRedirect|\bfetch\s*\(|\baxios\b|\brequests\.(?:get|post|put|request)|urlopen|render_template_string|\bpickle\.loads?|\bunserialize\s*\(|yaml\.load\s*\(|Marshal\.load|readObject\s*\(/;
+
+// Dev-only locations (examples, scripts, tests, fixtures, benchmarks, docs). Never excluded — a flaw there is real — but
+// inside a tier they go AFTER production code: on Ghost the 40 slots went to release/bench scripts while
+// core/frontend/src/admin-auth/message-handler.js (6 SSRF) and web/middleware/admin-toolbar.js (open redirect) were cut.
+export const DEV_PATH = /(?:^|\/)(?:examples?|samples?|demos?|scripts?|tools?|bench(?:marks?)?|tests?|__tests__|spec|specs|e2e|fixtures?|mocks?|docs?|stories)(?:\/|$)|\.(?:test|spec|stories)\.[cm]?[jt]sx?$|(?:^|\/)test_[^/]*\.py$|_test\.(?:go|py)$/i;
+
+/** How many weakness families a source carries — a tie-breaker: a file touching more families goes first. */
+function familyCount(code) {
+  let n = 0;
+  for (const re of Object.values(SINK_HINTS)) if (re.test(code)) n++;
+  return n;
+}
+
 /**
- * The units to send, in priority order: files THIS PR changed (`changedPaths`) first, then the `hitPaths` (extractor
- * hits), then the other `paths` carrying a sink marker AND a request source (SOURCE_HINT), then the marker-only ones.
- * A changed file is still sent only when it has a hit or a marker — being in the PR never widens egress. Engine-modelled
- * extensions only; read via `read(path)` (null / throw = unreadable); empty / oversize files skipped; stops at the file
- * and character caps. `skipped` counts candidate files left out so the log can say the scan was bounded instead of
- * implying full coverage; `fromPr` counts the sent units the PR changed.
+ * The units to send, in priority order (each tier ranked by family count, then path):
+ *   0 files THIS PR changed (`changedPaths`) · 1 extractor hits (`hitPaths`) · 2 an unambiguous config rule
+ *   (STRONG_PATTERN_HINT) · 3 a request source AND an injection-grade sink (STRONG_TAINT_SINK) · 4 a request source ·
+ *   5 any other sink marker.
+ * A changed file is still sent only when it has a hit or a marker — being in the PR never widens egress, nor does any
+ * tier (every tier is a subset of « has a sink marker »). Engine-modelled extensions only; read via `read(path)`
+ * (null / throw = unreadable); empty / oversize files skipped; stops at the file and character caps. `skipped` counts
+ * candidate files left out so the log can say the scan was bounded instead of implying full coverage; `fromPr` counts
+ * the sent units the PR changed.
  */
 export function selectDeepUnits(paths, read, hitPaths = [], changedPaths = []) {
   const hits = new Set(hitPaths);
   const changed = new Set(changedPaths);
-  const pr = [], first = [], sourced = [], markerOnly = [];
+  const cands = [];
   let skipped = 0;
   for (const path of [...new Set([...hitPaths, ...[...paths].sort()])]) {
     if (!DEEP_SCAN_EXTS.test(path)) continue;
@@ -112,13 +141,16 @@ export function selectDeepUnits(paths, read, hitPaths = [], changedPaths = []) {
     if (typeof code !== "string" || !code) { if (hits.has(path)) skipped++; continue; }
     const hit = hits.has(path);
     if (!hit && !hasSinkMarker(code)) continue; // no sink marker → never sent
-    if (changed.has(path)) pr.push({ path, code });
-    else if (hit) first.push({ path, code });
-    else (SOURCE_HINT.test(code) ? sourced : markerOnly).push({ path, code });
+    const sourced = SOURCE_HINT.test(code);
+    const tier = changed.has(path) ? 0 : hit ? 1 : STRONG_PATTERN_HINT.test(code) ? 2
+      : sourced && STRONG_TAINT_SINK.test(code) ? 3 : sourced ? 4 : 5;
+    cands.push({ path, code, tier, dev: DEV_PATH.test(path) ? 1 : 0, fam: familyCount(code) });
   }
+  cands.sort((a, b) => a.tier - b.tier || a.dev - b.dev || b.fam - a.fam || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const units = [];
   let total = 0, fromPr = 0;
-  for (const u of [...pr, ...first, ...sourced, ...markerOnly]) {
+  for (const c of cands) {
+    const u = { path: c.path, code: c.code };
     if (units.length >= DEEP_MAX_UNITS || u.code.length > DEEP_MAX_UNIT_CHARS || total + u.code.length > DEEP_MAX_TOTAL_CHARS) { skipped++; continue; }
     total += u.code.length;
     units.push(u);
