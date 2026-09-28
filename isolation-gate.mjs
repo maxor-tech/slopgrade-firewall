@@ -178,7 +178,7 @@ Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <p
   --strict         with --gate, fail CLOSED (exit 1) when no server verdict is available (default: fail open)
   --print-payload  print the exact structural fingerprint that would be sent, then exit (audit what leaves the runner)
   --sarif <path>   also write a SARIF report of the leaks (upload with github/codeql-action/upload-sarif)
-  --deep-scan      OPT-IN, paid repos: ALSO send the SOURCE of the sink-bearing files (≤ 40) to the hosted taint engine
+  --deep-scan      OPT-IN, paid repos: ALSO send the SOURCE of the sink-bearing files (≤ 80) to the hosted taint engine
                    (heisen). The only mode where code leaves the runner; --print-payload lists the files. Advisory.
   --deep-scan-block  OPT-IN, with --deep-scan and --gate: a NEW deep-scan finding (one no pack reported) BLOCKS the build.
                    Block precision: ~94% on benchmark code, ~69-73% on real-world CVE code (~1 false block in 3-4) — off by default.

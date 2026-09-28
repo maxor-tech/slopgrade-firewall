@@ -53,10 +53,31 @@ test("files with no security marker stay on the runner (the egress promise holds
   for (const code of plain) assert.equal(hasSinkMarker(code), false, code);
 });
 
-test("selectDeepUnits: under the cap, a marker file that ALSO reads request input goes before a marker-only one", () => {
-  const src = { "a_config.py": "SESSION_COOKIE_SECURE = False", "z_view.py": "def v(request):\n    return open(request.GET['f'])" };
+test("selectDeepUnits tiers: unambiguous config rule → request source + injection sink → request source → marker only", () => {
+  const src = {
+    "a_marker.py": "import hashlib\nh = hashlib.sha256(b'x')",                       // tier 5: a marker, no source
+    "b_view.py": "def v(request):\n    return open('/fixed')\nx = request.GET['a']",   // tier 4: source, no strong sink
+    "c_redirect.ts": "export function GET(r) { const p = r.nextUrl.searchParams.get('p'); return redirect(p) }", // tier 3
+    "d_db.ts": "export const pool = new Pool({ ssl: { rejectUnauthorized: false } })", // tier 2: TLS off, no source
+  };
   const r = selectDeepUnits(Object.keys(src), (p) => src[p]);
-  assert.deepEqual(r.units.map((u) => u.path), ["z_view.py", "a_config.py"]);
+  assert.deepEqual(r.units.map((u) => u.path), ["d_db.ts", "c_redirect.ts", "b_view.py", "a_marker.py"]);
+});
+
+test("selectDeepUnits: on a repo past the cap, config-rule files survive (outline: 4 TLS-off files of 942 were all cut)", () => {
+  const src = {};
+  for (let i = 0; i < DEEP_MAX_UNITS + 20; i++) src[`app/r${String(i).padStart(3, "0")}.js`] = "app.get('/x', (req, res) => res.send(req.query.q))";
+  src["zz/server/storage/redis.ts"] = "new Redis(url, { tls: { rejectUnauthorized: false } })";
+  src["zz/server/views.py"] = "@csrf_exempt\ndef hook(request):\n    request.user.delete()";
+  const r = selectDeepUnits(Object.keys(src), (p) => src[p]);
+  const sent = r.units.map((u) => u.path);
+  assert.ok(sent.includes("zz/server/storage/redis.ts") && sent.includes("zz/server/views.py"), "strong config rules go before plain request readers");
+  assert.equal(sent.length, DEEP_MAX_UNITS);
+});
+
+test("selectDeepUnits: the new tiers never widen egress — a file with no sink marker is still never sent", () => {
+  const src = { "plain.ts": "export const add = (a: number, b: number) => a + b", "db.ts": "ssl: { rejectUnauthorized: false }" };
+  assert.deepEqual(selectDeepUnits(Object.keys(src), (p) => src[p]).units.map((u) => u.path), ["db.ts"]);
 });
 
 test("selectDeepUnits: on a PR, the files it changed go first — but being in the PR never widens egress", () => {
