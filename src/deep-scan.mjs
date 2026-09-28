@@ -199,13 +199,30 @@ export function repoKind(read, dirs = () => []) {
   return { kind: "app", why: "no published-package manifest" };
 }
 
-/** Library-tier candidates → triage rows, only on paths THIS run sent; malformed rows dropped. Never feed/gate rows. */
+/** Library-tier candidates → triage rows, only on paths THIS run sent; malformed rows dropped. Never feed/gate rows.
+ *  The line is the detector's (one row per sink line since heisen-slop aea8aa9), else read from the evidence. */
 export function libraryCandidates(candidates, sentPaths) {
   const sent = new Set(sentPaths);
   return (Array.isArray(candidates) ? candidates : [])
     .filter((c) => c && typeof c.path === "string" && sent.has(c.path) && typeof c.cwe === "string" && /^CWE-\d{1,5}$/.test(c.cwe) && typeof c.evidence === "string")
-    .map((c) => ({ file: c.path, line: evidenceLine(c.evidence), rule: c.cwe, detail: c.evidence }));
+    .map((c) => ({ file: c.path, line: Number.isInteger(c.line) && c.line > 0 ? c.line : evidenceLine(c.evidence), rule: c.cwe, detail: c.evidence }));
 }
+
+/**
+ * What became of the previous run's candidates, as the server measured it (slopgrade `candidateOutcomes`: resolved =
+ * gone with no `heisen-ignore` at the sink, dismissed = gone because the sink is marked, unscanned = file not sent).
+ * One log line, or null when the server sent none (first library run, partial scan, older server) or a malformed one.
+ */
+export function candidateOutcomesLine(o) {
+  const keys = ["new", "persisting", "resolved", "dismissed", "unscanned"];
+  if (!o || typeof o !== "object" || !keys.every((k) => Number.isInteger(o[k]) && o[k] >= 0)) return null;
+  const parts = [`${o.resolved} resolved`, `${o.dismissed} dismissed (heisen-ignore)`, `${o.persisting} still open`, `${o.new} new`];
+  if (o.unscanned) parts.push(`${o.unscanned} not re-scanned`);
+  return `since the last library run: ${parts.join(" · ")}`;
+}
+
+/** How a maintainer quiets a candidate they reviewed — the same marker as findings, honoured on candidates since heisen-slop aea8aa9. */
+export const CANDIDATE_DISMISS_HINT = "reviewed and not a bug? add a `heisen-ignore: <reason>` comment on the sink line (or on a comment line just above) — it is dismissed from the next run and counted as such.";
 
 /** Shape check of the server answer; anything else is treated as no answer (fail open). */
 export function validHeisenResponse(j) {

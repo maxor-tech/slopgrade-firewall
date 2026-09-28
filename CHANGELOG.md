@@ -3,6 +3,20 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.10.7] — 2026-09-28
+
+### Added
+- **Library mode: what became of the last run's candidates.** When the server compares this run's library candidates with
+  the previous library run's (slopgrade `candidateOutcomes`), the triage section prints one line: resolved (gone, file
+  scanned again, no `heisen-ignore` at the sink) · dismissed (the sink line is marked `heisen-ignore`) · still open · new
+  · not re-scanned. Nothing is printed on a first library run, a partial scan or an older server.
+- The triage section now says how to quiet a reviewed candidate: a `heisen-ignore: <reason>` comment on the sink line (or
+  on a comment line just above) — the engine honours it on candidates since heisen-slop `aea8aa9`, like on findings.
+
+### Changed
+- A candidate's annotation line is the detector's own sink line when it sends one (one candidate per sink line since
+  heisen-slop `aea8aa9`; before, one per class), else read from the evidence as before.
+
 ## [0.10.6] — 2026-09-28
 
 ### Added
