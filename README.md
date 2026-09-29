@@ -145,7 +145,7 @@ intra-function packs above cannot see (e.g. a request parameter passed to a help
 shell=True)`). It is the **only** mode in which file contents leave your runner, so it is off unless you set it:
 
 - **What is sent** — the source of at most **80 files / 2M characters**: first the files where an extractor already
-  found a sink, then any Python / JS-TS / Go / Java / Ruby file containing a sink marker (shell, eval, SQL, file,
+  found a sink, then any Python / JS-TS / Go / Java / Ruby / PHP file containing a sink marker (shell, eval, SQL, file,
   redirect, outbound request, template, unsafe deserializer). A file with no sink marker is never sent.
   `--print-payload` lists the exact files (under `deepScan.files`) before anything is sent.
 - **Where** — only to the canonical `https://app.slopgrade.ai/api/ci/heisen` (never to a custom origin), with the same

@@ -12,7 +12,7 @@
 // ADVISORY: the server returns `blocking: 0` while the engine is in its calibration window, so these findings annotate
 // as warnings and never fail the check.
 
-export const DEEP_SCAN_EXTS = /\.(py|js|jsx|mjs|cjs|ts|tsx|go|java|rb)$/i;
+export const DEEP_SCAN_EXTS = /\.(py|js|jsx|mjs|cjs|ts|tsx|go|java|rb|php|phtml)$/i;
 // 80 since 0.10.5 (was 40): measured on the 22-app walk, the file cap was the last coverage loss on large monorepos —
 // 76% of the repo-wide findings were inside the sent files at 40 (v0.10.4), 85% with the tiered ranking, 91% at 80
 // (Ghost 4 → 11 of 12). The route answers within its time budget (pretix, the heaviest: 40 units in 12 s, 5 s worst
@@ -21,7 +21,7 @@ export const DEEP_MAX_UNITS = 80;
 export const DEEP_MAX_UNIT_CHARS = 200_000;
 export const DEEP_MAX_TOTAL_CHARS = 2_000_000;
 // A cheap lexical pre-filter, one entry per weakness family the hosted engines model (Python / JS-TS / Go / Java /
-// Ruby — the same classes /api/ci/heisen asks for). Over-inclusive by design — it only decides what MAY be sent; the
+// Ruby / PHP — the same classes /api/ci/heisen asks for). Over-inclusive by design — it only decides what MAY be sent; the
 // engine decides what is a finding. Until 0.10.3 this was a single injection-era regex: 93 of the 116 modelled
 // (language × class) cells never matched it (Go `db.Query(`, Java `executeQuery(`, every config rule — TLS off, JWT
 // none, weak crypto, CORS, cookies, XXE, CSRF…), so a file carrying only those never reached the engine.
@@ -53,6 +53,10 @@ export const SINK_HINTS = {
   csrf: /csrf|CSRF|Csrf|forgery_protection|protect_from_forgery/,
   jndi: /InitialContext|InitialDirContext|JndiTemplate|\bDirContext\b|\.lookup\s*\(/,
   debug: /\bdebug\s*[=:]\s*(?:True|true)\b|\bDEBUG\s*=\s*True\b|DEBUG_PROPAGATE_EXCEPTIONS/,
+  // PHP (heisen-slop taint_php, 2026-09-29): its sinks, in PHP-only spellings so a Python / Ruby / JS file does not become
+  // a marker by accident — `echo` / `<?=` (never a bare `print`), `include_once` / an include of `$x` / `__DIR__` (never a
+  // bare `require`, which every Ruby file has), the mysqli / pg / curl / file function family, `header('Location…`.
+  php: /<\?=|\becho\b|\b(?:mysqli?_(?:multi_|real_)?query|pg_(?:send_)?query|shell_exec|passthru|proc_open|pcntl_exec|create_function|call_user_func(?:_array)?|file_get_contents|file_put_contents|readfile|fopen|unlink|move_uploaded_file|curl_init|curl_setopt|simplexml_load_(?:string|file)|loadXML|get_results|whereRaw|orderByRaw|selectRaw)\s*\(|\b(?:include|require)_once\b|\b(?:include|require)\s*\(?\s*(?:__DIR__|dirname\s*\(|\$|['"][^'"\n]*['"]\s*\.)|\bheader\s*\(\s*['"]Location/,
 };
 /** Does this source carry at least one marker of a class the hosted engines model? */
 export function hasSinkMarker(code) {
@@ -61,7 +65,7 @@ export function hasSinkMarker(code) {
 }
 // A request-value source (the other half of every taint class). A marker file that ALSO reads request input is the
 // likeliest to hold a real flow, so it is sent before a marker-only file when the file cap bites on a large repo.
-export const SOURCE_HINT = /\brequest\.(?:args|form|values|GET|POST|FILES|files|json|get_json|data|body|query_params|cookies|headers|params|query|url|path_info|META|match_info|rel_url|post|multipart)\b|\breq\.(?:query|body|params|headers|cookies|url|originalUrl|path|files?|get)\b|\bparams\[|\br\.(?:URL|FormValue|PostFormValue|Form|PostForm|Header|Body|Cookie|MultipartForm)\b|\bc\.(?:Query|Param|PostForm|FormValue|Bind\w*)\s*\(|\bget(?:Parameter|ParameterValues|Header|QueryString|InputStream|Reader|Cookies|RequestURI|PathInfo)\s*\(|@(?:RequestParam|PathVariable|RequestBody|RequestHeader|CookieValue|QueryParam|PathParam|FormParam|HeaderParam)\b|\b(?:location|document)\.(?:hash|search|href|URL|location|cookie|referrer)\b|\bprocess\.argv\b|\bsearchParams\b|@\w+\.(?:route|get|post|put|patch|delete)\s*\(/;
+export const SOURCE_HINT = /\brequest\.(?:args|form|values|GET|POST|FILES|files|json|get_json|data|body|query_params|cookies|headers|params|query|url|path_info|META|match_info|rel_url|post|multipart)\b|\breq\.(?:query|body|params|headers|cookies|url|originalUrl|path|files?|get)\b|\bparams\[|\br\.(?:URL|FormValue|PostFormValue|Form|PostForm|Header|Body|Cookie|MultipartForm)\b|\bc\.(?:Query|Param|PostForm|FormValue|Bind\w*)\s*\(|\bget(?:Parameter|ParameterValues|Header|QueryString|InputStream|Reader|Cookies|RequestURI|PathInfo)\s*\(|@(?:RequestParam|PathVariable|RequestBody|RequestHeader|CookieValue|QueryParam|PathParam|FormParam|HeaderParam)\b|\b(?:location|document)\.(?:hash|search|href|URL|location|cookie|referrer)\b|\bprocess\.argv\b|\bsearchParams\b|@\w+\.(?:route|get|post|put|patch|delete)\s*\(|\$_(?:GET|POST|REQUEST|COOKIE|FILES)\b|php:\/\/input|\$request->(?:input|query|get|post)\s*\(/;
 
 /** Paths (repo-relative) of every file a pack fingerprint recorded hits for — the sink-bearing files. Sorted. */
 export function sinkFiles(packFingerprints) {

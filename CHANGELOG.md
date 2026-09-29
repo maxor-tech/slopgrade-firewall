@@ -3,6 +3,16 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+- **Deep scan: PHP.** `.php` / `.phtml` files are now deep-scan units (the hosted heisen-slop engines gained a PHP taint
+  engine: xss, SQL, command, code, path, open-redirect, SSRF, deserialization, XXE). PHP sink markers are spelled so an
+  ordinary Python / Ruby / JS file never becomes a marker (`echo` / `<?=`, never a bare `print`; an `include` of a
+  `$var`, `__DIR__` or a concatenation, never a bare `require`). PHP superglobals count as a request source for the
+  file ranking. **Release only after the slopGrade server knows PHP** (`/api/ci/heisen`, slopgrade PR #1199): an older
+  server refuses the WHOLE deep-scan request as soon as one unit has an extension it does not model.
+
 ## [0.10.9] — 2026-09-29
 
 ### Added

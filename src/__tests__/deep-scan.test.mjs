@@ -187,3 +187,16 @@ test("deepScanNudge: only a PAID repo without the deep scan is invited", () => {
   assert.equal(deepScanNudge({ deepScan: true, paid: true }), null, "already on");
   assert.equal(deepScanNudge({ deepScan: false, paid: false }), null, "public / free-oss / none: the deep scan would 402");
 });
+
+test("PHP units reach the deep scan, and the PHP markers never make an ordinary Python / Ruby / JS file a marker", async () => {
+  const { DEEP_SCAN_EXTS, SOURCE_HINT } = await import("../deep-scan.mjs");
+  assert.ok(DEEP_SCAN_EXTS.test("public/index.php") && DEEP_SCAN_EXTS.test("views/list.phtml"));
+  assert.ok(hasSinkMarker("<?php\n$q = $_GET['q'];\necho '<p>' . $q;\n"));
+  assert.ok(hasSinkMarker("<div><?= $name ?></div>"));
+  assert.ok(SOURCE_HINT.test("<?php $id = $_POST['id'];"));
+  for (const code of [
+    "require 'json'\nclass A\n  def to_s\n    'a'\n  end\nend\n",            // Ruby: a bare require is not a PHP include
+    "print('hello')\n",                                                  // Python print is not a PHP echo
+    "const label = 'include files';\nexport default label;\n",
+  ]) assert.equal(hasSinkMarker(code), false, code);
+});

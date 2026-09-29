@@ -125,5 +125,16 @@
   "xpath-injection": "  doc.xpath(\"//user[@name='#{params[:n]}']\")",
   "xss": "  raw(params[:html])",
   "xxe": "Nokogiri::XML(xml) { |config| config.noent }"
+ },
+ "php": {
+  "code-injection": "<?php\neval('$x = ' . $_GET['expr'] . ';');\n",
+  "command-injection": "<?php\nsystem('ping -c1 ' . $_GET['host']);\n",
+  "insecure-deserialization": "<?php\n$prefs = unserialize($_COOKIE['prefs']);\n",
+  "open-redirect": "<?php\nheader('Location: ' . $_GET['next']);\n",
+  "path-traversal": "<?php\ninclude 'pages/' . $_GET['p'] . '.php';\n",
+  "sql-injection": "<?php\n$id = $_GET['id'];\nmysqli_query($c, \"SELECT * FROM t WHERE id='\" . $id . \"'\");\n",
+  "ssrf": "<?php\n$ch = curl_init();\ncurl_setopt($ch, CURLOPT_URL, $_GET['url']);\n",
+  "xss": "<?php\n$q = $_GET['q'];\necho '<p>' . $q . '</p>';\n",
+  "xxe": "<?php\n$d = new DOMDocument();\n$d->loadXML($_POST['xml'], LIBXML_NOENT);\n"
  }
 }
