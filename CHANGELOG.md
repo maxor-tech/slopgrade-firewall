@@ -3,7 +3,7 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [0.10.8] — 2026-09-29
 
 ### Added
 - **`.slopgradeignore`** — exclude paths the default exclusions miss (docs or marketing copy that shows vulnerable code,
