@@ -3,6 +3,13 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.10.9] — 2026-09-29
+
+### Added
+- **Library mode: candidates ordered by this repo's history.** When the server reorders the triage list by what this
+  repo's maintainers fixed or dismissed before (slopgrade `candidatesRanked`: per class, fixed floats up, marked
+  `heisen-ignore` sinks), the section says so in one line. Nothing is printed when there is no history yet.
+
 ## [0.10.8] — 2026-09-29
 
 ### Added

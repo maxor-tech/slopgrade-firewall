@@ -221,6 +221,9 @@ export function candidateOutcomesLine(o) {
   return `since the last library run: ${parts.join(" · ")}`;
 }
 
+/** Printed when the server reordered the candidates by this repo's history (slopgrade `candidatesRanked`, #1189). */
+export const CANDIDATES_RANKED_NOTE = "ordered by what this repo fixed before: classes you usually fix come first, classes you usually mark heisen-ignore come last.";
+
 /** How a maintainer quiets a candidate they reviewed — the same marker as findings, honoured on candidates since heisen-slop aea8aa9. */
 export const CANDIDATE_DISMISS_HINT = "reviewed and not a bug? add a `heisen-ignore: <reason>` comment on the sink line (or on a comment line just above) — it is dismissed from the next run and counted as such.";
 

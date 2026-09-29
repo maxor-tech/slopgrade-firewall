@@ -58,7 +58,7 @@ import {
   validProBundleResponse, verifyBundleSig, PRO_BUNDLE_PUBKEY, runProPacks, sanitizeProFingerprints, FREE_PACK_COUNT, MAX_SARIF_RESULTS, MAX_PRO_BUNDLE_BYTES,
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs,
 } from "./src/client-lib.mjs";
-import { sinkFiles, prChangedPaths, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, heisenFeed, splitAgainstFeed, isPaidVerdict, deepScanNudge } from "./src/deep-scan.mjs";
+import { sinkFiles, prChangedPaths, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, CANDIDATES_RANKED_NOTE, heisenFeed, splitAgainstFeed, isPaidVerdict, deepScanNudge } from "./src/deep-scan.mjs";
 import { fixableHitIndex, attachFixes } from "./src/autofix.mjs";
 import { IGNORE_FILE, parseIgnore, ignoreMatcher, readIgnoreText } from "./src/ignore.mjs";
 
@@ -378,7 +378,7 @@ export async function main(argv = [], env = process.env) {
 
   // 5b. OPT-IN deep scan (heisen taint engine) — source only ever goes to the CANONICAL origin, like the pro bundle
   //     only ever comes from it. Fail-open on every path: a deep-scan hiccup never touches the verdict above.
-  let deepRows = [], deepLine = null, deepBlocking = 0, libRows = [], libOutcomes = null;
+  let deepRows = [], deepLine = null, deepBlocking = 0, libRows = [], libOutcomes = null, libRanked = false;
   if (deep) {
     if (origin !== DEFAULT_ORIGIN) ghWarn("deep scan skipped — source is only ever sent to the canonical slopGrade origin.");
     else if (!deep.units.length) deepLine = "no sink-bearing file in an engine-modelled language — nothing sent.";
@@ -391,6 +391,7 @@ export async function main(argv = [], env = process.env) {
         deepRows = heisenFeed(r.response.findings, deep.units.map((u) => u.path));
         libRows = libKind?.kind === "library" ? libraryCandidates(r.response.candidates, deep.units.map((u) => u.path)) : [];
         libOutcomes = libKind?.kind === "library" ? r.response.candidateOutcomes : null;
+        libRanked = libKind?.kind === "library" && r.response.candidatesRanked === true;
         deepLine = `${r.response.scanned} file(s) analysed${deep.fromPr ? ` (${deep.fromPr} changed by this PR, sent first)` : ""}${deep.skipped ? ` (+${deep.skipped} over the cap, not sent)` : ""}${r.response.unanswered ? ` · ${r.response.unanswered} unanswered (partial)` : ""}`;
       }
     }
@@ -460,6 +461,7 @@ export async function main(argv = [], env = process.env) {
     line(`\nslopGrade Firewall — library mode: ${libRows.length} candidate(s) to triage — a public function's parameter reaches a sink. NOT proven: on real CVEs about 2 in 3 such hits remain after the fix.`);
     const outcomes = candidateOutcomesLine(libOutcomes);
     if (outcomes) line(`  ${outcomes}`);
+    if (libRanked) line(`  ${CANDIDATES_RANKED_NOTE}`);
     for (const c of libRows.slice(0, 50)) {
       console.log(`::notice file=${wfFile(c.file)},line=${c.line} title=slopGrade library candidate (triage)::[${sanitizeLogLine(c.rule)}] ${sanitizeLogLine(c.detail)}`);
       line(`    - ${sanitizeLogLine(c.file)}:${c.line}  [${sanitizeLogLine(c.rule)}] candidate`);

@@ -2,7 +2,7 @@
 // the manifest shapes of the measured corpus: 22 real applications (0 may read as a library) and real libraries.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { repoKind, libraryCandidates, requestDeepScan, candidateOutcomesLine, CANDIDATE_DISMISS_HINT } from "../deep-scan.mjs";
+import { repoKind, libraryCandidates, requestDeepScan, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, CANDIDATES_RANKED_NOTE } from "../deep-scan.mjs";
 
 test("libraryCandidates takes the detector's per-sink line when present (heisen-slop aea8aa9), else the evidence's", () => {
   const ev = "library-tier (…): ast-taint: the request value read at line 2 reaches os.system() at line 3 (CWE-78)";
@@ -67,4 +67,9 @@ test("requestDeepScan sends `library: true` only when asked", async () => {
   await requestDeepScan(post, "https://app.slopgrade.ai", "t", "s", [], true);
   assert.equal("library" in bodies[0], false);
   assert.equal(bodies[1].library, true);
+});
+
+test("the ranked note names the rule it applied (fixed first, heisen-ignore last)", () => {
+  assert.match(CANDIDATES_RANKED_NOTE, /fixed before/);
+  assert.match(CANDIDATES_RANKED_NOTE, /heisen-ignore/);
 });
