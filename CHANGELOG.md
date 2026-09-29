@@ -3,6 +3,16 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+- **`.slopgradeignore`** — exclude paths the default exclusions miss (docs or marketing copy that shows vulnerable code,
+  generated files). Gitignore-style subset: bare names match at any depth, a `/` anchors at the root, `*` / `**` / `?`.
+  Applied to the free walk and the paid (pro) walk, so ignored files are never read and never fingerprinted.
+- **Self-exemption guard:** on a pull request the file is read from the BASE branch (`git show origin/<base>:…`), never
+  from the PR head — a PR that adds `src/` cannot hide its own findings. Match-everything patterns (`*`, `**`, `/`),
+  negations and lines over 200 chars are refused with a warning; at most 200 patterns.
+
 ## [0.10.7] — 2026-09-28
 
 ### Added
