@@ -171,7 +171,25 @@ shell=True)`). It is the **only** mode in which file contents leave your runner,
   **1.5% to 5.6%** (Python) — but about **2 in 3 candidates remain after the fix**, and a clean library can show a few
   by-design flows (a template engine rendering what it is given). Use it to review a package's public API, not as a gate.
   A candidate you reviewed is quieted with a `heisen-ignore: <reason>` comment on its sink line (client ≥ 0.10.7 also prints
-  what became of the previous run's candidates: resolved · dismissed · still open · new).
+  what became of the previous run's candidates: resolved · dismissed · still open · new; the run's page in
+  [app.slopgrade.ai/ci](https://app.slopgrade.ai/ci) lists them with a link to each line).
+- **Compared with semgrep, on the CVEs a taint tool is built for.** Most real CVEs are validation-logic bugs no taint
+  engine sees, so the comparison uses a denominator fixed **before** running either tool: an advisory pair counts when
+  its fix changes a line that calls a sink API of its class (`os.system`, `subprocess.*`, `eval`, `.execute(`, `fs.*`,
+  `fetch(`, `innerHTML`, `pickle.load`, …) — about 17% of pairs. Both tools then run on the same files; a pair is found
+  when the vulnerable file is flagged **and** its fix is not; « both sides » counts pairs flagged on the fix too (noise).
+  Held-out OSV advisories, semgrep 1.178.0 `p/default` per file, heisen measured 2026-09-28:
+
+  | held-out pairs | heisen, requests only | **heisen + library** | semgrep, taint rules | semgrep, + audit rules |
+  |---|---:|---:|---:|---:|
+  | npm, 174 | 1.1% | **24.1%** (both sides 41) | 6.9% (9) | 4.6% (55) |
+  | PyPI, 123 | 4.1% | **19.5%** (both sides 20) | 8.1% (16) | 24.4% (42) |
+
+  In **JavaScript** the library tier finds about **3×** what semgrep finds, and a smaller GitHub-advisory sample (93
+  pairs: 35.5% vs 12.9%) agrees. In **Python** it finds more than semgrep's taint rules but **fewer than its audit
+  rules**, which also flag the fixed file about twice as often. Go is not claimed (the sink list names Python / JS APIs).
+  Both library tier and audit rules are triage tiers, not blocks; the requests-only tier is what `deep-scan-block` can
+  block on: on the fixed files it blocked 1 in the PyPI set above and 0 in the GitHub-advisory sample.
 
 ## Excluding paths — `.slopgradeignore`
 
