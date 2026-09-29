@@ -173,6 +173,28 @@ shell=True)`). It is the **only** mode in which file contents leave your runner,
   A candidate you reviewed is quieted with a `heisen-ignore: <reason>` comment on its sink line (client ≥ 0.10.7 also prints
   what became of the previous run's candidates: resolved · dismissed · still open · new).
 
+## Excluding paths — `.slopgradeignore`
+
+Tests, fixtures, `vendor/`, `dist/` and example folders are already skipped. For anything else that is not your running
+code — docs or marketing copy that *shows* vulnerable snippets, generated files — add a `.slopgradeignore` at the repo
+root, one pattern per line (gitignore-style subset):
+
+```gitignore
+# pages that display intentionally vulnerable examples
+content/examples/
+lib/gate-pages.ts
+*.snap
+src/**/generated-*.ts
+```
+
+A pattern without `/` matches a file or directory at any depth; with a `/` it is anchored at the repo root. `*` stays
+within a path segment, `**` spans segments. Ignored files are never read, so they produce no finding and no fingerprint.
+
+**A pull request cannot exempt itself:** on a `pull_request` run the file is read from the **base branch** (`git show
+origin/<base>:.slopgradeignore`, needs `fetch-depth: 0`), never from the PR — a new entry applies once it is merged.
+Patterns that would exclude everything (`*`, `**`, `/`), negations (`!`) and over-long lines are refused with a warning.
+The log says how many patterns applied and how many files were skipped.
+
 ## Fail-open, always
 
 A missing OIDC token, a timeout (each call bounded at 20s), a network failure, or a server error **never** breaks

@@ -60,6 +60,7 @@ import {
 } from "./src/client-lib.mjs";
 import { sinkFiles, prChangedPaths, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, heisenFeed, splitAgainstFeed, isPaidVerdict, deepScanNudge } from "./src/deep-scan.mjs";
 import { fixableHitIndex, attachFixes } from "./src/autofix.mjs";
+import { IGNORE_FILE, parseIgnore, ignoreMatcher, readIgnoreText } from "./src/ignore.mjs";
 
 const CODE_EXTS = /\.(py|ts|tsx|js|jsx|mjs|cjs|sql|rb|go|php|prisma|java|cs|rs|c|cc|cpp|h|hpp|kt|scala|ex|exs)$/;
 const TIMEOUT_MS = 20_000;
@@ -124,7 +125,7 @@ async function postVerdict(origin, body) {
  * fetch → verify (bounded, sha256) → load from a temp file → run over the pro walk set → sanitize. Every failure path
  * degrades to the free packs with a warning — a pro hiccup never costs the verdict. A free repo gets 402, silently.
  */
-async function loadProPacks(origin, oidcToken, root, rel) {
+async function loadProPacks(origin, oidcToken, root, rel, isIgnored = () => false) {
   const none = (note) => ({ wire: {}, packCount: 0, version: null, note });
   // The pro bundle is closed-source code EXECUTED in the runner (import). Fetch it ONLY from the canonical origin — a
   // custom origin (staging, or an attacker who set SLOPGRADE_ALLOW_CUSTOM_ORIGIN) must never hand us code to run.
@@ -165,7 +166,7 @@ async function loadProPacks(origin, oidcToken, root, rel) {
   finally { if (dir) { try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort cleanup */ } } }
   const packs = Array.isArray(mod?.PRO_PACKS) ? mod.PRO_PACKS : [];
   // The pro walk set adds the infra formats (yaml/tf/json/Dockerfile…) the free CODE_EXTS walk never reads.
-  const proFiles = mod?.PRO_WALK_EXTS instanceof RegExp ? walk(root, mod.PRO_WALK_EXTS) : walk(root, CODE_EXTS);
+  const proFiles = (mod?.PRO_WALK_EXTS instanceof RegExp ? walk(root, mod.PRO_WALK_EXTS) : walk(root, CODE_EXTS)).filter((f) => !isIgnored(rel(f)));
   const { wire, errors } = runProPacks(packs, proFiles, { read: (f) => readFileSync(f, "utf8"), rel });
   if (errors > 0) ghWarn(`${errors} pro extractor call(s) threw and were skipped.`);
   return { wire: sanitizeProFingerprints(wire), packCount: packs.length, version: String(j.version), note: ` (paid · pro extractors ${sanitizeLogLine(String(j.version), 40)})` };
@@ -225,8 +226,17 @@ export async function main(argv = [], env = process.env) {
   let corsFingerprint, goCorsFingerprint, dotnetCorsFingerprint;
   let xxeFingerprint, deserFingerprint, secretFingerprint, cryptoFingerprint;
   const rel = (f) => { const nf = f.replace(/\\/g, "/"), nr = root.replace(/\\/g, "/").replace(/\/+$/, ""); return nf.startsWith(nr + "/") ? nf.slice(nr.length + 1) : nf.split("/").slice(-2).join("/"); };
+  // `.slopgradeignore` — on a pull request read from the BASE branch (a PR cannot exempt its own files) ; see src/ignore.mjs.
+  const ignoreSrc = readIgnoreText(env,
+    (args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15_000, maxBuffer: 1024 * 1024 }),
+    (p) => readFileSync(join(root, p), "utf8"));
+  const ignore = parseIgnore(ignoreSrc.text);
+  const isIgnored = ignoreMatcher(ignore.patterns);
+  let ignoredCount = 0;
   try {
-    files = walk(root, CODE_EXTS);
+    const walked = walk(root, CODE_EXTS);
+    files = walked.filter((f) => !isIgnored(rel(f)));
+    ignoredCount = walked.length - files.length;
     fingerprint = sanitizeFingerprint(buildFingerprint(files, root));
     sqliFingerprint = { files: [] }; goSqliFingerprint = { files: [] }; dotnetSqliFingerprint = { files: [] };
     cmdiFingerprint = { files: [] }; goCmdiFingerprint = { files: [] }; dotnetCmdiFingerprint = { files: [] };
@@ -270,6 +280,8 @@ export async function main(argv = [], env = process.env) {
     ghWarn(`could not scan the repo (${errMsg(e)}) — no verdict.`);
     return noVerdict();
   }
+  if (ignore.kept.length) line(`slopGrade Firewall: ${IGNORE_FILE} (${ignoreSrc.source === "base" ? "read from the base branch" : "read from the checkout"}) — ${ignore.kept.length} pattern(s), ${ignoredCount} file(s) not scanned.`);
+  if (ignore.refused.length) ghWarn(`${IGNORE_FILE}: ${ignore.refused.length} pattern(s) refused (match-everything, negation or too long): ${ignore.refused.slice(0, 5).join(" ")}`);
 
   const packFingerprints = {
     sqliFingerprint, goSqliFingerprint, dotnetSqliFingerprint,
@@ -333,7 +345,7 @@ export async function main(argv = [], env = process.env) {
 
   // 4b. PRO extractors — a PAID repo receives the closed-source extractors for the rest of the catalogue and runs them
   //     here (the source still never leaves) ; a free repo gets 402 and keeps its free packs. Fail-open, always.
-  const pro = await loadProPacks(origin, oidcToken, root, rel);
+  const pro = await loadProPacks(origin, oidcToken, root, rel, isIgnored);
   const wireAll = { ...pro.wire, ...wirePacks }; // the public extractors win on a key collision (never expected)
   // The coverage line — printed on EVERY run, clean or not : a run that scanned N files with P packs and found nothing
   // must be distinguishable from a run that scanned nothing (release-audit B-P1-7).
