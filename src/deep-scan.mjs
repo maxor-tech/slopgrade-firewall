@@ -89,14 +89,70 @@ const FULL_SHA = /^[0-9a-f]{40}$/;
  * repo-wide order. Deleted files are left out (nothing to send).
  */
 export function prChangedPaths(env, readEvent, git) {
+  const prs = prShas(env, readEvent);
+  if (!prs) return null;
+  try {
+    const out = git(["diff", "--name-only", "--diff-filter=d", "-z", `${prs.base}...${prs.head}`]);
+    return typeof out === "string" ? out.split("\0").filter(Boolean) : null;
+  } catch { return null; }
+}
+
+/** The base and head SHAs of a pull_request run, or null (not a PR run, no event, a ref name instead of a full SHA). */
+function prShas(env, readEvent) {
   if (env.GITHUB_EVENT_NAME !== "pull_request" && env.GITHUB_EVENT_NAME !== "pull_request_target") return null;
   let ev = null;
   try { ev = readEvent(); } catch { return null; }
   const base = ev?.pull_request?.base?.sha, head = ev?.pull_request?.head?.sha;
-  if (!FULL_SHA.test(base || "") || !FULL_SHA.test(head || "")) return null;
+  return FULL_SHA.test(base || "") && FULL_SHA.test(head || "") ? { base, head } : null;
+}
+
+// = heisen-slop serve.MAX_CHANGED_RANGES; a file with more ranges is sent without them (analysed whole).
+export const DEEP_MAX_CHANGED_RANGES = 2_000;
+// git pathspecs for DEEP_SCAN_EXTS (case-insensitive like the regex), so the range diff reads only sendable files.
+export const DEEP_SCAN_PATHSPEC = ["py", "js", "jsx", "mjs", "cjs", "ts", "tsx", "go", "java", "rb", "php", "phtml"].map((e) => `:(glob,icase)**/*.${e}`);
+
+/**
+ * `git diff -U0` output → Map(path → [[start, end], …]), the changed line ranges on the NEW side. A pure deletion
+ * (`+c,0`) marks its two neighbours, the lines the removal now joins. A new file, a binary file, a quoted path (git
+ * quotes control characters) or a deleted file gets NO entry: it is analysed whole, which is always correct.
+ */
+export function parseChangedRanges(diff) {
+  const out = new Map();
+  let cur = null, isNew = false;
+  for (const ln of String(diff).split("\n")) {
+    if (ln.startsWith("diff --git ")) { cur = null; isNew = false; continue; }
+    if (ln.startsWith("--- ")) { isNew = ln === "--- /dev/null"; continue; }
+    if (ln.startsWith("+++ ")) {
+      const p = ln.slice(4).replace(/\t$/, "");
+      cur = !isNew && p.startsWith("b/") ? p.slice(2) : null;
+      continue;
+    }
+    const h = cur && /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(ln);
+    if (!h) continue;
+    const c = Number(h[1]), d = h[2] === undefined ? 1 : Number(h[2]);
+    const r = d > 0 ? [c, c + d - 1] : c === 0 ? [1, 1] : [c, c + 1];
+    if (!out.has(cur)) out.set(cur, []);
+    out.get(cur).push(r);
+  }
+  return out;
+}
+
+/**
+ * The line ranges THIS pull request changed, per file, for PR-scoped analysis (the detector then analyses only the
+ * functions they touch and their in-file callers — slopgrade /api/ci/heisen `changed`, heisen-slop `changed_lines`).
+ * Diffed from the PR's BASE commit to the WORKING TREE, so the line numbers are those of the files actually sent: a
+ * pull_request run checks out GitHub's merge commit, where `base...head` numbers would be off by whatever the base
+ * branch changed since. On a head checkout the same diff also covers the base branch's newer lines — more is analysed,
+ * never less. Local git only, no network. null off-PR or when git cannot answer → every file analysed whole.
+ */
+export function prChangedRanges(env, readEvent, git) {
+  const prs = prShas(env, readEvent);
+  if (!prs) return null;
   try {
-    const out = git(["diff", "--name-only", "--diff-filter=d", "-z", `${base}...${head}`]);
-    return typeof out === "string" ? out.split("\0").filter(Boolean) : null;
+    // limited to the extensions the deep scan can send: a PR's lockfile / generated-asset churn would otherwise fill the
+    // output buffer and cost EVERY file its ranges
+    const out = git(["-c", "core.quotepath=off", "diff", "-U0", "--no-color", "--no-ext-diff", "--diff-filter=d", "-M", prs.base, "--", ...DEEP_SCAN_PATHSPEC]);
+    return typeof out === "string" ? parseChangedRanges(out) : null;
   } catch { return null; }
 }
 
@@ -131,9 +187,10 @@ function familyCount(code) {
  * tier (every tier is a subset of « has a sink marker »). Engine-modelled extensions only; read via `read(path)`
  * (null / throw = unreadable); empty / oversize files skipped; stops at the file and character caps. `skipped` counts
  * candidate files left out so the log can say the scan was bounded instead of implying full coverage; `fromPr` counts
- * the sent units the PR changed.
+ * the sent units the PR changed. With `changedRanges` (prChangedRanges), a PR file also carries `changed`, its changed
+ * line ranges — line numbers only, never more source — and `scoped` counts those units.
  */
-export function selectDeepUnits(paths, read, hitPaths = [], changedPaths = []) {
+export function selectDeepUnits(paths, read, hitPaths = [], changedPaths = [], changedRanges = null) {
   const hits = new Set(hitPaths);
   const changed = new Set(changedPaths);
   const cands = [];
@@ -152,15 +209,19 @@ export function selectDeepUnits(paths, read, hitPaths = [], changedPaths = []) {
   }
   cands.sort((a, b) => a.tier - b.tier || a.dev - b.dev || b.fam - a.fam || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const units = [];
-  let total = 0, fromPr = 0;
+  let total = 0, fromPr = 0, scoped = 0;
   for (const c of cands) {
     const u = { path: c.path, code: c.code };
     if (units.length >= DEEP_MAX_UNITS || u.code.length > DEEP_MAX_UNIT_CHARS || total + u.code.length > DEEP_MAX_TOTAL_CHARS) { skipped++; continue; }
     total += u.code.length;
+    if (changed.has(u.path)) {
+      fromPr++;
+      const ranges = changedRanges?.get(u.path);
+      if (Array.isArray(ranges) && ranges.length && ranges.length <= DEEP_MAX_CHANGED_RANGES) { u.changed = ranges; scoped++; }
+    }
     units.push(u);
-    if (changed.has(u.path)) fromPr++;
   }
-  return { units, skipped, chars: total, fromPr };
+  return { units, skipped, chars: total, fromPr, scoped };
 }
 
 // ── Library mode (0.10.6, opt-in `library-mode: "true"`) ─────────────────────────────────────────────────────────────

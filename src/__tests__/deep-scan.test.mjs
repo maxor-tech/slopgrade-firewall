@@ -120,7 +120,7 @@ test("selectDeepUnits enforces the file and character caps", () => {
 
 test("a throwing reader is a skipped hit file, never a crash", () => {
   const r = selectDeepUnits(["a.py"], () => { throw new Error("EACCES"); }, ["a.py"]);
-  assert.deepEqual(r, { units: [], skipped: 1, chars: 0, fromPr: 0 });
+  assert.deepEqual(r, { units: [], skipped: 1, chars: 0, fromPr: 0, scoped: 0 });
 });
 
 test("validHeisenResponse accepts the route's shape and rejects anything else", () => {
