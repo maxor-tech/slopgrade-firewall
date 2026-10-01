@@ -3,6 +3,24 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.10.11] — 2026-10-01
+
+### Added
+- **Deep scan: PR-scoped analysis.** On a pull request, each changed file the deep scan sends also carries the line
+  ranges the PR changed (`changed: [[start, end], …]`). The ranges are read locally with `git diff -U0` from the base
+  commit to the checked-out tree: line numbers only, no extra source, no network. GitHub's merge-commit checkout gets
+  the numbers of the files actually sent.
+- The hosted engine then analyses only the functions those lines touch and their in-file callers (heisen-slop
+  `0cb20cb`; slopgrade route PR #1224). On OSV PyPI real-CVE fixes: 0 vulnerable files lost versus whole-file analysis,
+  held-out paired 59 → 65, flagged-on-both-sides 76 → 54, engine time about −25 %.
+- These files are analysed whole, exactly as before:
+  - new files;
+  - files with more than 2,000 ranges;
+  - quoted paths;
+  - every file on a push run;
+  - every file when git cannot answer.
+- The deep-scan line says how many files were analysed PR-scoped. A slopGrade server that predates the field ignores it.
+
 ## [0.10.10] — 2026-09-30
 
 ### Added

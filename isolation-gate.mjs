@@ -58,7 +58,7 @@ import {
   validProBundleResponse, verifyBundleSig, PRO_BUNDLE_PUBKEY, runProPacks, sanitizeProFingerprints, FREE_PACK_COUNT, MAX_SARIF_RESULTS, MAX_PRO_BUNDLE_BYTES,
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs,
 } from "./src/client-lib.mjs";
-import { sinkFiles, prChangedPaths, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, CANDIDATES_RANKED_NOTE, heisenFeed, splitAgainstFeed, isPaidVerdict, deepScanNudge } from "./src/deep-scan.mjs";
+import { sinkFiles, prChangedPaths, prChangedRanges, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, CANDIDATES_RANKED_NOTE, heisenFeed, splitAgainstFeed, isPaidVerdict, deepScanNudge } from "./src/deep-scan.mjs";
 import { fixableHitIndex, attachFixes } from "./src/autofix.mjs";
 import { IGNORE_FILE, parseIgnore, ignoreMatcher, readIgnoreText } from "./src/ignore.mjs";
 
@@ -299,13 +299,17 @@ export async function main(argv = [], env = process.env) {
   // OPT-IN deep scan: the files that WOULD leave (source), chosen from the sink-bearing files only. Computed up front so
   // --print-payload can list them — the audit promise extends to the one mode that sends code. On a pull request the
   // files it changed go first (read locally from git — no network, so the printed list is the sent list).
-  const prFiles = deepScan ? prChangedPaths(env, () => JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8")),
-    (args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15_000, maxBuffer: 16 * 1024 * 1024 })) : null;
-  const deep = deepScan ? selectDeepUnits(files.map(rel), (p) => readFileSync(join(root, p), "utf8"), sinkFiles(packFingerprints), prFiles ?? []) : null;
+  const prEvent = () => JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8"));
+  const git = (args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15_000, maxBuffer: 16 * 1024 * 1024 });
+  const prFiles = deepScan ? prChangedPaths(env, prEvent, git) : null;
+  // PR-scoped analysis (0.10.11): each PR file also carries the line ranges it changed — line numbers only, never more
+  // source — so the engine analyses the functions the PR touched (and their callers), not the whole file again.
+  const prRanges = prFiles ? prChangedRanges(env, prEvent, git) : null;
+  const deep = deepScan ? selectDeepUnits(files.map(rel), (p) => readFileSync(join(root, p), "utf8"), sinkFiles(packFingerprints), prFiles ?? [], prRanges) : null;
   // Library mode: only for a checkout that IS a published package (manifest-only, local) — an application never asks.
   const libKind = libraryMode ? repoKind((rel) => { try { return readFileSync(join(root, rel), "utf8"); } catch { return null; } },
     () => { try { return readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith(".")).map((e) => e.name); } catch { return []; } }) : null;
-  const deepAudit = deep ? { deepScan: { note: "SOURCE of these files is sent (opt-in --deep-scan)", files: deep.units.map((u) => u.path), chars: deep.chars, skipped: deep.skipped, fromPr: deep.fromPr, ...(libKind ? { libraryMode: libKind.kind === "library", repoKind: libKind.why } : {}) } } : {};
+  const deepAudit = deep ? { deepScan: { note: "SOURCE of these files is sent (opt-in --deep-scan)", files: deep.units.map((u) => u.path), chars: deep.chars, skipped: deep.skipped, fromPr: deep.fromPr, scopedToPrLines: deep.scoped, ...(libKind ? { libraryMode: libKind.kind === "library", repoKind: libKind.why } : {}) } } : {};
 
   // 2. EXFILTRATION guard — a custom origin would mint a token for an attacker audience. Run DRY unless opted in.
   const { origin, blocked } = resolveOrigin(env);
@@ -392,7 +396,7 @@ export async function main(argv = [], env = process.env) {
         libRows = libKind?.kind === "library" ? libraryCandidates(r.response.candidates, deep.units.map((u) => u.path)) : [];
         libOutcomes = libKind?.kind === "library" ? r.response.candidateOutcomes : null;
         libRanked = libKind?.kind === "library" && r.response.candidatesRanked === true;
-        deepLine = `${r.response.scanned} file(s) analysed${deep.fromPr ? ` (${deep.fromPr} changed by this PR, sent first)` : ""}${deep.skipped ? ` (+${deep.skipped} over the cap, not sent)` : ""}${r.response.unanswered ? ` · ${r.response.unanswered} unanswered (partial)` : ""}`;
+        deepLine = `${r.response.scanned} file(s) analysed${deep.fromPr ? ` (${deep.fromPr} changed by this PR, sent first)` : ""}${deep.skipped ? ` (+${deep.skipped} over the cap, not sent)` : ""}${r.response.unanswered ? ` · ${r.response.unanswered} unanswered (partial)` : ""}${Number.isInteger(r.response.scoped) && r.response.scoped > 0 ? ` · ${r.response.scoped} analysed only where this PR changed them (and their callers)` : ""}`;
       }
     }
   }

@@ -148,6 +148,18 @@ shell=True)`). It is the **only** mode in which file contents leave your runner,
   found a sink, then any Python / JS-TS / Go / Java / Ruby / PHP file containing a sink marker (shell, eval, SQL, file,
   redirect, outbound request, template, unsafe deserializer). A file with no sink marker is never sent.
   `--print-payload` lists the exact files (under `deepScan.files`) before anything is sent.
+- **On a pull request, the PR's code first — and only the code it changed** (client ≥ 0.10.11). The files the PR
+  changed are sent first. Each one also carries the **line ranges** the PR changed, read locally with `git diff -U0`
+  against the base commit (line numbers only, never more source). The engine then analyses the functions those lines
+  touch and every function of the file that calls them, not the whole file again. A new file, or a change outside any
+  function the engine can place, is analysed whole.
+  - A PR-scoped run is never read as « fixed »: on the run's page an untouched function's earlier findings are neither
+    resolved nor compared.
+  - Measured on real CVE fixes (OSV PyPI, each side scoped to the lines its fix changed): no vulnerable file that the
+    whole-file analysis caught was lost; held-out pairs caught rose 59 → 65; files flagged on both sides of a fix fell
+    76 → 54; engine time fell about a quarter.
+  - Push runs to the default branch stay whole-file. `--print-payload` shows how many files are sent PR-scoped
+    (`deepScan.scopedToPrLines`).
 - **Where** — only to the canonical `https://app.slopgrade.ai/api/ci/heisen` (never to a custom origin), with the same
   OIDC proof. Server-side the code is forwarded to the engine and **dropped** — never logged, never stored; only
   `file:line`, the CWE and the engine's one-line evidence are kept for your `/ci` history.
