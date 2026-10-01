@@ -108,6 +108,8 @@ function prShas(env, readEvent) {
 
 // = heisen-slop serve.MAX_CHANGED_RANGES; a file with more ranges is sent without them (analysed whole).
 export const DEEP_MAX_CHANGED_RANGES = 2_000;
+// git pathspecs for DEEP_SCAN_EXTS (case-insensitive like the regex), so the range diff reads only sendable files.
+export const DEEP_SCAN_PATHSPEC = ["py", "js", "jsx", "mjs", "cjs", "ts", "tsx", "go", "java", "rb", "php", "phtml"].map((e) => `:(glob,icase)**/*.${e}`);
 
 /**
  * `git diff -U0` output → Map(path → [[start, end], …]), the changed line ranges on the NEW side. A pure deletion
@@ -147,7 +149,9 @@ export function prChangedRanges(env, readEvent, git) {
   const prs = prShas(env, readEvent);
   if (!prs) return null;
   try {
-    const out = git(["-c", "core.quotepath=off", "diff", "-U0", "--no-color", "--no-ext-diff", "--diff-filter=d", "-M", prs.base, "--"]);
+    // limited to the extensions the deep scan can send: a PR's lockfile / generated-asset churn would otherwise fill the
+    // output buffer and cost EVERY file its ranges
+    const out = git(["-c", "core.quotepath=off", "diff", "-U0", "--no-color", "--no-ext-diff", "--diff-filter=d", "-M", prs.base, "--", ...DEEP_SCAN_PATHSPEC]);
     return typeof out === "string" ? parseChangedRanges(out) : null;
   } catch { return null; }
 }

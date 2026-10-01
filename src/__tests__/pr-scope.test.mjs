@@ -75,6 +75,8 @@ test("prChangedRanges on a real repository: GitHub's merge checkout gets the lin
   writeFileSync(join(dir, "app/new_name.py"), lines(10, "o").replace("o3\n", "o3-changed\n"));
   sh(dir, "rm", "-q", "app/dead.py");
   writeFileSync(join(dir, "app/new.py"), "x = 1\n");
+  writeFileSync(join(dir, "package-lock.json"), "{}\n".repeat(50));   // churn the deep scan never sends
+  writeFileSync(join(dir, "Views.PY"), "a\n");                        // upper-case extension still counts
   sh(dir, "add", "."); sh(dir, "commit", "-qm", "pr");
   const head = sh(dir, "rev-parse", "HEAD").trim();
 
@@ -87,12 +89,16 @@ test("prChangedRanges on a real repository: GitHub's merge checkout gets the lin
 
   const env = { GITHUB_EVENT_NAME: "pull_request" };
   const ev = () => ({ pull_request: { base: { sha: base }, head: { sha: head } } });
-  const git = (args) => sh(dir, ...args);
+  let seenArgs = [], seenOut = "";
+  const git = (args) => { seenArgs = args; seenOut = sh(dir, ...args); return seenOut; };
   const m = prChangedRanges(env, ev, git);
   assert.deepEqual(m.get("app/views.py"), [[20, 20]], "line 15 of the PR head is line 20 of the checked-out merge");
   assert.deepEqual(m.get("app/new_name.py"), [[3, 3]], "a renamed file keeps only its edited line");
   assert.equal(m.has("app/dead.py"), false);
   assert.equal(m.has("app/new.py"), false, "a new file is analysed whole");
+  assert.deepEqual(seenArgs.filter((a) => a.startsWith(":(")).length, 12, "the diff is limited to sendable extensions");
+  assert.equal(seenOut.includes("package-lock.json"), false, "lockfile churn never reaches the buffer");
+  assert.equal(seenOut.includes("Views.PY"), true, "the pathspec is case-insensitive like DEEP_SCAN_EXTS");
   // the precondition that makes the working-tree diff necessary: base...head numbers would be off by 5
   const naive = parseChangedRanges(sh(dir, "diff", "-U0", `${mergeBase}...${head}`));
   assert.deepEqual(naive.get("app/views.py"), [[15, 15]]);
