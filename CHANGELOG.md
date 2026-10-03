@@ -3,6 +3,15 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Changed
+- **A refused run now says why.** When the server answers without a verdict (non-2xx), the CI warning prints the
+  server's machine code and message, not only the status. Example: `server refused (HTTP 402: account-locked) — Essai
+  Team terminé : ajoutez une carte sur slopgrade.ai pour réactiver le compte. — no verdict.` Only a plain code is
+  echoed, the message is capped at 160 characters, and the line still goes through the log sanitizer. Behavior is
+  unchanged: no verdict, exit 0 (unless `--strict`).
+
 ## [0.10.11] — 2026-10-01
 
 ### Added

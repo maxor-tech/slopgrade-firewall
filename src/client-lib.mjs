@@ -120,6 +120,20 @@ export function sanitizeLogLine(s, max = 240) {
 }
 
 /**
+ * The CI-log line for a server REFUSAL (non-2xx, no verdict) — says WHY, not only the status. Example: a 402
+ * `account-locked` (the owner's Team trial ended unpaid) prints the server's reactivation message. Only a plain
+ * machine code is echoed for `error`; the message is capped. The caller still passes the line through
+ * sanitizeLogLine (ghWarn), so a hostile body can never forge a workflow command.
+ */
+export function refusalLine(status, body) {
+  const b = body && typeof body === "object" ? body : {};
+  const code = typeof b.error === "string" && /^[a-z0-9_-]{1,40}$/i.test(b.error) ? b.error : null;
+  const msg = typeof b.message === "string" ? b.message.trim().slice(0, 160) : "";
+  const head = `server refused (HTTP ${status}${code ? `: ${code}` : ""})`;
+  return msg ? `${head} — ${msg} — no verdict.` : `${head} — no verdict.`;
+}
+
+/**
  * The EXACT wire payload, built by whitelisting known fields — applied at the POST boundary (not only inside
  * buildFingerprint) so what leaves the runner is provable and cannot grow a source-bearing field by accident.
  * This is the whole contract: structural signals + names + abstract query shapes. Never file contents.

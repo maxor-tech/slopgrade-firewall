@@ -56,7 +56,7 @@ import {
   resolveOrigin, DEFAULT_ORIGIN, classifyEnv, validVerdict, sanitizeLogLine, sanitizeFingerprint, sanitizePackFingerprints,
   parseLeak, leakText, findingLocation, buildSarif, collectPackBlocks, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
   validProBundleResponse, verifyBundleSig, PRO_BUNDLE_PUBKEY, runProPacks, sanitizeProFingerprints, FREE_PACK_COUNT, MAX_SARIF_RESULTS, MAX_PRO_BUNDLE_BYTES,
-  githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs,
+  githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs, refusalLine,
 } from "./src/client-lib.mjs";
 import { sinkFiles, prChangedPaths, prChangedRanges, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, CANDIDATES_RANKED_NOTE, heisenFeed, splitAgainstFeed, isPaidVerdict, deepScanNudge } from "./src/deep-scan.mjs";
 import { fixableHitIndex, attachFixes } from "./src/autofix.mjs";
@@ -106,7 +106,10 @@ async function postVerdict(origin, body) {
       });
       if (res.ok) return await res.json();
       if (res.status >= 500 && attempt === 0) { await new Promise((r) => setTimeout(r, 750)); continue; }
-      ghWarn(`server refused (HTTP ${res.status}) — no verdict.`);
+      // Say WHY (e.g. 402 account-locked → the server's reactivation message), never only the status. A body that is
+      // not JSON keeps the generic line. Still fail-open: no verdict, exit 0 (unless --strict).
+      const detail = await res.json().catch(() => null);
+      ghWarn(refusalLine(res.status, detail));
       return null;
     } catch (e) {
       if (attempt === 0) { await new Promise((r) => setTimeout(r, 750)); continue; }
