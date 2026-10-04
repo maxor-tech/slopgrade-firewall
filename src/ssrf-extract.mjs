@@ -50,8 +50,11 @@ function directPatterns(pyClients) {
     ["php-curl", /curl_setopt\s*\([^;]*CURLOPT_URL\s*,\s*[^;]*\$_(?:GET|POST|REQUEST|COOKIE)|->\s*(?:get|post|request)\s*\(\s*\$_(?:GET|POST|REQUEST)/],
     // Java — new URL(request.getParameter(...)).openConnection / RestTemplate on a request value.
     ["java-url", /new\s+URL\s*\([^;]*request\s*\.\s*getParameter|restTemplate\s*\.\s*(?:getForObject|getForEntity|exchange)\s*\([^;]*request\s*\.\s*getParameter/],
-    // Ruby — Net::HTTP / HTTParty / Faraday / open on params inline.
-    ["ruby-http", /\b(?:Net::HTTP\s*\.\s*(?:get|post|get_response)|HTTParty\s*\.\s*(?:get|post)|Faraday\s*\.\s*(?:get|post)|open)\s*\(\s*params\b/],
+    // Ruby — Net::HTTP / HTTParty / Faraday on params inline, or Kernel#open / URI.open on an ACCESSED params value.
+    // `open` must be a BARE call (or URI./Kernel.) and the arg `params[…]` / `params.require…` — real-code corpus FP:
+    // `fs.open(params.filePath)`, `root.open(params.relativePath)`, a TS method `open(params: T)` (a function-param
+    // object named params, not Rails user input, and a file open, not an HTTP fetch).
+    ["ruby-http", /\b(?:Net::HTTP\s*\.\s*(?:get|post|get_response)|HTTParty\s*\.\s*(?:get|post)|Faraday\s*\.\s*(?:get|post))\s*\(\s*params\b|(?:(?<![\w.:$])open|\b(?:URI|Kernel)\s*\.\s*open)\s*\(\s*params\s*[[.]/],
   ];
 }
 
@@ -90,7 +93,7 @@ const pySinkBase = pySink(PY_BASE);
 const ssrfSinkTest = (l, v) => pySinkBase(v).test(l) || nodeSink(v).test(l);
 const SSRF_SOURCE = new RegExp(`${PY_SOURCE.source}|${NODE_SOURCE.source}`);
 
-/** The SSRF wrapper config — shared by the walker's cross-file registry build. */
+/** The SSRF wrapper config — shared by the walker's cross-file registry build and the calibration harness. */
 export const ssrfWrapperCfg = { sinkTest: ssrfSinkTest, sanitizer: SSRF_SANITIZE, sourceTest: SSRF_SOURCE, hasSink: HAS_SINK };
 
 /**

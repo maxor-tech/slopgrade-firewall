@@ -8,14 +8,16 @@
 import { runTaintPass, mentions } from "./taint-core.mjs";
 import { findSinkWrappers, interprocHit } from "./taint-interproc.mjs";
 
-const REQ = "request|req\\b|\\$_(?:GET|POST|REQUEST|COOKIE)";
 // STRICT source-access form (a request SUB-FIELD, never the bare word) — safe to match nested in a sink's args
 // without flagging a string literal that merely contains "request".
 const SRC = "request\\s*\\.\\s*(?:args|form|values|GET|POST|json|data)|req(?:uest)?\\s*\\.\\s*(?:query|body|params)|\\$_(?:GET|POST|REQUEST|COOKIE)";
 const PATTERNS = [
   // Python — open()/send_file() with a request value as the path. send_from_directory (the SAFE Flask helper) is NOT
   // matched. `os.path.join(..., request…)` is excluded: join is the sanitization boundary, not the sink.
-  ["py-open", new RegExp(`\\b(?:open|send_file)\\s*\\(\\s*(?:${REQ})`)],
+  // A BARE call only (real-code corpus FP: `opener.open(req)` urllib, `Image.open(requests.get(url).raw)`, a TS/Go/Rust
+  // method `open(request: T)`) — and the request value must be ACCESSED (`request.args…`, `req.query…`, `request[…]`):
+  // a bare `request` / `req` argument is a request OBJECT, never a path, and `requests` is the HTTP library.
+  ["py-open", new RegExp(`(?<![\\w.])(?:open|send_file)\\s*\\(\\s*(?:(?:request|req)\\s*[.[]|\\$_(?:GET|POST|REQUEST|COOKIE))`)],
   // Python — a user SUB-FIELD nested anywhere in a file sink's args: open(os.path.join(base, request.args[…])),
   // io.open, os.remove/unlink/rename, and pathlib Path(request…). The strict SRC form keeps a string literal clean.
   ["py-file-nested", new RegExp(`\\b(?:open|io\\.open|send_file|os\\.(?:remove|unlink|rename))\\s*\\([^)]*(?:${SRC})`)],
@@ -39,6 +41,7 @@ const SOURCE = /\brequest\s*\.\s*(?:args|form|values|GET|POST|json|data)\b|\breq
 // basename/secure_filename strip the directory; realpath/resolve/abspath+check + safe_join canonicalize; a
 // .replace/.strip/.sub is treated as manual `..`-stripping (precision-first — recall cost accepted).
 const PATH_SANITIZE = /\b(?:basename|secure_filename|realpath|resolve|canonical\w*|safe_join|abspath|allowlist|whitelist|sanitiz\w*|valid\w*|escape\w*)\b|\.(?:replace|strip|lstrip|sub)\b|^\s*(?:if|elif|else\s+if|while|assert|unless)\b/i;
+const HASHED = /\.hexdigest\s*\(|\.digest\s*\(\s*['"]hex['"]|\buuid\d?\s*\(|\buuid\.uuid\d\s*\(/;
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // A file sink containing the tainted var: Python open/send_file/io.open/os.remove|unlink|rename ; Node fs.* / sendFile.
 const sink = (v) => {
@@ -56,7 +59,7 @@ const sink = (v) => {
 const HAS_SINK = /\b(?:open|send_file|sendFile)\s*\(|\bfs\s*\.\s*(?:readFile|readFileSync|createReadStream|open|openSync|writeFile|writeFileSync|unlink|createWriteStream|readdir|readdirSync)|\bos\.(?:remove|unlink|rename)/;
 // For pass 1, a wrapper param reaches the sink only if the same line is NOT itself sanitized (mirrors checkSinks).
 const ptSinkTest = (l, v) => !PATH_SANITIZE.test(l) && sink(v).test(l);
-/** The path-traversal wrapper config — shared by the walker's cross-file registry build. */
+/** The path-traversal wrapper config — shared by the walker's cross-file registry build and the calibration harness. */
 export const pathTraversalWrapperCfg = { sinkTest: ptSinkTest, sanitizer: PATH_SANITIZE, sourceTest: SOURCE, hasSink: HAS_SINK };
 
 /** Path-traversal taint pass — intra-function + inter-procedural + cross-file (a file-sink wrapper imported from another module). */
@@ -82,7 +85,9 @@ function taintPass(lines, text, importedWrappers) {
       const { name, rhs } = sa;
       const hasSource = SOURCE.test(rhs);
       const hasTaintVar = [...taint.keys()].some((v) => v !== name && mentions(v, rhs));
-      if (hasSource || hasTaintVar) taint.set(name, "t");
+      // A hash / uuid of the user value is a fixed-alphabet hex token, never traversable (real-code corpus FP:
+      // `name = hashlib.sha256(await request.body()).hexdigest()` → a cache path `f'{name}.json'`).
+      if ((hasSource || hasTaintVar) && !HASHED.test(rhs)) taint.set(name, "t");
       else taint.delete(name);
     },
   });

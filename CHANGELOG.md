@@ -12,6 +12,28 @@ All notable changes to the open-source slopGrade Firewall client are documented 
   echoed, the message is capped at 160 characters, and the line still goes through the log sanitizer. Behavior is
   unchanged: no verdict, exit 0 (unless `--strict`).
 
+### Fixed — the 22 free detectors re-synced with their calibrated server copies
+Calibration fixes made to the hosted copies of these extractors had not reached this client. They ship here now,
+measured on a 101-repository real-code corpus (178,535 files) through the full CI path:
+- **SQL injection** — a bare `params` bind-parameter variable (`cursor.execute(sql, params)`) is no longer a user
+  source ; Ruby `params` must be accessed (`params[:x]`, `params.require`, …) ; a ternary between two constant strings
+  no longer taints ; `find_by_sql("… '#{params[:name]}'")` now fires. Go and .NET gain the intra-function taint pass
+  (`q := "SELECT …" + r.FormValue(…)` … `db.Query(q)` ; `var sql = "…" + id` … `new SqlCommand(sql, …)`).
+- **Command injection** — sources must be accessed (`request.args`, `req.query`, …) : the word `request` inside a
+  constant path and a local `req` variable no longer fire ; the `child_process` module form with the request value
+  inside the command now fires ; a Ruby backtick inside a quoted string (an exception message) no longer fires.
+- **Path traversal** — only a bare `open()` / `send_file()` fires (`opener.open(req)`, `Image.open(requests.get(…))`
+  and methods named `open` did) ; a hash / uuid of the request value is not traversable.
+- **SSRF** — Ruby `open` must be the Kernel call on `params[…]` (`fs.open(params.x)` in TypeScript did).
+- **Weak crypto** — names inside messages / comparisons (`strcasecmp($c, 'rc4')`, an "ARC4 key" error string) and a
+  class named `DES` no longer fire ; `RC2.Create()` and `new RC4(` are recognised.
+- **Insecure deserialization** — a ruamel `YAML()` instance's `.load`, a local-file `unsafe_load` / `ObjectInputStream`
+  without a request source, and a typed `[JsonProperty(TypeNameHandling…)]` member are no longer findings.
+- **XXE** — a `LIBXML_NOENT` that is tested or cleared, and `DtdProcessing.Parse` next to `XmlResolver = null`, no
+  longer fire.
+- **Secrets** — GitLab, Google OAuth client-secret, SendGrid, npm and Square credential formats ; a Slack token with no
+  digit (a hand-written placeholder) no longer fires.
+
 ## [0.10.11] — 2026-10-01
 
 ### Added

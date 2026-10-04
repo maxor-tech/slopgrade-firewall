@@ -14,7 +14,16 @@
 //      parameterizing call on the var, or a non-tainting reassignment (precision over recall = ~0 FP).
 
 // A request/user source token (Python request.*, Node req.*, Ruby params, PHP superglobals).
-const REQ = "request\\s*\\.\\s*(?:args|form|values|GET|POST|json|data)|req(?:uest)?\\s*\\.\\s*(?:query|body|params)|\\$_(?:GET|POST|REQUEST|COOKIE)|\\bparams\\b";
+// Ruby `params` is user input ONLY when ACCESSED (params[:x] / params.require / params.permit) — a BARE
+// `params` identifier is the idiomatic SAFE BIND-PARAMETER variable (`cursor.execute(sql, params)`,
+// `db.query(sql, params)`), which is parameterized, not injectable. Scoping to `params[` / `params.` keeps
+// Rails detection and kills the FP class where the bind-var is named `params` (real-code false block:
+// `return cursor.execute(sql, params)` in an ORM's internals fired taint-sql). Verified: Rails params[:name] /
+// Express req.params still fire; the ORM case is clean.
+// The `params.` form is further scoped to the Rails ACCESSORS (require/permit/fetch/dig/to_unsafe_h…) and must not be
+// a member (`x.params.…`) — real-code corpus FP: a TS helper's options object `params.db.exec(\`DROP TABLE
+// ${params.tableName}\`)` (a function argument, not request input). `params[…]` keeps the Rails/Sinatra index form.
+const REQ = "request\\s*\\.\\s*(?:args|form|values|GET|POST|json|data)|req(?:uest)?\\s*\\.\\s*(?:query|body|params)|\\$_(?:GET|POST|REQUEST|COOKIE)|(?<![\\w.$])params\\s*(?:\\[|\\.\\s*(?:require|permit|fetch|dig|to_unsafe_h(?:ash)?|values_at|slice)\\b)";
 // A SQL-executing sink.
 const SINK = "execute|executemany|executescript|query|raw|exec|executeQuery|executeUpdate|prepareStatement|mysqli_query|mysql_query|pg_query|pg_exec|find_by_sql";
 
@@ -28,7 +37,8 @@ const SQL_LIT = `(?:"[^"]*(?:${SQL_KW})[^"]*"|'[^']*(?:${SQL_KW})[^']*')`;
 const DIRECT_PATTERNS = [
   // per-quote (a SQL f-string routinely embeds the other quote : f"… name = '{x}'") — same trap as SQL_LIT above.
   ["fstring-sql", new RegExp(`\\b(?:${SINK})\\s*\\(\\s*(?:f"[^"]*\\{[^}]*(?:${REQ})|f'[^']*\\{[^}]*(?:${REQ}))`)],
-  ["interp-sql", new RegExp(`\\b(?:${SINK}|where|find_by_sql)\\s*\\(\\s*(?:["'][^"']*#\\{[^}]*(?:${REQ})|\`[^\`]*\\$\\{[^}]*(?:${REQ}))`)],
+  // per-quote as well : `find_by_sql("… name = '#{params[:name]}'")` embeds the other quote before the #{} (same trap).
+  ["interp-sql", new RegExp(`\\b(?:${SINK}|where|find_by_sql)\\s*\\(\\s*(?:"[^"]*#\\{[^}]*(?:${REQ})|'[^']*#\\{[^}]*(?:${REQ})|\`[^\`]*\\$\\{[^}]*(?:${REQ}))`)],
   ["concat-sql", new RegExp(`\\b(?:${SINK})\\s*\\(\\s*[^;]*${SQL_LIT}\\s*(?:\\+|\\.|%)\\s*[^;]*(?:${REQ})`)],
   ["php-inline-sql", new RegExp(`\\b(?:mysqli_query|mysql_query|pg_query|pg_exec|->\\s*query|->\\s*exec(?:ute)?)\\s*\\([^;]*["'][^"']*\\$_(?:GET|POST|REQUEST|COOKIE)`)],
   // Java (JDBC Statement + JPA/Hibernate) — a SQL/JPQL string concatenated with an HttpServletRequest accessor at a
@@ -69,6 +79,9 @@ const interpolated = (v, l) => {
     || new RegExp(`["'\`]\\s*(?:\\+|%|\\.format\\s*\\()\\s*\\(?\\s*\\b${V}\\b`).test(l)
     || new RegExp(`\\b${V}\\b\\s*\\+\\s*["'\`]`).test(l);
 };
+// `cond ? "lit" : "lit"` (Ruby/JS) or `"lit" if cond else "lit"` (Python) — both branches constant string literals.
+const LIT = `(?:"[^"\\\\]*"|'[^'\\\\]*')`;
+const CONST_TERNARY = new RegExp(`^[^"'\`]*\\?\\s*${LIT}\\s*:\\s*${LIT}\\s*;?\\s*$|^\\s*${LIT}\\s+if\\s+[^"'\`]*\\s+else\\s+${LIT}\\s*$`);
 // A cheap file-level gate: no execute-family token ⇒ no possible SQL sink ⇒ skip the inter-procedural pass.
 const HAS_SINK = new RegExp(`\\b(?:${SINK})\\b`);
 const sqliSinkTest = (l, v) => sink(v).test(l);
@@ -103,6 +116,9 @@ function taintPass(lines, text, importedWrappers) {
     updateTaint(l, taint, sa) {
       if (!sa) return;
       const { name, rhs } = sa;
+      // A user value used only as the CONDITION choosing between two constant literals yields a constant — real-code
+      // corpus FP: `where_clause = params[:x] ? "AND po.digest = :x" : ""` then spliced into a heredoc (bound by :x).
+      if (CONST_TERNARY.test(rhs)) { taint.delete(name); return; }
       const hasReq = REQ_RE.test(rhs);
       const hasUserVar = [...taint].some(([v, t]) => t === "user" && mentions(v, rhs));
       const hasSqlVar = [...taint].some(([v, t]) => t === "sql" && mentions(v, rhs));
