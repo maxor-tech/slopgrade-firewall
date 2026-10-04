@@ -312,7 +312,7 @@ export async function main(argv = [], env = process.env) {
   // Library mode: only for a checkout that IS a published package (manifest-only, local) — an application never asks.
   const libKind = libraryMode ? repoKind((rel) => { try { return readFileSync(join(root, rel), "utf8"); } catch { return null; } },
     () => { try { return readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith(".")).map((e) => e.name); } catch { return []; } }) : null;
-  const deepAudit = deep ? { deepScan: { note: "SOURCE of these files is sent (opt-in --deep-scan)", files: deep.units.map((u) => u.path), chars: deep.chars, skipped: deep.skipped, fromPr: deep.fromPr, scopedToPrLines: deep.scoped, ...(libKind ? { libraryMode: libKind.kind === "library", repoKind: libKind.why } : {}) } } : {};
+  const deepAudit = deep ? { deepScan: { note: "SOURCE of these files is sent (opt-in --deep-scan) — only when the server confirms this repo is paid", files: deep.units.map((u) => u.path), chars: deep.chars, skipped: deep.skipped, fromPr: deep.fromPr, scopedToPrLines: deep.scoped, ...(libKind ? { libraryMode: libKind.kind === "library", repoKind: libKind.why } : {}) } } : {};
 
   // 2. EXFILTRATION guard — a custom origin would mint a token for an attacker audience. Run DRY unless opted in.
   const { origin, blocked } = resolveOrigin(env);
@@ -388,6 +388,9 @@ export async function main(argv = [], env = process.env) {
   let deepRows = [], deepLine = null, deepBlocking = 0, libRows = [], libOutcomes = null, libRanked = false;
   if (deep) {
     if (origin !== DEFAULT_ORIGIN) ghWarn("deep scan skipped — source is only ever sent to the canonical slopGrade origin.");
+    // Source leaves the runner ONLY for a paid repo. Before 0.10.11 a free or public repo with the option on uploaded its
+    // files and got 402 after the fact; the verdict above already says the plan, so nothing is sent unless it is paid.
+    else if (!paid) ghWarn(`deep scan is a paid feature — no source was sent. Enable it: ${origin}/ci`);
     else if (!deep.units.length) deepLine = "no sink-bearing file in an engine-modelled language — nothing sent.";
     else {
       const post = (url, body) => timedFetch(url, { method: "POST", headers: { "content-type": "application/json" }, body });
