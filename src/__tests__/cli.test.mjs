@@ -236,3 +236,34 @@ test("a paid verdict with packBlocking>0 exits 1 AND names the located findings"
     assert.match(text, /2 blocking security finding\(s\)[^\n]*build blocked/);
   });
 });
+
+// Deep scan = the one mode that sends SOURCE. Until 0.10.11 the client sent the files whatever the plan, and the server
+// answered 402 after receiving them — a free or public repo that turned the option on still uploaded its code. The
+// verdict already says whether the repo is paid (isPaidVerdict) : source leaves the runner only when it is.
+function deepWorkspace() {
+  const ws = mkdtempSync(join(tmpdir(), "sg-fw-deep-"));
+  writeFileSync(join(ws, "app.py"), "import subprocess\nfrom flask import request\n\ndef ping():\n    return subprocess.check_output('ping ' + request.args['h'], shell=True)\n", "utf8");
+  return ws;
+}
+const heisenCalls = (calls) => calls.filter((c) => c.url.endsWith("/api/ci/heisen"));
+
+test("deep scan on a FREE repo : no source is sent, and the log says so", async () => {
+  await withStubbedNetwork(VERDICT, async ({ calls, out }) => {
+    const code = await main(["--gate", "--deep-scan"], { ...CI_ENV, GITHUB_WORKSPACE: deepWorkspace() });
+    assert.equal(code, 0);
+    assert.equal(heisenCalls(calls).length, 0, "a free repo must never POST source to /api/ci/heisen");
+    assert.match(out.join("\n"), /deep scan is a paid feature — no source was sent/);
+  });
+});
+
+test("deep scan on a PAID repo : the sink-bearing file is sent once to the canonical origin", async () => {
+  const paid = { ...VERDICT, gateEntitled: true, gateLevel: "paid", packBlocking: 0 };
+  await withStubbedNetwork(paid, async ({ calls }) => {
+    await main(["--gate", "--deep-scan"], { ...CI_ENV, GITHUB_WORKSPACE: deepWorkspace() });
+    const sent = heisenCalls(calls);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].url, "https://app.slopgrade.ai/api/ci/heisen");
+    const units = JSON.parse(sent[0].opts.body).units;
+    assert.deepEqual(units.map((u) => u.path), ["app.py"]);
+  });
+});

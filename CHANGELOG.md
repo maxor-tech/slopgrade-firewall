@@ -7,10 +7,16 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ### Changed
 - **A refused run now says why.** When the server answers without a verdict (non-2xx), the CI warning prints the
-  server's machine code and message, not only the status. Example: `server refused (HTTP 402: account-locked) — Essai
-  Team terminé : ajoutez une carte sur slopgrade.ai pour réactiver le compte. — no verdict.` Only a plain code is
+  server's machine code and message, not only the status. Example: `server refused (HTTP 402: account-locked) — Team
+  trial ended: add a card on app.slopgrade.ai to reactivate the account. — no verdict.` Only a plain code is
   echoed, the message is capped at 160 characters, and the line still goes through the log sanitizer. Behavior is
   unchanged: no verdict, exit 0 (unless `--strict`).
+
+### Fixed — a free or public repo never uploads source to the deep scan
+- With `deep-scan: "true"`, the client used to send the selected files' source whatever the plan, and the server
+  refused them (402) after receiving them. The client now reads the plan from the verdict it already has and sends
+  source **only for a paid repo**. On a free or public repo it prints `deep scan is a paid feature — no source was
+  sent` and uploads nothing. `--print-payload` states the same condition.
 
 ### Fixed — the 22 free detectors re-synced with their calibrated server copies
 Calibration fixes made to the hosted copies of these extractors had not reached this client. They ship here now,
