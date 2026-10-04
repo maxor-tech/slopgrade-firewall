@@ -1,0 +1,26 @@
+name: slop-gate
+on: [pull_request]
+jobs:
+  slop:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # ZERO SECRETS: GitHub proves this repo through OIDC → the Firewall resolves your entitlement server-side. Nothing to rotate.
+      id-token: write
+      # The Firewall posts the verdict as a sticky PR comment (summary + clickable leaks, updated in place) — needs PR write. Missing → it skips cleanly.
+      pull-requests: write
+      # Sends findings to the Security tab (Code Scanning: inline PR annotations, tracked + dismissible, free on public repos). Missing → it skips cleanly.
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      # Pinned to the IMMUTABLE SHA of the release commit (a tag can be re-pointed, a SHA cannot); the comment gives the version — Dependabot / Renovate can update it.
+      - uses: maxor-tech/slopgrade-firewall@f06f293849be2bfc750f8842595381f50a17db49 # v0.10.10
+        with:
+          # gate = blocks on a cross-tenant leak OR a critical/high security finding when the repo is entitled —
+          # on a PR, ONLY what the PR introduces (existing debt is reported, never blocks your PR)
+          # (free: the cross-tenant gate + the open-source classes block; a paid repo adds the calibrated pro classes, every finding at file:line — see slopGrade /pricing). advisory = reports, never blocks.
+          firewall-mode: gate
+          # deep-scan: "true"   # OPT-IN (paid repos): sends the source of the files that hold a sink to the hosted taint engine (cross-function flows). The only mode that sends code — see the Action README.
+          # deep-scan-block: "true"   # with deep-scan + gate: a NEW deep-scan finding (no pack saw it) fails the check. ~1 false block in 3-4 measured on real CVEs — off by default.
+          # library-mode: "true"   # with deep-scan, published PACKAGE repos only: lists the library-tier candidates (public function parameter → sink) as "to triage" notices. Never blocking; ~2 in 3 remain after the fix.
