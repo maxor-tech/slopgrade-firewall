@@ -1,18 +1,31 @@
 // SECRETS pack — the CLIENT half (commodity). Scans file text for credential-shaped literals and emits, per match,
 // ONLY {file, line, kind, entropy, placeholder} — NEVER the secret value. The value is read locally to compute its
 // Shannon entropy and to test if it's an obvious placeholder, then discarded. That is the no-egress guarantee for
-// secrets: the server learns WHERE and WHAT KIND, never the credential itself. The confidence tuning that turns
-// candidates into findings lives server-side, in the hosted product — never shipped in this client.
+// secrets: the server learns WHERE and WHAT KIND, never the credential itself. The confidence tuning (entropy floor,
+// placeholder catalog) that turns candidates into findings is hosted server-side, not shipped in this client.
 
 // HIGH-CONFIDENCE provider credential shapes only — a specific prefix + fixed body ≈ near-certainty, low base-rate
-// FP. Noisier heuristics (a generic `secret = "…"` assignment; a bare JWT or a lone `-----BEGIN PRIVATE KEY-----`
-// header) are intentionally omitted here: they collide with design tokens, form fields, i18n strings and
-// PEM-handling code, so they need context a static line-scan can't give. The hosted product handles those.
+// FP. Two noisier detectors were BUILT and REJECTED in the (real-code corpus) majority
+// FP): (1) a GENERIC `secret = "…"` assignment — `token`/`secret`/`password` collide with design tokens, form
+// fields, i18n and validation strings (544 hits, mostly FP); (2) a bare JWT / a lone `-----BEGIN PRIVATE KEY-----`
+// HEADER — which appears in PEM-handling code and openapi examples far more than as a committed key. Both need
+// context/verification a static line-scan can't give, so they are deferred.
 const PATTERNS = [
   ["aws-access-key", /\bAKIA[0-9A-Z]{16}\b/],
   ["github-token", /\bgh[pousr]_[A-Za-z0-9]{36,}\b/],
   ["stripe-secret", /\bsk_live_[A-Za-z0-9]{20,}\b/],
-  ["slack-token", /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/],
+  // A real Slack token's body always carries numeric team/user id segments (`xoxb-<digits>-<digits>-<alnum>`); an
+  // all-letter body (`xoxb-wire-probe`) is a hand-written probe/placeholder (real-code corpus FP).
+  ["slack-token", /\bxox[baprs]-(?=[A-Za-z-]*\d)[A-Za-z0-9-]{10,}\b/],
+  // batch56 (2026-09-08 gap-scan of a real-code corpus) — five more fixed-shape provider credentials the placeholder/entropy
+  // filter keeps ~0-FP. Measured kept-after-filter on the corpus: google-oauth-secret 23 REAL leaks (a real project
+  // a real project, several carrying `// gitleaks:allow`), the others'
+  // residuals are gitleaks/semgrep rule-catalog example values (defensible fires).
+  ["gitlab-token", /\bglpat-[A-Za-z0-9_-]{20,}\b/],
+  ["google-oauth-secret", /\bGOCSPX-[A-Za-z0-9_-]{20,}\b/],
+  ["sendgrid-key", /\bSG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}\b/],
+  ["npm-token", /\bnpm_[A-Za-z0-9]{36}\b/],
+  ["square-token", /\b(?:sq0csp-|sq0atp-)[A-Za-z0-9_-]{22,}\b/],  // EAAA dropped — collides with Meta/FB tokens
   // google-api-key (AIza…) was REJECTED: it is the Firebase/Maps WEB key, public-by-design (ships in
   // google-services.json / client bundles / deploy config) — flagging it is a false positive, not a leak.
 ];

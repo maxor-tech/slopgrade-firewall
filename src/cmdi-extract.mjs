@@ -7,17 +7,22 @@
 //   2. TAINT (dataflow, new)          — intra-function: `cmd = "convert " + request.args['f']` … `os.system(cmd)`,
 //      or `f = request.args['f']` … `os.system("convert " + f)`. A var becomes tainted from a user source (or by
 //      combining one with string-building); a hit fires when it reaches a SHELL sink. Python + Node taint here;
-//      PHP/Java/Ruby keep direct-only (next layer). Precision (the moat, ~0 FP): subprocess only fires with
+//      PHP/Java/Ruby keep direct-only (next layer). Precision (~0 FP): subprocess only fires with
 //      shell=True (a list-arg / shell=False call never shell-parses the value); `.exec` is scoped to child_process
 //      (never a bare regexp.exec); taint clears on a function boundary, a shlex.quote/escape/sanitize call, or a
 //      non-tainting reassignment.
 
-const REQ = "request|req\\b|\\$_(?:GET|POST|REQUEST|COOKIE)";
+// Sources scoped to ACCESSED forms (request./request[ , req./req[) — a BARE `request`/`req` token false-fired
+// on the substring "request" inside a CONSTANT path (`os.system('… pull-request-builder.py')`) and on a local
+// var named `req` (`eval(req, ctx)`) — both real-code false blocks. $_ superglobals stay bare (PHP has no such
+// collision). The real vuln
+// is always a property/index access (request.args / req.query / request['x']), never the bare identifier.
+const REQ = "request\\s*[.\\[]|req\\s*[.\\[]|\\$_(?:GET|POST|REQUEST|COOKIE)";
 const DIRECT_PATTERNS = [
   // (?<!\.) so a method call (myRegex.exec(req…) / obj.eval(req…)) never matches the Python eval/exec builtin.
   ["py-eval", new RegExp(`(?<!\\.)\\b(?:eval|exec)\\s*\\(\\s*(?:${REQ})`)],
   ["py-shell", new RegExp(`\\bos\\.(?:system|popen)\\s*\\([^)]*(?:${REQ})|\\bcommands\\.getoutput\\s*\\([^)]*(?:${REQ})|subprocess\\.[A-Za-z_]+\\([^)]*(?:${REQ})[^)]*shell\\s*=\\s*True|subprocess\\.[A-Za-z_]+\\([^)]*shell\\s*=\\s*True[^)]*(?:${REQ})`)],
-  ["node-exec", /\beval\s*\(\s*(?:req|request)\b|child_process\s*\.\s*(?:exec|execSync)\s*\(\s*(?:req|request)\b|\bcp\s*\.\s*(?:exec|execSync)\s*\(\s*(?:req|request)\b|new\s+Function\s*\(\s*(?:req|request)\b/],
+  ["node-exec", /\beval\s*\(\s*(?:req|request)\s*[.\[]|child_process\s*\.\s*(?:exec|execSync)\s*\(\s*(?:req|request)\s*[.\[]|\bcp\s*\.\s*(?:exec|execSync)\s*\(\s*(?:req|request)\s*[.\[]|new\s+Function\s*\(\s*(?:req|request)\s*[.\[]/],
   // Destructured child_process (`const { exec, execSync } = require("node:child_process")`) — the dominant modern
   // form — with a request value ANYWHERE in the command argument (concat or template literal), not only as the first
   // token. Release audit 2026-09-13 (B-P1-6) : `execSync("ping -c 1 " + req.query.host)` and
@@ -26,12 +31,32 @@ const DIRECT_PATTERNS = [
   // arrays and never shell-parse, so they are deliberately absent. Same kind as the line above : the brain's LABEL map
   // is a CLOSED classification (an unknown kind is dropped), and the label text already fits this shape.
   ["node-exec", /(?<!\.)\b(?:exec|execSync)\s*\([^)]*\b(?:req|request)\s*\.\s*(?:query|body|params)\b/],
+  // Same concat / template shape on the MODULE form (`const cp = require("child_process"); cp.execSync("ping " +
+  // req.query.host)`) — the `(?<!\.)` above deliberately skips member calls and the first node-exec rule only fires
+  // when the request value is the FIRST token. Acquisition audit 2026-09-27 (G14). Scoped to the child_process
+  // receiver names (never a bare `.exec`), shell sinks only.
+  ["node-exec", /\b(?:child_process|childProcess|cp)\s*\.\s*(?:exec|execSync)\s*\([^)]*\b(?:req|request)\s*\.\s*(?:query|body|params)\b/],
   ["php-exec", /\b(?:eval|assert|create_function|system|exec|passthru|shell_exec|popen|proc_open)\s*\(\s*[^;]*\$_(?:GET|POST|REQUEST|COOKIE)/],
   ["ruby-exec", /\b(?:eval|instance_eval|class_eval|system)\s*\(\s*params\b|`[^`]*#\{[^}]*params[^}]*\}[^`]*`/],
   ["java-exec", /Runtime\s*\.\s*getRuntime\s*\(\s*\)\s*\.\s*exec\s*\([^;]*\brequest\b|new\s+ProcessBuilder\s*\([^;]*\brequest\b/],
 ];
 
 const isComment = (l) => /^\s*(\/\/|\*|#|--|;|<!--)/.test(l);
+// The ruby-exec BACKTICK form is a shell command only when the backtick opens OUTSIDE a quoted string. Real-code corpus
+// FP: `raise "Couldn't find thread with id: \`#{params[:thread_id]}\`"` — markdown-style backticks inside an exception
+// message (an odd count of `"` before the first backtick ⇒ the backtick sits inside a double-quoted literal).
+const RUBY_CALL_EXEC = /\b(?:eval|instance_eval|class_eval|system)\s*\(\s*params\b/;
+function rubyExecLive(l) {
+  if (RUBY_CALL_EXEC.test(l)) return true;
+  let q = null;   // the open quote char, or null when outside a string literal
+  for (let i = 0; i < l.length; i++) {
+    const c = l[i];
+    if (q) { if (c === "\\") i++; else if (c === q) q = null; continue; }
+    if (c === "`") return true;   // a backtick opened at code level → a real shell command literal
+    if (c === '"' || c === "'") q = c;
+  }
+  return false;
+}
 
 import { runTaintPass, mentions } from "./taint-core.mjs";
 import { findSinkWrappers, interprocHit } from "./taint-interproc.mjs";
@@ -99,6 +124,7 @@ export function extractCmdi(text, importedWrappers) {
     if (l.length > 4000) continue;   // minified blob — noise
     if (isComment(l)) continue;      // a sink named in a comment is documentation, not live code
     for (const [kind, re] of DIRECT_PATTERNS) {
+      if (kind === "ruby-exec" && !rubyExecLive(l)) continue;
       if (re.test(l)) out.push({ line: i + 1, kind });
     }
   }

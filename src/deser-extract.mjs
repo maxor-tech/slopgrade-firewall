@@ -15,11 +15,11 @@ const HIGH = [
   // excluded by requiring the call to NOT carry a Safe loader on the same line. A real sink also LOADS something, so
   // the parens must hold a non-empty argument (`\(\s*[^\s)]`): this drops a security scanner's own reminder PROSE
   // that names the API with empty parens — `yaml.load() / yaml.unsafe_load() execute arbitrary Python` — as a false
-  // HIGH (a real-code false positive: security-guidance prose that names the API with no argument). Zero TP loss: a bare
+  // HIGH (holistic FP audit 2026-09-08: anthropics_claude-code security-guidance patterns.py). Zero TP loss: a bare
   // `yaml.load()` with no stream is a TypeError, never a real deserialization sink.
   // The safe-Loader lookahead scans the whole LINE (`[^\n]*`), not just to the first `)` — otherwise a nested paren
-  // in the first arg hides the loader: `yaml.load(path.read_text(...), Loader=yaml.CSafeLoader)` (a real-code
-  // sample) stopped the old `[^)]*Loader` scan at read_text's `)` and false-fired. The redundant `(?![^)]*safe)`
+  // in the first arg hides the loader: `yaml.load(path.read_text(...), Loader=yaml.CSafeLoader)` (a real project, (real-code corpus)
+  // audit) stopped the old `[^)]*Loader` scan at read_text's `)` and false-fired. The redundant `(?![^)]*safe)`
   // lookahead was dropped (SafeLoader is already caught by the Loader lookahead, and `[^)]*safe` matched "unsafe").
   ["py-yaml-unsafe", /\byaml\.unsafe_load\s*\(\s*[^\s)]|\byaml\.load\s*\(\s*(?![^\n]*(?:Safe|CSafe|Base|Full)?Loader)[^\s)]/],
   // Java — the classic gadget sinks. The bare `.readObject()` (a 2-line ObjectInputStream, receiver on another
@@ -53,22 +53,71 @@ const isComment = (l) => /^\s*(\/\/|\*|#|--|;|<!--)/.test(l);
 // its `asn1In.readObject()` / `pemParser.readObject()` is crypto PARSING, not a deser sink — the guard drops it.
 const BARE_READOBJECT = /\.readObject\s*\(\s*\)/;
 
+// Real-code corpus FPs (2026-10-01) — three narrow recognitions, each a provably-not-untrusted shape:
+//   • ruamel.yaml — `yaml = YAML()` / `ruamel.yaml.YAML(typ="safe")` binds `yaml` to a ruamel instance whose `load`
+//     is the round-trip/safe loader (no arbitrary Python objects). Only typ="unsafe" reconstructs objects. So in a
+//     file that binds `yaml` to a ruamel YAML(...) (not unsafe) and never imports PyYAML as `yaml`, `yaml.load(f)` is
+//     not the PyYAML RCE. `yaml.unsafe_load` is still judged below.
+//   • A LOCAL-FILE stream — `yaml.unsafe_load(path.read_text())` / `ObjectInputStream(FileInputStream(file))`
+//     deserializes a file on the app's own disk: the same trusted-data case the GATED tier already drops for
+//     `pickle.load(open(...))`. Demoted to GATED (fires only with a direct request source on the line). A network /
+//     caller-supplied stream (`ObjectInputStream(socket.getInputStream())`, a stream parameter) stays HIGH.
+//   • A Json.NET MEMBER attribute `[JsonProperty(ItemTypeNameHandling = TypeNameHandling.Auto)]` on a member typed as
+//     an app's own class: Json.NET rejects a `$type` not assignable to the declared type, so the gadget classes
+//     (ObjectDataProvider, …) cannot land there. It stays HIGH when the member is `object`/`dynamic` or a BCL
+//     interface every gadget implements (IEnumerable, IDisposable, ISerializable, …). Settings-level
+//     `TypeNameHandling = TypeNameHandling.Auto` (root object, declared types unknown) always stays HIGH.
+const RUAMEL_BIND = /\byaml\s*=\s*(?:ruamel\.yaml\.)?YAML\s*\(/;
+const RUAMEL_UNSAFE = /\bYAML\s*\([^)\n]*typ\s*=\s*\[?\s*['"]unsafe/;
+const PYYAML_IMPORT = /^\s*(?:import\s+yaml\b(?!\s*\.)|from\s+yaml\s+import\b)/m;
+const LOCAL_FILE_ARG = /\byaml\.unsafe_load\s*\(\s*(?:open\s*\(|[\w.]+\.read_(?:text|bytes)\s*\()/;
+const OIS_CTOR = /\bObjectInputStream\s*\(/;
+const OIS_LOCAL_FILE = /\bObjectInputStream\s*\(\s*(?:new\s+)?(?:Buffered(?:Input)?Stream\s*\(\s*(?:new\s+)?)?FileInputStream\s*\(/;
+const TNH_ATTR = /^\s*\[\s*JsonProperty\s*\([^\]]*TypeNameHandling\s*=\s*TypeNameHandling\./;
+const TNH_DANGEROUS_TYPE = /^(?:object|Object|dynamic|System\.Object|I(?:Enumerable|List|Collection|Dictionary|Disposable|Serializable|Comparable|Convertible|Formattable|ReadOnlyList|ReadOnlyCollection|ReadOnlyDictionary))$/;
+// Declared (element) type of the member a C# attribute decorates: the next non-attribute line, innermost generic arg.
+function memberElementType(lines, i) {
+  for (let j = i + 1; j < Math.min(lines.length, i + 4); j++) {
+    const d = lines[j].trim();
+    if (!d || d.startsWith("[")) continue;
+    const m = /^(?:(?:public|private|protected|internal|static|readonly|virtual|override|new|required)\s+)*([\w.]+(?:<[^=;{]*>)?(?:\[\])?\??)\s+\w+\s*(?:[{;=]|$)/.exec(d);
+    if (!m) return null;
+    const g = /<\s*(?:[^<>]*,\s*)?([\w.]+)\??\s*>\s*(?:\[\])?\??$/.exec(m[1]);
+    return (g ? g[1] : m[1].replace(/(?:\[\])?\??$/, ""));
+  }
+  return null;
+}
+
 /** Scan one file → [{line, kind, high, srcCtx}]. Source line NEVER leaves this function. */
 export function extractDeser(text) {
   const out = [];
   const s = String(text);
   const hasOIS = /\bObjectInputStream\b/.test(s);   // file-level: is real Java deserialization even in play here?
+  const ruamelSafe = RUAMEL_BIND.test(s) && !RUAMEL_UNSAFE.test(s) && !PYYAML_IMPORT.test(s);
   const lines = s.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (l.length > 4000) continue;   // minified blob — noise
     if (isComment(l)) continue;      // a sink named in a comment is documentation, not live code
     for (const [kind, re] of HIGH) {
-      if (re.test(l)) out.push({ line: i + 1, kind, high: true, srcCtx: true });
+      if (!re.test(l)) continue;
+      if (kind === "py-yaml-unsafe" && ruamelSafe && !/\byaml\.unsafe_load\b/.test(l)) continue; // ruamel safe/rt load
+      if (kind === "dotnet-binaryformatter" && TNH_ATTR.test(l) && !/\bBinaryFormatter\b|Formatter\b|NetDataContractSerializer/.test(l)) {
+        const t = memberElementType(lines, i);
+        if (t && !TNH_DANGEROUS_TYPE.test(t)) continue;   // member typed as an app class → $type must be assignable to it
+      }
+      const local = (kind === "py-yaml-unsafe" && LOCAL_FILE_ARG.test(l)) || (kind === "java-readobject" && OIS_LOCAL_FILE.test(l));
+      if (local) { out.push({ line: i + 1, kind, high: false, srcCtx: DIRECT_SRC.test(l) }); continue; } // local-file stream → gated
+      out.push({ line: i + 1, kind, high: true, srcCtx: true });
     }
-    // bare ObjectInputStream deserialization (receiver on another line) — only when the file uses ObjectInputStream.
+    // bare ObjectInputStream deserialization (receiver on another line) — only when the file uses ObjectInputStream,
+    // and not on a line the inline java-readobject pattern already matched (avoid a double count on the same line).
     if (hasOIS && BARE_READOBJECT.test(l) && !/\bObjectInputStream\b/.test(l)) {
-      out.push({ line: i + 1, kind: "java-readobject", high: true, srcCtx: true });
+      // the nearest ObjectInputStream construction within 3 lines above: a local FileInputStream → gated (trusted disk)
+      let ctor = null;
+      for (let j = i - 1; j >= Math.max(0, i - 3); j--) if (OIS_CTOR.test(lines[j])) { ctor = lines[j]; break; }
+      if (ctor && OIS_LOCAL_FILE.test(ctor)) out.push({ line: i + 1, kind: "java-readobject", high: false, srcCtx: DIRECT_SRC.test(l) });
+      else out.push({ line: i + 1, kind: "java-readobject", high: true, srcCtx: true });
     }
     for (const [kind, re] of GATED) {
       if (!re.test(l)) continue;

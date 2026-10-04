@@ -21,6 +21,18 @@ const PATTERNS = [
 
 const isComment = (l) => /^\s*(\/\/|\*|#|--|;|<!--)/.test(l);
 
+// Real-code corpus FPs (2026-10-01), two narrow recognitions:
+//   • PHP — `LIBXML_NOENT` that is TESTED or CLEARED, not passed: `if ($flags & \LIBXML_NOENT) { throw … }` (a guard
+//     REJECTING the flag) / `$flags & ~LIBXML_NOENT`, and the constant named inside a string literal (the guard's
+//     exception message). A single `&` (not `&&`) is a bit test/mask; enabling is `|` or passing the constant.
+//   • .NET — `DtdProcessing = DtdProcessing.Parse` with an explicit `XmlResolver = null` on the same settings
+//     object (within RESOLVER_WINDOW lines) and no XmlUrlResolver: the DOCTYPE is parsed but NO external entity /
+//     DTD is ever fetched (no resolver) — not XXE. Without the explicit null it keeps firing (.NET Framework < 4.5.2
+//     defaults to an XmlUrlResolver).
+const RESOLVER_WINDOW = 12;
+const PHP_NOENT_TESTED = /(?<!&)&(?!&)\s*~?\s*\\?LIBXML_NOENT\b|~\s*\\?LIBXML_NOENT\b/g;
+const stripLiterals = (l) => l.replace(/(["'])(?:\\.|(?!\1)[^\\])*\1/g, '""');
+
 /** Scan one file → [{line, kind}]. Source line NEVER leaves this function. */
 export function extractXxe(text) {
   const out = [];
@@ -30,7 +42,14 @@ export function extractXxe(text) {
     if (l.length > 4000) continue;   // minified blob — noise
     if (isComment(l)) continue;      // an XXE switch named in a comment is documentation, not live code
     for (const [kind, re] of PATTERNS) {
-      if (re.test(l)) out.push({ line: i + 1, kind });
+      if (kind === "php-libxml") {
+        if (!re.test(stripLiterals(l).replace(PHP_NOENT_TESTED, ""))) continue;   // tested/cleared/quoted ≠ enabled
+      } else if (!re.test(l)) continue;
+      if (kind === "dotnet-dtd" && !/XmlUrlResolver/.test(l)) {
+        const win = lines.slice(Math.max(0, i - RESOLVER_WINDOW), Math.min(lines.length, i + RESOLVER_WINDOW + 1)).join("\n");
+        if (/\bXmlResolver\s*=\s*null\b/.test(win) && !/XmlUrlResolver/.test(win)) continue;   // no resolver → no XXE
+      }
+      out.push({ line: i + 1, kind });
     }
   }
   return out;
