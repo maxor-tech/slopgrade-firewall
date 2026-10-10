@@ -5,6 +5,8 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.10.12] — 2026-10-09
+
 ### Changed
 - **A refused run now says why.** When the server answers without a verdict (non-2xx), the CI warning prints the
   server's machine code and message, not only the status. Example: `server refused (HTTP 402: account-locked) — Team
