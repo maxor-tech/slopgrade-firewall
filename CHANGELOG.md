@@ -5,6 +5,13 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+### Added
+- `change-review` input (`--change-review`, opt-in, needs `deep-scan`, pull requests only). The PR's diff hunks (changed
+  lines + 3 lines of context, at most 64, removals first) go to heisen-slop's diff-reading 55M. It lists the changes
+  likely to WEAKEN security — most often a removed validation check, which no taint engine sees. Printed as triage
+  notices, never blocking. Held-out real CVE fixes: 34% of vulnerability-introducing changes caught at 0.3% false
+  alarms per hunk.
+
 ## [0.10.12] — 2026-10-09
 
 ### Changed

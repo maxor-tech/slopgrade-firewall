@@ -27,6 +27,10 @@ inputs:
     description: "OPT-IN (default false; needs deep-scan: \"true\"). For a repo that is a PUBLISHED PACKAGE (detected from package.json / pyproject / setup.py — applications are never affected), also list the taint engine's library-tier candidates — a public function's parameter reaching a sink — as notices to triage. Not proven findings, never blocking: on real CVEs it lifts paired recall from ~1% to ~6-9%, but about 2 in 3 candidates remain after the fix."
     required: false
     default: "false"
+  change-review:
+    description: "OPT-IN (default false; needs deep-scan: \"true\", pull requests only). ALSO sends the PR's diff hunks (the changed lines + 3 lines of context, at most 64) to heisen-slop's diff-reading 55M, which lists the changes likely to WEAKEN security — most often a validation check removed, which no taint engine sees. Notices to triage, never blocking. Measured on held-out real CVE fixes: 34% of the vulnerability-introducing changes caught at 0.3% false alarms per hunk (a 10-hunk PR gets a false notice ~3% of the time). Same rules as deep-scan: paid repos only, canonical origin only, listed by --print-payload."
+    required: false
+    default: "false"
   deep-scan-block:
     description: "OPT-IN (default false; needs deep-scan: \"true\" and firewall-mode: gate). A NEW deep-scan finding — one no detector pack reported — BLOCKS the check instead of annotating a warning. Measured block precision of the taint engine: ~94% on labeled benchmark code, but ~69-73% on real-world CVE code (about 1 false block in 3-4, mostly project-specific validators it does not recognise) — so it stays off unless you choose it."
     required: false
@@ -83,6 +87,7 @@ runs:
         FW_DEEP_SCAN: ${{ inputs.deep-scan }}
         FW_DEEP_SCAN_BLOCK: ${{ inputs.deep-scan-block }}
         FW_LIBRARY_MODE: ${{ inputs.library-mode }}
+        FW_CHANGE_REVIEW: ${{ inputs.change-review }}
         FW_FIX: ${{ inputs.fix }}
         # The caller's OWN GITHUB_TOKEN, used for two consumer-side surfaces, both posting to the caller's OWN repo and
         # never reaching slopGrade: the inline PR comment feed (`permissions: pull-requests: write`) and the Code
@@ -106,5 +111,6 @@ runs:
         [ "${FW_DEEP_SCAN}" = "true" ] && ARGS+=(--deep-scan)
         [ "${FW_DEEP_SCAN_BLOCK}" = "true" ] && ARGS+=(--deep-scan-block)
         [ "${FW_LIBRARY_MODE}" = "true" ] && ARGS+=(--library-mode)
+        [ "${FW_CHANGE_REVIEW}" = "true" ] && ARGS+=(--change-review)
         [ "${FW_FIX}" = "off" ] && ARGS+=(--no-fix)
         node "$FW_CLI" "${ARGS[@]}"
