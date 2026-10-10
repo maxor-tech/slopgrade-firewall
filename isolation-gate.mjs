@@ -59,6 +59,7 @@ import {
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs, refusalLine,
 } from "./src/client-lib.mjs";
 import { sinkFiles, prChangedPaths, prChangedRanges, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, CANDIDATES_RANKED_NOTE, heisenFeed, splitAgainstFeed, isPaidVerdict, deepScanNudge } from "./src/deep-scan.mjs";
+import { prHunks, validChangeReview } from "./src/change-review.mjs";
 import { fixableHitIndex, attachFixes } from "./src/autofix.mjs";
 import { IGNORE_FILE, parseIgnore, ignoreMatcher, readIgnoreText } from "./src/ignore.mjs";
 
@@ -176,7 +177,7 @@ async function loadProPacks(origin, oidcToken, root, rel, isIgnored = () => fals
 }
 
 const HELP = `slopGrade Firewall — CI leak detection (free tier: 10 flagship classes · paid repos: the full catalogue, extracted in your runner)
-Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <path>] [--deep-scan [--deep-scan-block] [--library-mode]] [--help]
+Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <path>] [--deep-scan [--deep-scan-block] [--library-mode] [--change-review]] [--help]
   --gate           block (exit 1) on a reliable hard leak in an entitled repo (default: advisory, never blocks) ;
                    on a pull request, only what the PR introduced counts (pre-existing debt is reported, never blocks)
   --strict         with --gate, fail CLOSED (exit 1) when no server verdict is available (default: fail open)
@@ -188,9 +189,12 @@ Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <p
   --library-mode   OPT-IN, with --deep-scan, PACKAGE repos only: also list library-tier candidates (a public function's
                    parameter reaching a sink) as notices to triage - never findings, never blocking.
                    Block precision: ~94% on benchmark code, ~69-73% on real-world CVE code (~1 false block in 3-4) — off by default.
+  --change-review  OPT-IN, with --deep-scan, pull requests only: ALSO send the PR's diff hunks (changed lines + 3 lines of
+                   context, ≤ 64) to the diff-reading 55M, which lists the changes likely to WEAKEN security (a removed
+                   check). Notices to triage, never blocking. Held-out real CVEs: 34% caught at 0.3% false alarms per hunk.
   --help           show this help
 Exit codes: 1 only on a gate-blocked verdict (or --strict with no verdict); 0 otherwise (fail open).`;
-const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-block", "--library-mode", "--no-fix"]);
+const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-block", "--library-mode", "--change-review", "--no-fix"]);
 
 export async function main(argv = [], env = process.env) {
   if (argv.includes("--help")) { console.log(HELP); return 0; }
@@ -203,8 +207,10 @@ export async function main(argv = [], env = process.env) {
   const deepScan = argv.includes("--deep-scan");
   const deepBlock = deepScan && argv.includes("--deep-scan-block");
   const libraryMode = deepScan && argv.includes("--library-mode");
+  const changeReview = deepScan && argv.includes("--change-review");
   const noFix = argv.includes("--no-fix"); // one-click fix suggestions are ON by default (input `fix: off` opts out)
   if (argv.includes("--deep-scan-block") && !deepScan) console.log("::warning title=slopGrade Firewall::--deep-scan-block has no effect without --deep-scan (deep-scan: \"true\").");
+  if (argv.includes("--change-review") && !deepScan) console.log("::warning title=slopGrade Firewall::--change-review has no effect without --deep-scan (deep-scan: \"true\").");
   const root = env.GITHUB_WORKSPACE || process.cwd();
   const noVerdict = () => (strict && gateMode ? 1 : 0);
 
@@ -312,7 +318,10 @@ export async function main(argv = [], env = process.env) {
   // Library mode: only for a checkout that IS a published package (manifest-only, local) — an application never asks.
   const libKind = libraryMode ? repoKind((rel) => { try { return readFileSync(join(root, rel), "utf8"); } catch { return null; } },
     () => { try { return readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith(".")).map((e) => e.name); } catch { return []; } }) : null;
-  const deepAudit = deep ? { deepScan: { note: "SOURCE of these files is sent (opt-in --deep-scan) — only when the server confirms this repo is paid", files: deep.units.map((u) => u.path), chars: deep.chars, skipped: deep.skipped, fromPr: deep.fromPr, scopedToPrLines: deep.scoped, ...(libKind ? { libraryMode: libKind.kind === "library", repoKind: libKind.why } : {}) } } : {};
+  // Change review (0.10.13): the PR's own diff hunks, read locally like the ranges — listed by --print-payload too.
+  const change = changeReview ? prHunks(env, prEvent, git) : null;
+  const deepAudit = deep ? { deepScan: { note: "SOURCE of these files is sent (opt-in --deep-scan) — only when the server confirms this repo is paid", files: deep.units.map((u) => u.path), chars: deep.chars, skipped: deep.skipped, fromPr: deep.fromPr, scopedToPrLines: deep.scoped, ...(libKind ? { libraryMode: libKind.kind === "library", repoKind: libKind.why } : {}),
+    ...(change ? { changeReview: { note: "these PR hunks (changed lines + 3 lines of context) are sent (opt-in --change-review)", hunks: change.hunks.map((h) => `${h.path}:${h.newStart}`), skipped: change.skipped } } : {}) } } : {};
 
   // 2. EXFILTRATION guard — a custom origin would mint a token for an attacker audience. Run DRY unless opted in.
   const { origin, blocked } = resolveOrigin(env);
@@ -385,7 +394,7 @@ export async function main(argv = [], env = process.env) {
 
   // 5b. OPT-IN deep scan (heisen taint engine) — source only ever goes to the CANONICAL origin, like the pro bundle
   //     only ever comes from it. Fail-open on every path: a deep-scan hiccup never touches the verdict above.
-  let deepRows = [], deepLine = null, deepBlocking = 0, libRows = [], libOutcomes = null, libRanked = false;
+  let deepRows = [], deepLine = null, deepBlocking = 0, libRows = [], libOutcomes = null, libRanked = false, changeBlock = null;
   if (deep) {
     if (origin !== DEFAULT_ORIGIN) ghWarn("deep scan skipped — source is only ever sent to the canonical slopGrade origin.");
     // Source leaves the runner ONLY for a paid repo. Before 0.10.12 a free or public repo with the option on uploaded its
@@ -394,7 +403,7 @@ export async function main(argv = [], env = process.env) {
     else if (!deep.units.length) deepLine = "no sink-bearing file in an engine-modelled language — nothing sent.";
     else {
       const post = (url, body) => timedFetch(url, { method: "POST", headers: { "content-type": "application/json" }, body });
-      const r = await requestDeepScan(post, origin, oidcToken, sha, deep.units, libKind?.kind === "library");
+      const r = await requestDeepScan(post, origin, oidcToken, sha, deep.units, libKind?.kind === "library", change?.hunks ?? []);
       if (r.state === "plan-required") ghWarn(`deep scan is a paid feature — no source was analysed. Enable it: ${origin}/ci`);
       else if (r.state === "unavailable") ghWarn(`deep scan unavailable (${r.status}) — verdict unaffected.`);
       else {
@@ -402,6 +411,7 @@ export async function main(argv = [], env = process.env) {
         libRows = libKind?.kind === "library" ? libraryCandidates(r.response.candidates, deep.units.map((u) => u.path)) : [];
         libOutcomes = libKind?.kind === "library" ? r.response.candidateOutcomes : null;
         libRanked = libKind?.kind === "library" && r.response.candidatesRanked === true;
+        changeBlock = change?.hunks.length ? validChangeReview(r.response.changeReview) : null;
         deepLine = `${r.response.scanned} file(s) analysed${deep.fromPr ? ` (${deep.fromPr} changed by this PR, sent first)` : ""}${deep.skipped ? ` (+${deep.skipped} over the cap, not sent)` : ""}${r.response.unanswered ? ` · ${r.response.unanswered} unanswered (partial)` : ""}${Number.isInteger(r.response.scoped) && r.response.scoped > 0 ? ` · ${r.response.scoped} analysed only where this PR changed them (and their callers)` : ""}`;
       }
     }
@@ -477,6 +487,20 @@ export async function main(argv = [], env = process.env) {
       line(`    - ${sanitizeLogLine(c.file)}:${c.line}  [${sanitizeLogLine(c.rule)}] candidate`);
     }
     if (libRows.length) line(`  ${CANDIDATE_DISMISS_HINT}`);
+  }
+  // Change review: PR hunks the diff-reading 55M scores as likely to WEAKEN security — notices, never in `feed` (so
+  // never in the gate, the blocking count or SARIF). An unanswered batch is said, never read as « nothing flagged ».
+  if (changeReview && deepLine !== null) {
+    if (!change) line(`\nslopGrade Firewall — change review: not a pull request run (or git could not diff the base) — nothing reviewed.`);
+    else if (!change.hunks.length) line(`\nslopGrade Firewall — change review: no changed hunk in an engine-modelled language.`);
+    else if (!changeBlock) line(`\nslopGrade Firewall — change review unavailable — verdict unaffected.`);
+    else {
+      line(`\nslopGrade Firewall — change review (heisen-slop-55m, triage): ${changeBlock.flagged.length} of ${changeBlock.reviewed} PR hunk(s) look like they weaken a security check${changeBlock.unreviewed ? ` · ${changeBlock.unreviewed} not reviewed (partial)` : ""}${change.skipped ? ` · ${change.skipped} over the cap, not sent` : ""}. On real CVE fixes: 34% of vulnerability-introducing changes caught at 0.3% false alarms per hunk.`);
+      for (const f of changeBlock.flagged.slice(0, 20)) {
+        console.log(`::notice file=${wfFile(f.path)},line=${f.newStart} title=slopGrade change review (triage)::this change may weaken a security check (p=${f.p.toFixed(4)}) — review the removed lines`);
+        line(`    - ${sanitizeLogLine(f.path)}:${f.newStart}  p=${f.p.toFixed(4)}`);
+      }
+    }
   }
 
   // One-click fixes (0.10.1) — a verified, line-local secure rewrite rides in the finding's inline comment as a GitHub

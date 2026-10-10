@@ -98,7 +98,7 @@ export function prChangedPaths(env, readEvent, git) {
 }
 
 /** The base and head SHAs of a pull_request run, or null (not a PR run, no event, a ref name instead of a full SHA). */
-function prShas(env, readEvent) {
+export function prShas(env, readEvent) {
   if (env.GITHUB_EVENT_NAME !== "pull_request" && env.GITHUB_EVENT_NAME !== "pull_request_target") return null;
   let ev = null;
   try { ev = readEvent(); } catch { return null; }
@@ -355,9 +355,10 @@ export function deepScanNudge({ deepScan, paid }) {
  * POST the units; `post(url, body)` → {status, json()} is injected (timedFetch in the client). Returns
  * {state: "ok", response} | {state: "plan-required"} | {state: "unavailable", status?} — never throws.
  */
-export async function requestDeepScan(post, origin, oidcToken, sha, units, library = false) {
+export async function requestDeepScan(post, origin, oidcToken, sha, units, library = false, hunks = []) {
   try {
-    const res = await post(`${origin}/api/ci/heisen`, JSON.stringify({ oidcToken, sha, units, ...(library ? { library: true } : {}) }));
+    // `hunks` (change review, 0.10.13) are sent only when the option produced some — never an empty field
+    const res = await post(`${origin}/api/ci/heisen`, JSON.stringify({ oidcToken, sha, units, ...(library ? { library: true } : {}), ...(hunks.length ? { hunks } : {}) }));
     if (res.status === 402) return { state: "plan-required" };
     if (res.status < 200 || res.status >= 300) return { state: "unavailable", status: res.status };
     const j = await res.json();
