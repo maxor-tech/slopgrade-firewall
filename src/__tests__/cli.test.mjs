@@ -237,7 +237,7 @@ test("a paid verdict with packBlocking>0 exits 1 AND names the located findings"
   });
 });
 
-// Deep scan = the one mode that sends SOURCE. Until 0.10.11 the client sent the files whatever the plan, and the server
+// Deep scan = the one mode that sends SOURCE. Before 0.10.12 the client sent the files whatever the plan, and the server
 // answered 402 after receiving them — a free or public repo that turned the option on still uploaded its code. The
 // verdict already says whether the repo is paid (isPaidVerdict) : source leaves the runner only when it is.
 function deepWorkspace() {

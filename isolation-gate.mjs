@@ -388,7 +388,7 @@ export async function main(argv = [], env = process.env) {
   let deepRows = [], deepLine = null, deepBlocking = 0, libRows = [], libOutcomes = null, libRanked = false;
   if (deep) {
     if (origin !== DEFAULT_ORIGIN) ghWarn("deep scan skipped — source is only ever sent to the canonical slopGrade origin.");
-    // Source leaves the runner ONLY for a paid repo. Before 0.10.11 a free or public repo with the option on uploaded its
+    // Source leaves the runner ONLY for a paid repo. Before 0.10.12 a free or public repo with the option on uploaded its
     // files and got 402 after the fact; the verdict above already says the plan, so nothing is sent unless it is paid.
     else if (!paid) ghWarn(`deep scan is a paid feature — no source was sent. Enable it: ${origin}/ci`);
     else if (!deep.units.length) deepLine = "no sink-bearing file in an engine-modelled language — nothing sent.";
