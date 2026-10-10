@@ -5,6 +5,8 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.10.13] — 2026-10-10
+
 ### Added
 - `change-review` input (`--change-review`, opt-in, needs `deep-scan`, pull requests only). The PR's diff hunks (changed
   lines + 3 lines of context, at most 64, removals first) go to heisen-slop's diff-reading 55M. It lists the changes
