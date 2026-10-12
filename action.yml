@@ -28,7 +28,7 @@ inputs:
     required: false
     default: "false"
   change-review:
-    description: "OPT-IN (default false; needs deep-scan: \"true\", pull requests only). ALSO sends the PR's diff hunks (the changed lines + 3 lines of context, at most 64) to heisen-slop's diff-reading 55M, which lists the changes likely to WEAKEN security — most often a validation check removed, which no taint engine sees. Notices to triage, never blocking. Measured on held-out real CVE fixes of every kind (6,269 advisories): 36% of the vulnerability-introducing changes caught at 0.20% false alarms per hunk (a 10-hunk PR gets a false notice ~2.0% of the time). Same rules as deep-scan: paid repos only, canonical origin only, listed by --print-payload."
+    description: "OPT-IN (default false; needs deep-scan: \"true\", pull requests only). ALSO sends the PR's diff hunks (the changed lines + 3 lines of context, at most 64) to heisen-slop's diff-reading 55M, which lists the changes likely to WEAKEN security — most often a validation check removed, which no taint engine sees. Notices to triage, never blocking. Measured once on held-out real CVEs: 36% of security fixes undone (a check removed) caught at 0.20% false alarms per hunk (a 10-hunk PR gets a false notice ~2.0% of the time). It does NOT find new vulnerable code: on the commits that really introduced 5,468 CVEs, 6% of commits flagged vs 0.8% of ordinary commits. Same rules as deep-scan: paid repos only, canonical origin only, listed by --print-payload."
     required: false
     default: "false"
   deep-scan-block:

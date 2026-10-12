@@ -91,14 +91,21 @@ test("prHunks on a real repository: the PR's removed check is a hunk on the chec
 });
 
 // The measured claim is stated in three places (action.yml input, --help, the run summary line). All three must state
-// the SAME recall and false-alarm rate, and no copy of an older measurement may remain: a stale number tells a user what
-// a model that is no longer served did.
+// the SAME two measurements, and no copy of an older wording may remain: a stale number tells a user what a model that
+// is no longer served did. The two halves are both required: 36 % is measured on security fixes played BACKWARDS; on the
+// commits that really introduced a CVE (heisen-slop docs/55M-REAL-CVE.md §4.6) the model flags 6 % of commits against
+// 0.8 % of ordinary ones. Stating the first without the second is the over-claim 0.10.14 shipped.
 test("the change-review measurement is stated the same in action.yml, --help and the run summary", () => {
   const root = new URL("../../", import.meta.url);
   const yml = readFileSync(new URL("action.yml", root), "utf8");
   const gate = readFileSync(new URL("isolation-gate.mjs", root), "utf8");
-  const claim = /(\d+)% (?:of (?:the )?vulnerability-introducing changes )?caught at (\d+\.\d+)% false alarms/g;
-  const stated = [...yml.matchAll(claim), ...gate.matchAll(claim)].map((m) => `${m[1]}%@${m[2]}%`);
-  assert.equal(stated.length, 3, `action.yml input + --help + summary line: ${stated.join(", ")}`);
-  assert.deepEqual([...new Set(stated)], ["36%@0.20%"], "the served v3+v6+v7 set: 35.8 % of 6,269 advisories at 0.20 %");
+  const undone = /(\d+)% of security fixes undone(?: \(a check removed\))? caught at (\d+\.\d+)% false alarms/g;
+  const real = /(\d+)% of commits flagged vs (\d+\.\d+)% of ordinary commits/g;
+  const a = [...yml.matchAll(undone), ...gate.matchAll(undone)].map((m) => `${m[1]}%@${m[2]}%`);
+  const b = [...yml.matchAll(real), ...gate.matchAll(real)].map((m) => `${m[1]}%vs${m[2]}%`);
+  assert.equal(a.length, 3, `action.yml input + --help + summary line: ${a.join(", ")}`);
+  assert.equal(b.length, 3, `each copy also states the real-introducing-commit number: ${b.join(", ")}`);
+  assert.deepEqual([...new Set(a)], ["36%@0.20%"], "the served v3+v6+v7 set: 35.8 % of 6,269 advisories at 0.20 %");
+  assert.deepEqual([...new Set(b)], ["6%vs0.8%"], "SZZ held-out, 5,468 CVEs: 6.2 % of introducing commits vs 0.78 %");
+  assert.doesNotMatch(yml + gate, /vulnerability-introducing changes caught/, "the 0.10.14 over-claim is gone");
 });

@@ -5,6 +5,17 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.10.15] — 2026-10-12
+
+### Fixed
+- `change-review`: the stated measurement no longer over-claims. 0.10.13–0.10.14 said "36% of the
+  vulnerability-introducing changes caught". That 36% was measured on security fixes played BACKWARDS (a check removed),
+  not on the commits that really brought each vulnerability in. Measured once on those real commits (SZZ: git blame on
+  each fix, 5,468 held-out CVEs, heisen-slop docs/55M-REAL-CVE.md §4.6): 6% of introducing commits get a notice, against
+  0.8% of ordinary commits, and the notice points at the buggy hunk in 0.5% of them. The option is a guard against removed
+  security checks, not a finder of new vulnerable code — `action.yml`, `--help` and the run summary now say both. Text
+  only; no change to what is sent.
+
 ## [0.10.14] — 2026-10-12
 
 ### Changed

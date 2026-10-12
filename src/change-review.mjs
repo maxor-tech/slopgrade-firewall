@@ -1,7 +1,9 @@
 // Change review (0.10.13, opt-in `change-review: "true"`, needs `deep-scan: "true"`) — the PR's diff hunks, scored by
 // heisen-slop's diff-reading 55M: which changes look like they WEAKEN security (most often a validation check removed,
-// the class no taint engine sees). Held-out real CVE fixes of every kind: 36 % of the vulnerability-introducing changes
-// caught at 0.20 % false alarms per ordinary hunk (heisen-slop docs/55M-REAL-CVE.md §4.3/§4.5, the v3+v6+v7 ensemble). TRIAGE: notices, never blocking.
+// the class no taint engine sees). Held-out: 36 % of security fixes UNDONE (the fix played backwards) caught at 0.20 %
+// false alarms per ordinary hunk (heisen-slop docs/55M-REAL-CVE.md §4.3/§4.5, the v3+v6+v7 ensemble). On the commits
+// that REALLY introduced 5,468 held-out CVEs (SZZ, §4.6) it flags 6 % of commits vs 0.8 % of ordinary ones and points at
+// the buggy hunk in 0.5 %: a guard against removed checks, not a finder of new vulnerable code. TRIAGE: notices, never blocking.
 //
 // EGRESS: the hunks carry the PR's changed lines plus 3 lines of context — sent only with this option on, only for a
 // paid repo, only to the canonical origin (the same rules as the deep scan), and listed by --print-payload.
