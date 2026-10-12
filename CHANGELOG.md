@@ -5,6 +5,14 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.10.14] — 2026-10-12
+
+### Changed
+- `change-review`: the stated measurement follows the model the hosted engine now serves (the mean of three diff-reading
+  55M models, one process each, heisen-slop #51). Held-out, per advisory, over 6,269 real CVE fixes of every kind: 36% of the
+  vulnerability-introducing changes caught at 0.20% false alarms per hunk (was: 34% at 0.3%, one model, CWE-modeled
+  advisories only). Text only — `action.yml`, `--help`, the run summary line. No change to what is sent.
+
 ## [0.10.13] — 2026-10-10
 
 ### Added

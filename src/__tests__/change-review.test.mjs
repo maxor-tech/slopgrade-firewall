@@ -2,7 +2,7 @@
 // the runner), the order and cap (removals first, 64 max), the response validation, and prHunks on a REAL repository.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -88,4 +88,17 @@ test("prHunks on a real repository: the PR's removed check is a hunk on the chec
   assert.match(r.hunks[0].text, /^-    if not os\.path\.realpath\(path\)\.startswith\(BASE\):$/m);
   assert.equal(r.hunks.some((h) => h.path.includes("package-lock")), false, "only engine-modelled files");
   assert.equal(prHunks({ GITHUB_EVENT_NAME: "push" }, ev, () => { throw new Error("must not run"); }), null);
+});
+
+// The measured claim is stated in three places (action.yml input, --help, the run summary line). All three must state
+// the SAME recall and false-alarm rate, and no copy of an older measurement may remain: a stale number tells a user what
+// a model that is no longer served did.
+test("the change-review measurement is stated the same in action.yml, --help and the run summary", () => {
+  const root = new URL("../../", import.meta.url);
+  const yml = readFileSync(new URL("action.yml", root), "utf8");
+  const gate = readFileSync(new URL("isolation-gate.mjs", root), "utf8");
+  const claim = /(\d+)% (?:of (?:the )?vulnerability-introducing changes )?caught at (\d+\.\d+)% false alarms/g;
+  const stated = [...yml.matchAll(claim), ...gate.matchAll(claim)].map((m) => `${m[1]}%@${m[2]}%`);
+  assert.equal(stated.length, 3, `action.yml input + --help + summary line: ${stated.join(", ")}`);
+  assert.deepEqual([...new Set(stated)], ["36%@0.20%"], "the served v3+v6+v7 set: 35.8 % of 6,269 advisories at 0.20 %");
 });
