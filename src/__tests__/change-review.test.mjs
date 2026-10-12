@@ -6,11 +6,11 @@ import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readFileSync } from "nod
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseHunks, selectHunks, prHunks, validChangeReview, CHANGE_MAX_HUNKS } from "../change-review.mjs";
+import { parseHunks, selectHunks, prHunks, validChangeReview, windowsOf, CHANGE_MAX_HUNKS } from "../change-review.mjs";
 
 const sh = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" });
 
-test("parseHunks: ' '/'-'/'+' lines with the new-side start; new, binary, unmodelled and newline-marker lines left out", () => {
+test("parseHunks: ' '/'-'/'+' lines with the new-side start; a new file is a window; unmodelled and newline-marker lines left out", () => {
   const diff = [
     "diff --git a/app/files.py b/app/files.py",
     "index 1..2 100644",
@@ -38,12 +38,26 @@ test("parseHunks: ' '/'-'/'+' lines with the new-side start; new, binary, unmode
   assert.deepEqual(parseHunks(diff), [{
     path: "app/files.py", newStart: 10, removes: 2,
     text: " def read(p):\n-    if '..' in p:\n-        raise ValueError(p)\n     return open(p)",
-  }]);
+  }, { path: "new.py", newStart: 1, removes: 0, text: "+x = 1" }]);
 });
 
-test("parseHunks: a hunk over 40 lines is never sent", () => {
+// 0.10.15 dropped new files and hunks over 40 lines: 52 % of the commits that really introduced a held-out CVE put the
+// bug in one (heisen-slop docs/55M-REAL-CVE.md §4.6). They are now cut into windows the reviewer can read — the same cut
+// as heisen-slop scripts/action_hunks.py windows_of (tests/test_szz_eval.py pins the same cases).
+test("parseHunks: a hunk over 40 lines is cut into windows, not dropped", () => {
   const big = ["--- a/a.js", "+++ b/a.js", "@@ -1,41 +1,41 @@", ...Array.from({ length: 41 }, (_, i) => `-l${i}`)].join("\n");
-  assert.deepEqual(parseHunks("diff --git a/a.js b/a.js\n" + big), []);
+  const r = parseHunks("diff --git a/a.js b/a.js\n" + big);
+  assert.deepEqual(r.map((h) => [h.newStart, h.text.split("\n").length, h.removes]), [[1, 40, 40], [1, 1, 1]]);
+});
+
+test("windowsOf: <= 40 lines and <= 4,000 characters each, new-side line numbers kept, unchanged windows dropped", () => {
+  const lines = [...Array.from({ length: 90 }, (_, i) => `+line ${i}`), "-gone", " ctx"];
+  const ws = windowsOf("a.py", 10, lines);
+  assert.deepEqual(ws.map((w) => w.text.split("\n").length), [40, 40, 12]);
+  assert.deepEqual(ws.map((w) => w.newStart), [10, 50, 90]);
+  assert.deepEqual(windowsOf("a.py", 1, Array(5).fill("+" + "x".repeat(1500))).map((w) => w.text.split("\n").length), [2, 2, 1]);
+  assert.deepEqual(windowsOf("a.py", 1, [...Array(41).fill(" ctx"), "+x"]).map((w) => w.newStart), [41]);
+  assert.ok(windowsOf("a.py", 1, ["+" + "y".repeat(9000)]).every((w) => w.text.length <= 4000), "an over-long line is cut");
 });
 
 test("selectHunks: hunks that delete lines go first, then path and line; at most CHANGE_MAX_HUNKS, the rest counted", () => {
@@ -93,8 +107,8 @@ test("prHunks on a real repository: the PR's removed check is a hunk on the chec
 // The measured claim is stated in three places (action.yml input, --help, the run summary line). All three must state
 // the SAME two measurements, and no copy of an older wording may remain: a stale number tells a user what a model that
 // is no longer served did. The two halves are both required: 36 % is measured on security fixes played BACKWARDS; on the
-// commits that really introduced a CVE (heisen-slop docs/55M-REAL-CVE.md §4.6) the model flags 6 % of commits against
-// 0.8 % of ordinary ones. Stating the first without the second is the over-claim 0.10.14 shipped.
+// commits that really introduced a CVE (heisen-slop docs/55M-REAL-CVE.md §4.6), cut in windows, the model flags 9 % of
+// commits against 1.0 % of ordinary ones. Stating the first without the second is the over-claim 0.10.14 shipped.
 test("the change-review measurement is stated the same in action.yml, --help and the run summary", () => {
   const root = new URL("../../", import.meta.url);
   const yml = readFileSync(new URL("action.yml", root), "utf8");
@@ -106,6 +120,6 @@ test("the change-review measurement is stated the same in action.yml, --help and
   assert.equal(a.length, 3, `action.yml input + --help + summary line: ${a.join(", ")}`);
   assert.equal(b.length, 3, `each copy also states the real-introducing-commit number: ${b.join(", ")}`);
   assert.deepEqual([...new Set(a)], ["36%@0.20%"], "the served v3+v6+v7 set: 35.8 % of 6,269 advisories at 0.20 %");
-  assert.deepEqual([...new Set(b)], ["6%vs0.8%"], "SZZ held-out, 5,468 CVEs: 6.2 % of introducing commits vs 0.78 %");
+  assert.deepEqual([...new Set(b)], ["9%vs1.0%"], "SZZ held-out windows mode, 5,468 CVEs: 9.03 % of introducing commits vs 0.96 %");
   assert.doesNotMatch(yml + gate, /vulnerability-introducing changes caught/, "the 0.10.14 over-claim is gone");
 });

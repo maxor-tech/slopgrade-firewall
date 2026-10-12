@@ -5,6 +5,24 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.10.16] — 2026-10-12
+
+### Changed
+- `change-review` now reviews **new files and hunks over 40 lines**, cut into 40-line windows; 0.10.15 dropped them. 52%
+  of the commits that really introduced a held-out CVE put the bug in such a hunk (heisen-slop docs/55M-REAL-CVE.md §4.6).
+  Measured once on held-out with the same served model and threshold (SZZ, 5,468 CVEs):
+
+  | | 0.10.15 | 0.10.16 |
+  |---|---:|---:|
+  | buggy line reaches the reviewer | 48% | 82% |
+  | introducing commit gets a notice | 6.2% | 9.0% |
+  | the notice points at the buggy hunk | 0.48% | 0.68% |
+  | ordinary commit gets a notice | 0.78% | 0.96% |
+
+  Still a guard against removed checks, weak at new vulnerable code — `action.yml`, `--help` and the run summary say so.
+  Egress: the same rule (the PR's changed lines + 3 lines of context, at most 64 hunks); a new file's lines are changed
+  lines and now count. The cut mirrors heisen-slop `scripts/action_hunks.py` (identical on 953 hunks of 200 real commits).
+
 ## [0.10.15] — 2026-10-12
 
 ### Fixed
