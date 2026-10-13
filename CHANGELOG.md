@@ -5,6 +5,17 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.10.17] — 2026-10-12
+
+### Changed
+- `change-review`: the stated measurement follows the hosted engine, which now serves **two detectors as one verdict**
+  (heisen-slop #54, docs/55M-REAL-CVE.md §4.7): the reversed-fix set (a removed check) OR a new pair trained on the
+  commits that really introduced CVEs (new vulnerable code). Held-out once, cutoffs frozen: 17% of 5,468 real
+  CVE-introducing commits get a notice (was 9%), against 1.9% of ordinary commits (was 1.0%); the notice points at the
+  buggy hunk in 2.7% of them (was 0.7%); 36% of security fixes undone still caught, at 0.21% false alarms per hunk.
+  The `p` of a notice is now the engine's calibrated score (each detector's cutoff at 0.5). Text only — nothing changes
+  in what is sent.
+
 ## [0.10.16] — 2026-10-12
 
 ### Changed
