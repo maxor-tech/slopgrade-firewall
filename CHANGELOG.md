@@ -5,6 +5,16 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.10.19] — 2026-10-13
+
+### Added
+- `change-review` reads **C** (`.c` and `.h`). The hosted reviewer accepts C since heisen-slop #58; measured once on
+  held-out real C CVEs (docs/55M-REAL-CVE.md §4.9): 10.7% of 1,669 C commits that really introduced a CVE get a notice,
+  against 1.60% of 376 ordinary C commits — before this, C hunks were not sent (0%). C++ is not measured, so not sent.
+  Only change review reads C: the deep scan has no C engine and its file list is unchanged. In a PR that mixes C with
+  other languages, the C hunks share the 64-hunk cap (removals first, as before). Opt-in and egress rules unchanged:
+  the C hunks are listed by `--print-payload` like the others.
+
 ## [0.10.18] — 2026-10-13
 
 ### Changed

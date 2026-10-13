@@ -6,9 +6,21 @@ import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readFileSync } from "nod
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseHunks, selectHunks, prHunks, validChangeReview, windowsOf, CHANGE_MAX_HUNKS } from "../change-review.mjs";
+import { parseHunks, selectHunks, prHunks, validChangeReview, windowsOf, CHANGE_MAX_HUNKS, CHANGE_REVIEW_EXTS, CHANGE_REVIEW_PATHSPEC } from "../change-review.mjs";
 
 const sh = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" });
+
+// C (0.10.19): measured for the diff reviewer only (heisen-slop docs/55M-REAL-CVE.md §4.9). The deep scan has no C engine,
+// so its extension list must stay without C — only change review reads .c / .h. C++ is not measured.
+test("C hunks (.c / .h) are reviewed; C++ is not; the deep scan's list stays without C; the pathspec follows", async () => {
+  const { DEEP_SCAN_EXTS, DEEP_SCAN_PATHSPEC } = await import("../deep-scan.mjs");
+  const file = (p) => [`diff --git a/${p} b/${p}`, `--- a/${p}`, `+++ b/${p}`, "@@ -3,3 +3,2 @@", " int n = len;", "-if (n > cap) return -1;", " memcpy(buf, src, n);"];
+  const r = parseHunks([...file("src/io.c"), ...file("include/IO.H"), ...file("src/io.cpp"), ...file("src/io.hpp")].join("\n"));
+  assert.deepEqual(r.map((h) => [h.path, h.newStart, h.removes]), [["src/io.c", 3, 1], ["include/IO.H", 3, 1]]);
+  for (const p of ["a.py", "a.tsx", "a.phtml", "a.go"]) assert.ok(CHANGE_REVIEW_EXTS.test(p), `${p}: every deep-scan language stays reviewed`);
+  assert.ok(!DEEP_SCAN_EXTS.test("src/io.c") && !DEEP_SCAN_EXTS.test("io.h"), "a C file never becomes a deep-scan unit");
+  assert.deepEqual(CHANGE_REVIEW_PATHSPEC, [...DEEP_SCAN_PATHSPEC, ":(glob,icase)**/*.c", ":(glob,icase)**/*.h"]);
+});
 
 test("parseHunks: ' '/'-'/'+' lines with the new-side start; a new file is a window; unmodelled and newline-marker lines left out", () => {
   const diff = [
