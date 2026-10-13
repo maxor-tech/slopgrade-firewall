@@ -107,8 +107,8 @@ test("prHunks on a real repository: the PR's removed check is a hunk on the chec
 // The measured claim is stated in three places (action.yml input, --help, the run summary line). All three must state
 // the SAME two measurements, and no copy of an older wording may remain: a stale number tells a user what a model that
 // is no longer served did. The two halves are both required: 36 % is measured on security fixes played BACKWARDS; on the
-// commits that really introduced a CVE (heisen-slop docs/55M-REAL-CVE.md §4.7), the two served detectors flag 17 % of
-// commits against 1.9 % of ordinary ones. Stating the first without the second is the over-claim 0.10.14 shipped.
+// commits that really introduced a CVE (heisen-slop docs/55M-REAL-CVE.md §4.8), the two served detectors flag 19 % of
+// commits against 2.1 % of ordinary ones. Stating the first without the second is the over-claim 0.10.14 shipped.
 test("the change-review measurement is stated the same in action.yml, --help and the run summary", () => {
   const root = new URL("../../", import.meta.url);
   const yml = readFileSync(new URL("action.yml", root), "utf8");
@@ -119,7 +119,7 @@ test("the change-review measurement is stated the same in action.yml, --help and
   const b = [...yml.matchAll(real), ...gate.matchAll(real)].map((m) => `${m[1]}%vs${m[2]}%`);
   assert.equal(a.length, 3, `action.yml input + --help + summary line: ${a.join(", ")}`);
   assert.equal(b.length, 3, `each copy also states the real-introducing-commit number: ${b.join(", ")}`);
-  assert.deepEqual([...new Set(a)], ["36%@0.21%"], "the served union: 36.4 % of 6,269 reversed fixes at 0.21 %");
-  assert.deepEqual([...new Set(b)], ["17%vs1.9%"], "SZZ held-out, served union, 5,468 CVEs: 16.6 % of introducing commits vs 1.85 %");
+  assert.deepEqual([...new Set(a)], ["36%@0.23%"], "the served union with diff-v13: 36.4 % of 6,269 reversed fixes at 0.23 %");
+  assert.deepEqual([...new Set(b)], ["19%vs2.1%"], "SZZ held-out, served union with diff-v13, 5,468 CVEs: 19.3 % of introducing commits vs 2.14 %");
   assert.doesNotMatch(yml + gate, /vulnerability-introducing changes caught/, "the 0.10.14 over-claim is gone");
 });
