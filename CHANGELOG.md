@@ -5,6 +5,16 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.10.20] — 2026-10-13
+
+### Removed
+- `change-review` no longer sends C (`.c` / `.h`) — 0.10.19 is withdrawn. Its measurement scored up to 400 hunks per
+  C commit; the Action sends 64. Re-cut to the Action's 64 (heisen-slop docs/55M-REAL-CVE.md §4.9), the C validation
+  set gives 4.0% of C introducing commits flagged vs 0.9% of ordinary C commits — below the bar fixed before the
+  measurement (5%). C commits are large: 15% of them exceed 64 hunks, and the bug often sits past the cap. The hosted
+  reviewer still accepts C, so a better measured C path can return without a server change. Every other language is
+  unchanged (19% of real CVE-introducing commits vs 2.1% of ordinary commits).
+
 ## [0.10.19] — 2026-10-13
 
 ### Added
