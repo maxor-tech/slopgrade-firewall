@@ -191,8 +191,8 @@ Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <p
                    Block precision: ~94% on benchmark code, ~69-73% on real-world CVE code (~1 false block in 3-4) — off by default.
   --change-review  OPT-IN, with --deep-scan, pull requests only: ALSO send the PR's diff hunks (changed lines + 3 lines of
                    context, ≤ 64) to the diff-reading 55M, which lists the changes likely to WEAKEN security (a removed
-                   check). Notices to triage, never blocking. Held-out: 36% of security fixes undone caught at 0.21% false alarms
-                   per hunk; on real CVE-introducing commits, 17% of commits flagged vs 1.9% of ordinary commits.
+                   check). Notices to triage, never blocking. Held-out: 36% of security fixes undone caught at 0.23% false alarms
+                   per hunk; on real CVE-introducing commits, 19% of commits flagged vs 2.1% of ordinary commits.
   --help           show this help
 Exit codes: 1 only on a gate-blocked verdict (or --strict with no verdict); 0 otherwise (fail open).`;
 const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-block", "--library-mode", "--change-review", "--no-fix"]);
@@ -496,7 +496,7 @@ export async function main(argv = [], env = process.env) {
     else if (!change.hunks.length) line(`\nslopGrade Firewall — change review: no changed hunk in an engine-modelled language.`);
     else if (!changeBlock) line(`\nslopGrade Firewall — change review unavailable — verdict unaffected.`);
     else {
-      line(`\nslopGrade Firewall — change review (heisen-slop-55m, triage): ${changeBlock.flagged.length} of ${changeBlock.reviewed} PR hunk(s) look like they weaken a security check${changeBlock.unreviewed ? ` · ${changeBlock.unreviewed} not reviewed (partial)` : ""}${change.skipped ? ` · ${change.skipped} over the cap, not sent` : ""}. Held-out: 36% of security fixes undone caught at 0.21% false alarms per hunk; on real CVE-introducing commits, 17% of commits flagged vs 1.9% of ordinary commits.`);
+      line(`\nslopGrade Firewall — change review (heisen-slop-55m, triage): ${changeBlock.flagged.length} of ${changeBlock.reviewed} PR hunk(s) look like they weaken a security check${changeBlock.unreviewed ? ` · ${changeBlock.unreviewed} not reviewed (partial)` : ""}${change.skipped ? ` · ${change.skipped} over the cap, not sent` : ""}. Held-out: 36% of security fixes undone caught at 0.23% false alarms per hunk; on real CVE-introducing commits, 19% of commits flagged vs 2.1% of ordinary commits.`);
       for (const f of changeBlock.flagged.slice(0, 20)) {
         console.log(`::notice file=${wfFile(f.path)},line=${f.newStart} title=slopGrade change review (triage)::this change may weaken a security check (p=${f.p.toFixed(4)}) — review the removed lines`);
         line(`    - ${sanitizeLogLine(f.path)}:${f.newStart}  p=${f.p.toFixed(4)}`);

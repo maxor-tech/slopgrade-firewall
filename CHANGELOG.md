@@ -5,6 +5,15 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.10.18] — 2026-10-13
+
+### Changed
+- `change-review`: the stated measurement follows the hosted engine, whose new-vulnerable-code detector now pairs diff-v9
+  with **diff-v13** (heisen-slop #57, docs/55M-REAL-CVE.md §4.8: trained with advisory-grade positives traced from NVD
+  fix commits). Held-out once, cutoffs frozen: 19% of 5,468 real CVE-introducing commits get a notice (was 17%), against
+  2.1% of ordinary commits (was 1.9%); the notice points at the buggy hunk in 3.9% of them (was 2.7%); 36% of security
+  fixes undone still caught, at 0.23% false alarms per hunk (was 0.21%). Text only — nothing changes in what is sent.
+
 ## [0.10.17] — 2026-10-12
 
 ### Changed

@@ -1,10 +1,10 @@
 // Change review (0.10.13, opt-in `change-review: "true"`, needs `deep-scan: "true"`) — the PR's diff hunks, scored by
 // heisen-slop's diff-reading 55M: which changes look like they WEAKEN security (most often a validation check removed,
 // the class no taint engine sees). The engine serves TWO detectors as one verdict (heisen-slop docs/55M-REAL-CVE.md
-// §4.7): the reversed-fix set (a removed check) OR the SZZ pair trained on real introducing hunks (new vulnerable code).
-// Held-out, cutoffs frozen: 36 % of security fixes UNDONE caught at 0.21 % false alarms per ordinary hunk; on the commits
-// that REALLY introduced 5,468 CVEs (SZZ, windows cut since 0.10.16), 17 % of commits flagged vs 1.9 % of ordinary ones,
-// pointing at the buggy hunk in 2.7 % (0.10.16 with one detector: 9 % vs 1.0 %, 0.7 %). The `p` of a notice is the
+// §4.8): the reversed-fix set (a removed check) OR the SZZ pair trained on real introducing hunks (new vulnerable code).
+// Held-out, cutoffs frozen: 36 % of security fixes UNDONE caught at 0.23 % false alarms per ordinary hunk; on the commits
+// that REALLY introduced 5,468 CVEs (SZZ, windows cut since 0.10.16), 19 % of commits flagged vs 2.1 % of ordinary ones,
+// pointing at the buggy hunk in 3.9 % (0.10.17, pair with diff-v12: 17 % vs 1.9 %, 2.7 %; 0.10.16, one detector: 9 % vs 1.0 %, 0.7 %). The `p` of a notice is the
 // engine's calibrated score (each detector's cutoff at 0.5), not a probability. TRIAGE: notices, never blocking.
 //
 // EGRESS: the hunks carry the PR's changed lines (a new file's lines included, in windows) plus 3 lines of context — sent only with this option on, only for a
