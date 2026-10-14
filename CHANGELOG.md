@@ -5,6 +5,20 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.10.22] — 2026-10-14
+
+### Added
+- `change-review` reads **C++** (`.cpp` `.cc` `.cxx` `.hpp` `.hh`). **Egress:** with change review on, the changed
+  lines of C++ files are now sent (opt-in and paid-repo rules unchanged; listed by `--print-payload`).
+- The hosted engine scores C++ hunks with a C++-only detector (heisen-slop docs/55M-REAL-CVE.md §4.12); the other
+  languages' scores are unchanged by construction. Its cutoff was calibrated on one half of 2,262 fresh C++ repos and
+  checked once on the other half.
+- Held-out, measured at this 64-hunk cut: the commit that introduced the bug got a notice in **12.4% of 217 unseen C++
+  CVE advisories** (27), on the buggy hunk in 1.8%; **1.9% of 3,493 ordinary C++ commits** got one (95% interval
+  1.5-2.4%). Most notices are false alarms; no notice is not a clearance.
+- Three earlier C++ attempts failed their bar (false alarms 3.9-4.7%) and were not shipped; the doc lists them.
+- `.h` stays C. Rust has too few advisories: not sent. The deep scan is unchanged (no C / C++ engine).
+
 ## [0.10.21] — 2026-10-13
 
 ### Added
