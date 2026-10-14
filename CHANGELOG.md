@@ -5,6 +5,17 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.10.23] — 2026-10-14
+
+### Added
+- `change-review` reads **Rust** (`.rs`). **Egress:** with change review on, the changed lines of Rust files are now
+  sent (opt-in and paid-repo rules unchanged; listed by `--print-payload`).
+- The hosted engine scores Rust with its served detectors, unchanged (heisen-slop docs/55M-REAL-CVE.md §4.13).
+- Held-out, at this 64-hunk cut: the commit that introduced the bug got a notice in **8.3% of 230 Rust CVE
+  advisories** (19), on the buggy hunk in 2.2%; **1.0% of 6,298 ordinary Rust commits** of fresh repos got one (95%
+  interval 0.8-1.3%). Most notices are false alarms; no notice is not a clearance.
+- With this release change review covers the C family requested: C (0.10.21), C++ (0.10.22), Rust (0.10.23).
+
 ## [0.10.22] — 2026-10-14
 
 ### Added

@@ -11,15 +11,15 @@ import { parseHunks, selectHunks, prHunks, validChangeReview, windowsOf, CHANGE_
 const sh = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" });
 
 // C (0.10.21, heisen-slop §4.10) and C++ (0.10.22, routed detector §4.12) are measured for the diff reviewer only. The
-// deep scan has neither engine, so its extension list must stay without them. Rust is not measured: not sent.
-test("C (.c / .h) and C++ (.cpp .cc .cxx .hpp .hh) hunks are reviewed; Rust is not; the deep scan's list stays without them", async () => {
+// deep scan has none of these engines, so its extension list stays without them. Rust (0.10.23, §4.13) too.
+test("C (.c / .h), C++ (.cpp .cc .cxx .hpp .hh) and Rust (.rs) hunks are reviewed; the deep scan's list stays without them", async () => {
   const { DEEP_SCAN_EXTS, DEEP_SCAN_PATHSPEC } = await import("../deep-scan.mjs");
   const file = (p) => [`diff --git a/${p} b/${p}`, `--- a/${p}`, `+++ b/${p}`, "@@ -3,3 +3,2 @@", " int n = len;", "-if (n > cap) return -1;", " memcpy(buf, src, n);"];
   const r = parseHunks([...file("src/io.c"), ...file("include/IO.H"), ...file("src/io.cpp"), ...file("src/io.HPP"), ...file("src/lib.rs")].join("\n"));
-  assert.deepEqual(r.map((h) => [h.path, h.newStart, h.removes]), [["src/io.c", 3, 1], ["include/IO.H", 3, 1], ["src/io.cpp", 3, 1], ["src/io.HPP", 3, 1]]);
+  assert.deepEqual(r.map((h) => [h.path, h.newStart, h.removes]), [["src/io.c", 3, 1], ["include/IO.H", 3, 1], ["src/io.cpp", 3, 1], ["src/io.HPP", 3, 1], ["src/lib.rs", 3, 1]]);
   for (const p of ["a.py", "a.tsx", "a.phtml", "a.go", "a.cc", "a.cxx", "a.hh"]) assert.ok(CHANGE_REVIEW_EXTS.test(p), `${p}: reviewed`);
-  for (const p of ["src/io.c", "io.h", "io.cpp", "io.hpp"]) assert.ok(!DEEP_SCAN_EXTS.test(p), `${p} never becomes a deep-scan unit`);
-  assert.deepEqual(CHANGE_REVIEW_PATHSPEC, [...DEEP_SCAN_PATHSPEC, ...["c", "h", "cpp", "cc", "cxx", "hpp", "hh"].map((e) => `:(glob,icase)**/*.${e}`)]);
+  for (const p of ["src/io.c", "io.h", "io.cpp", "io.hpp", "lib.rs"]) assert.ok(!DEEP_SCAN_EXTS.test(p), `${p} never becomes a deep-scan unit`);
+  assert.deepEqual(CHANGE_REVIEW_PATHSPEC, [...DEEP_SCAN_PATHSPEC, ...["c", "h", "cpp", "cc", "cxx", "hpp", "hh", "rs"].map((e) => `:(glob,icase)**/*.${e}`)]);
 });
 
 test("parseHunks: ' '/'-'/'+' lines with the new-side start; a new file is a window; unmodelled and newline-marker lines left out", () => {
@@ -140,11 +140,14 @@ test("the change-review measurement is stated the same in action.yml, --help and
 // §4.10) is stated with counts; no shipped text may carry a withdrawn C number (CHANGELOG keeps the history).
 test("C claims: the 0.10.21 numbers are stated with counts, no withdrawn 0.10.19 number ships", async () => {
   const { C_REVIEW_NOTE, noticeHint } = await import("../change-review.mjs");
-  for (const s of ["114 of 1,091", "1.5%", "8 of 356", "no notice is not a clearance", "Rust is not sent"])
+  for (const s of ["114 of 1,091", "1.5%", "8 of 356", "no notice is not a clearance", ".h files are read as C"])
     assert.ok(C_REVIEW_NOTE.includes(s), s);
   const { CPP_REVIEW_NOTE } = await import("../change-review.mjs");   // C++ (0.10.22, §4.12), stated with counts too
   for (const s of ["27 of 217", "on the buggy hunk in 1.8%", "67 of 3,493", "no notice is not a clearance"])
     assert.ok(CPP_REVIEW_NOTE.includes(s), s);
+  const { RUST_REVIEW_NOTE } = await import("../change-review.mjs");   // Rust (0.10.23, §4.13)
+  for (const s of ["19 of 230", "on the buggy hunk in 2.2%", "65 of 6,298", "no notice is not a clearance"])
+    assert.ok(RUST_REVIEW_NOTE.includes(s), s);
   const root = new URL("../../", import.meta.url);
   const shipped = ["action.yml", "isolation-gate.mjs", "src/change-review.mjs"].map((f) => readFileSync(new URL(f, root), "utf8")).join("\n");
   for (const old of ["10.7 %", "10.7%", "1,669", "1.60 %", "1.60%", "11% of the C commits", "1.6% of ordinary C"])
