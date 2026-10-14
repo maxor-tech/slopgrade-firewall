@@ -6,11 +6,35 @@
 // that REALLY introduced 5,468 CVEs (SZZ, windows cut since 0.10.16), 19 % of commits flagged vs 2.1 % of ordinary ones,
 // pointing at the buggy hunk in 3.9 % (0.10.17, pair with diff-v12: 17 % vs 1.9 %, 2.7 %; 0.10.16, one detector: 9 % vs 1.0 %, 0.7 %). The `p` of a notice is the
 // engine's calibrated score (each detector's cutoff at 0.5), not a probability. TRIAGE: notices, never blocking.
+// C (.c / .h, 0.10.21): the same union, measured at THIS cut (64 hunks) — pre-registered bar passed on val, held-out once
+// (heisen-slop docs/55M-REAL-CVE.md §4.10): 10.45 % of 1,091 real C CVE-introducing commits get a notice vs 2.25 % of
+// 356 ordinary C commits; on the buggy hunk 1.47 %. (0.10.19 sent C on a 400-hunk measurement and was withdrawn.)
+// C++ failed its bar and Rust lacks data: neither is sent.
 //
 // EGRESS: the hunks carry the PR's changed lines (a new file's lines included, in windows) plus 3 lines of context — sent only with this option on, only for a
 // paid repo, only to the canonical origin (the same rules as the deep scan), and listed by --print-payload.
 
 import { DEEP_SCAN_EXTS, DEEP_SCAN_PATHSPEC, prShas } from "./deep-scan.mjs";
+
+// What the diff reviewer reads: every deep-scan language, plus C. Kept apart from DEEP_SCAN_EXTS on purpose — the deep
+// scan's taint engine has no C, so a C file must never become a deep-scan unit. Mirrors heisen-slop
+// scripts/action_hunks.py with `add_languages(["c"])`, the view the C measurement used (`.h` read as C).
+export const CHANGE_REVIEW_EXTS = new RegExp(`(?:${DEEP_SCAN_EXTS.source})|\\.(?:c|h)$`, "i");
+export const CHANGE_REVIEW_PATHSPEC = [...DEEP_SCAN_PATHSPEC, ":(glob,icase)**/*.c", ":(glob,icase)**/*.h"];
+
+/** A C hunk (the run summary then states the C measurement, which differs from the other languages'). */
+export const C_HUNK = /\.(?:c|h)$/i;
+/** Held-out at this 64-hunk cut (heisen-slop docs/55M-REAL-CVE.md §4.10), counts with the rates; the 95 % interval of
+ *  the ordinary-commit rate is 1.1-4.4 %. A notice is a PR-level flag: it lands on the buggy hunk in 1.5 % only. */
+export const C_REVIEW_NOTE = "  C (.c/.h, held-out, this 64-hunk cut): the commit that introduced the bug got a notice in 10% of" +
+  " real C CVE advisories (114 of 1,091), on the buggy hunk in 1.5%; 2.2% (8 of 356) of ordinary C commits got one." +
+  " Most notices are false alarms, and no notice is not a clearance. .h files are read as C; C++ and Rust are not sent.";
+
+/** The notice's advice, from the hunk it flags: removed lines to look at, or only added code. */
+export function noticeHint(hunks, flag) {
+  const h = (hunks || []).find((x) => x.path === flag.path && x.newStart === flag.newStart);
+  return h && /(^|\n)-/.test(h.text) ? "review the removed lines" : "review the added code";
+}
 
 export const CHANGE_MAX_HUNKS = 64;          // = slopgrade change-review MAX_REVIEW_HUNKS
 export const CHANGE_MAX_HUNK_LINES = 40;     // = heisen-slop diff_training.MAX_HUNK_LINES
@@ -63,7 +87,7 @@ export function parseHunks(diff) {
     if (!cur && ln.startsWith("--- ")) { isNew = ln === "--- /dev/null"; continue; }
     if (!cur && ln.startsWith("+++ ")) {
       const p = ln.slice(4).replace(/\t$/, "");
-      path = p.startsWith("b/") && DEEP_SCAN_EXTS.test(p) ? p.slice(2) : null;
+      path = p.startsWith("b/") && CHANGE_REVIEW_EXTS.test(p) ? p.slice(2) : null;
       continue;
     }
     const h = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(ln);
@@ -89,7 +113,7 @@ export function prHunks(env, readEvent, git) {
   const prs = prShas(env, readEvent);
   if (!prs) return null;
   try {
-    const out = git(["-c", "core.quotepath=off", "diff", "-U3", "--no-color", "--no-ext-diff", "--diff-filter=d", "-M", prs.base, "--", ...DEEP_SCAN_PATHSPEC]);
+    const out = git(["-c", "core.quotepath=off", "diff", "-U3", "--no-color", "--no-ext-diff", "--diff-filter=d", "-M", prs.base, "--", ...CHANGE_REVIEW_PATHSPEC]);
     return typeof out === "string" ? selectHunks(parseHunks(out)) : null;
   } catch { return null; }
 }

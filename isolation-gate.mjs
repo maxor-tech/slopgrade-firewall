@@ -59,7 +59,7 @@ import {
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs, refusalLine,
 } from "./src/client-lib.mjs";
 import { sinkFiles, prChangedPaths, prChangedRanges, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, CANDIDATES_RANKED_NOTE, heisenFeed, splitAgainstFeed, isPaidVerdict, deepScanNudge } from "./src/deep-scan.mjs";
-import { prHunks, validChangeReview } from "./src/change-review.mjs";
+import { prHunks, validChangeReview, C_HUNK, C_REVIEW_NOTE, noticeHint } from "./src/change-review.mjs";
 import { fixableHitIndex, attachFixes } from "./src/autofix.mjs";
 import { IGNORE_FILE, parseIgnore, ignoreMatcher, readIgnoreText } from "./src/ignore.mjs";
 
@@ -497,8 +497,9 @@ export async function main(argv = [], env = process.env) {
     else if (!changeBlock) line(`\nslopGrade Firewall — change review unavailable — verdict unaffected.`);
     else {
       line(`\nslopGrade Firewall — change review (heisen-slop-55m, triage): ${changeBlock.flagged.length} of ${changeBlock.reviewed} PR hunk(s) look like they weaken a security check${changeBlock.unreviewed ? ` · ${changeBlock.unreviewed} not reviewed (partial)` : ""}${change.skipped ? ` · ${change.skipped} over the cap, not sent` : ""}. Held-out: 36% of security fixes undone caught at 0.23% false alarms per hunk; on real CVE-introducing commits, 19% of commits flagged vs 2.1% of ordinary commits.`);
+      if (change.hunks.some((h) => C_HUNK.test(h.path))) line(C_REVIEW_NOTE);
       for (const f of changeBlock.flagged.slice(0, 20)) {
-        console.log(`::notice file=${wfFile(f.path)},line=${f.newStart} title=slopGrade change review (triage)::this change may weaken a security check (p=${f.p.toFixed(4)}) — review the removed lines`);
+        console.log(`::notice file=${wfFile(f.path)},line=${f.newStart} title=slopGrade change review (triage)::this change may weaken a security check (p=${f.p.toFixed(4)}) — ${noticeHint(change.hunks, f)}`);
         line(`    - ${sanitizeLogLine(f.path)}:${f.newStart}  p=${f.p.toFixed(4)}`);
       }
     }
