@@ -88,6 +88,19 @@ test("validChangeReview: well-formed block kept, malformed rows dropped, a malfo
     { reviewed: 2, unreviewed: 0, threshold: 0.9994, flagged: [{ path: "a.py", newStart: 3, p: 0.9998 }] });
 });
 
+test("unreviewed hunks are named by language (a C++ detector outage reads as « C++ 12 »); unknown keys never printed", async () => {
+  const { unreviewedNote } = await import("../change-review.mjs");
+  const block = validChangeReview({ reviewed: 4, unreviewed: 13, threshold: 0.5, flagged: [],
+    unreviewedByLanguage: { cpp: 12, python: 1, "<script>": 3, rust: 0, c: 1.5 } });
+  assert.deepEqual(block.unreviewedByLanguage, { cpp: 12, python: 1 }, "known languages with a positive whole count only");
+  assert.equal(unreviewedNote(block), " · 13 not reviewed (partial: C++ 12, Python 1)");
+  assert.equal(unreviewedNote(validChangeReview({ reviewed: 0, unreviewed: 2, threshold: 0.5, flagged: [] })),
+    " · 2 not reviewed (partial)", "an older server without the field: the old wording");
+  assert.equal(unreviewedNote(validChangeReview({ reviewed: 3, unreviewed: 0, threshold: 0.5, flagged: [] })), "", "all reviewed");
+  assert.equal(validChangeReview({ reviewed: 1, unreviewed: 1, threshold: 0.5, flagged: [], unreviewedByLanguage: [1] }).unreviewedByLanguage,
+    undefined, "an array is not a language map");
+});
+
 test("prHunks on a real repository: the PR's removed check is a hunk on the checked-out line numbers; off-PR → null", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "fw-change-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));

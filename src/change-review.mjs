@@ -135,11 +135,28 @@ export function prHunks(env, readEvent, git) {
   } catch { return null; }
 }
 
-/** The server's `changeReview`, kept only when well-formed (a malformed block is ignored, never half-printed). */
+/** How the summary names a language of `unreviewedByLanguage`; an unknown key is dropped, never printed raw. */
+export const LANGUAGE_LABEL = Object.freeze({
+  python: "Python", javascript: "JS/TS", go: "Go", java: "Java", ruby: "Ruby", php: "PHP", c: "C", cpp: "C++", rust: "Rust",
+});
+
+/** The server's `changeReview`, kept only when well-formed (a malformed block is ignored, never half-printed).
+ *  `unreviewedByLanguage` (slopgrade, when hunks went unreviewed) is kept for the known languages with a positive count. */
 export function validChangeReview(x) {
   if (!x || typeof x !== "object") return null;
   const { reviewed, unreviewed, threshold, flagged } = x;
   if (!Number.isInteger(reviewed) || !Number.isInteger(unreviewed) || typeof threshold !== "number" || !Array.isArray(flagged)) return null;
   const rows = flagged.filter((f) => f && typeof f.path === "string" && Number.isInteger(f.newStart) && f.newStart >= 1 && typeof f.p === "number");
-  return { reviewed, unreviewed, threshold, flagged: rows };
+  const by = x.unreviewedByLanguage;
+  const langs = by && typeof by === "object" && !Array.isArray(by)
+    ? Object.entries(by).filter(([k, n]) => Object.hasOwn(LANGUAGE_LABEL, k) && Number.isInteger(n) && n > 0)
+    : [];
+  return { reviewed, unreviewed, threshold, flagged: rows, ...(langs.length ? { unreviewedByLanguage: Object.fromEntries(langs) } : {}) };
+}
+
+/** " · 12 not reviewed (partial: C++ 12)" — the part of the summary that says what went unreviewed, by language. */
+export function unreviewedNote(block) {
+  if (!block.unreviewed) return "";
+  const by = Object.entries(block.unreviewedByLanguage || {}).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  return ` · ${block.unreviewed} not reviewed (partial${by.length ? ": " + by.map(([k, n]) => `${LANGUAGE_LABEL[k]} ${n}`).join(", ") : ""})`;
 }

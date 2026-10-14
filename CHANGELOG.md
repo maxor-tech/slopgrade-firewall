@@ -5,6 +5,14 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.10.24] — 2026-10-14
+
+### Changed
+- The change-review summary now names the languages of the hunks that were not reviewed, e.g. `13 not reviewed
+  (partial: C++ 12, Python 1)`. A C++ detector outage on the hosted engine now costs only the C++ hunks; the rest of
+  the batch is still reviewed (heisen-slop #70). An older server without the per-language count keeps the old wording.
+- Only known language keys with a positive whole count are printed; anything else from the server is dropped.
+
 ## [0.10.23] — 2026-10-14
 
 ### Added
