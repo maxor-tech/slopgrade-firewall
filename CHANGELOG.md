@@ -5,6 +5,24 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.10.21] — 2026-10-13
+
+### Added
+- `change-review` reads **C** (`.c` / `.h`) again, measured this time at the Action's own cut (64 hunks per PR).
+  **Egress:** with change review on, the changed lines of C files are now sent (opt-in and paid-repo rules unchanged;
+  listed by `--print-payload`).
+- Why 0.10.19 was withdrawn: its C numbers scored up to 400 hunks per commit; the Action sends 64.
+- What changed: the bar was fixed before any number (heisen-slop docs/55M-REAL-CVE.md §4.10); validation adds OSV
+  OSS-Fuzz C fixes; the served models are unchanged; held-out was read once, at 64.
+- Held-out, per C advisory: the commit that introduced the bug got a notice in **10.5% (114 of 1,091)**, on the buggy
+  hunk in 1.5% (16); **2.2% of ordinary C commits (8 of 356, 95% interval 1.1-4.4%)** got one. Compared with the
+  withdrawn 0.10.19 claim (11% vs 1.6%), the ordinary-commit rate is HIGHER. Most C notices are false alarms; no notice
+  is not a clearance.
+- `.h` is read as C, also in C++ repos. C++ failed the bar (4.1%) and Rust has too few advisories: neither is sent.
+  The deep scan is unchanged (no C engine). The other languages lose 0.1 point on validation from sharing the 64 slots.
+- A notice now says "review the added code" when its hunk removes nothing (it said "review the removed lines" always);
+  the run summary adds the C measurement when C hunks were reviewed.
+
 ## [0.10.20] — 2026-10-13
 
 ### Removed

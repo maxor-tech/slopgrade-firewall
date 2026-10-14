@@ -6,16 +6,20 @@ import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readFileSync } from "nod
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseHunks, selectHunks, prHunks, validChangeReview, windowsOf, CHANGE_MAX_HUNKS } from "../change-review.mjs";
+import { parseHunks, selectHunks, prHunks, validChangeReview, windowsOf, CHANGE_MAX_HUNKS, CHANGE_REVIEW_EXTS, CHANGE_REVIEW_PATHSPEC } from "../change-review.mjs";
 
 const sh = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" });
 
-// 0.10.19 sent C and was withdrawn in 0.10.20: re-cut to the Action's 64 hunks, its C measurement fell below the bar
-// fixed before it was read (heisen-slop docs/55M-REAL-CVE.md §4.9). C may return only with a new measurement at 64.
-test("C (.c / .h) is not sent: the 0.10.19 C measurement did not hold at the Action's 64-hunk cap", () => {
+// C (0.10.19): measured for the diff reviewer only (heisen-slop docs/55M-REAL-CVE.md §4.9). The deep scan has no C engine,
+// so its extension list must stay without C — only change review reads .c / .h. C++ is not measured.
+test("C hunks (.c / .h) are reviewed; C++ is not; the deep scan's list stays without C; the pathspec follows", async () => {
+  const { DEEP_SCAN_EXTS, DEEP_SCAN_PATHSPEC } = await import("../deep-scan.mjs");
   const file = (p) => [`diff --git a/${p} b/${p}`, `--- a/${p}`, `+++ b/${p}`, "@@ -3,3 +3,2 @@", " int n = len;", "-if (n > cap) return -1;", " memcpy(buf, src, n);"];
-  assert.deepEqual(parseHunks([...file("src/io.c"), ...file("include/io.h")].join("\n")), []);
-  assert.equal(parseHunks(file("src/io.py").join("\n")).length, 1, "the same hunk in a reviewed language is still sent");
+  const r = parseHunks([...file("src/io.c"), ...file("include/IO.H"), ...file("src/io.cpp"), ...file("src/io.hpp")].join("\n"));
+  assert.deepEqual(r.map((h) => [h.path, h.newStart, h.removes]), [["src/io.c", 3, 1], ["include/IO.H", 3, 1]]);
+  for (const p of ["a.py", "a.tsx", "a.phtml", "a.go"]) assert.ok(CHANGE_REVIEW_EXTS.test(p), `${p}: every deep-scan language stays reviewed`);
+  assert.ok(!DEEP_SCAN_EXTS.test("src/io.c") && !DEEP_SCAN_EXTS.test("io.h"), "a C file never becomes a deep-scan unit");
+  assert.deepEqual(CHANGE_REVIEW_PATHSPEC, [...DEEP_SCAN_PATHSPEC, ":(glob,icase)**/*.c", ":(glob,icase)**/*.h"]);
 });
 
 test("parseHunks: ' '/'-'/'+' lines with the new-side start; a new file is a window; unmodelled and newline-marker lines left out", () => {
@@ -130,4 +134,20 @@ test("the change-review measurement is stated the same in action.yml, --help and
   assert.deepEqual([...new Set(a)], ["36%@0.23%"], "the served union with diff-v13: 36.4 % of 6,269 reversed fixes at 0.23 %");
   assert.deepEqual([...new Set(b)], ["19%vs2.1%"], "SZZ held-out, served union with diff-v13, 5,468 CVEs: 19.3 % of introducing commits vs 2.14 %");
   assert.doesNotMatch(yml + gate, /vulnerability-introducing changes caught/, "the 0.10.14 over-claim is gone");
+});
+
+// 0.10.19 shipped C claims measured at 400 hunks per commit (withdrawn in 0.10.20). The re-measured C (0.10.21, heisen-slop
+// §4.10) is stated with counts; no shipped text may carry a withdrawn C number (CHANGELOG keeps the history).
+test("C claims: the 0.10.21 numbers are stated with counts, no withdrawn 0.10.19 number ships", async () => {
+  const { C_REVIEW_NOTE, noticeHint } = await import("../change-review.mjs");
+  for (const s of ["114 of 1,091", "1.5%", "8 of 356", "no notice is not a clearance", "C++ and Rust are not sent"])
+    assert.ok(C_REVIEW_NOTE.includes(s), s);
+  const root = new URL("../../", import.meta.url);
+  const shipped = ["action.yml", "isolation-gate.mjs", "src/change-review.mjs"].map((f) => readFileSync(new URL(f, root), "utf8")).join("\n");
+  for (const old of ["10.7 %", "10.7%", "1,669", "1.60 %", "1.60%", "11% of the C commits", "1.6% of ordinary C"])
+    assert.ok(!shipped.includes(old), `withdrawn C claim still shipped: ${old}`);
+  const yml = readFileSync(new URL("action.yml", root), "utf8");
+  for (const s of ["got a notice in 10%", "on the buggy hunk in 1.5%", "2.2% (8 of 356)"]) assert.ok(yml.includes(s), `action.yml C claim: ${s}`);
+  assert.equal(noticeHint([{ path: "a.c", newStart: 3, text: " x\n-if (n > cap) return -1;\n y" }], { path: "a.c", newStart: 3 }), "review the removed lines");
+  assert.equal(noticeHint([{ path: "a.c", newStart: 3, text: " x\n+memcpy(buf, src, n);" }], { path: "a.c", newStart: 3 }), "review the added code");
 });
