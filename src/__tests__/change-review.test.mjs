@@ -153,7 +153,7 @@ test("the change-review measurement is stated the same in action.yml, --help and
 // §4.10) is stated with counts; no shipped text may carry a withdrawn C number (CHANGELOG keeps the history).
 test("C claims: the 0.10.21 numbers are stated with counts, no withdrawn 0.10.19 number ships", async () => {
   const { C_REVIEW_NOTE, noticeHint } = await import("../change-review.mjs");
-  for (const s of ["114 of 1,091", "1.5%", "8 of 356", "no notice is not a clearance", ".h files are read as C"])
+  for (const s of ["114 of 1,091", "1.5%", "277 of 8,049", "no notice is not a clearance", ".h files are read as C"])
     assert.ok(C_REVIEW_NOTE.includes(s), s);
   const { CPP_REVIEW_NOTE } = await import("../change-review.mjs");   // C++ (0.10.22, §4.12), stated with counts too
   for (const s of ["27 of 217", "on the buggy hunk in 1.8%", "67 of 3,493", "no notice is not a clearance"])
@@ -163,10 +163,10 @@ test("C claims: the 0.10.21 numbers are stated with counts, no withdrawn 0.10.19
     assert.ok(RUST_REVIEW_NOTE.includes(s), s);
   const root = new URL("../../", import.meta.url);
   const shipped = ["action.yml", "isolation-gate.mjs", "src/change-review.mjs"].map((f) => readFileSync(new URL(f, root), "utf8")).join("\n");
-  for (const old of ["10.7 %", "10.7%", "1,669", "1.60 %", "1.60%", "11% of the C commits", "1.6% of ordinary C"])
+  for (const old of ["10.7 %", "10.7%", "1,669", "1.60 %", "1.60%", "11% of the C commits", "1.6% of ordinary C", "8 of 356"])
     assert.ok(!shipped.includes(old), `withdrawn C claim still shipped: ${old}`);
   const yml = readFileSync(new URL("action.yml", root), "utf8");
-  for (const s of ["got a notice in 10%", "on the buggy hunk in 1.5%", "2.2% (8 of 356)"]) assert.ok(yml.includes(s), `action.yml C claim: ${s}`);
+  for (const s of ["got a notice in 10%", "on the buggy hunk in 1.5%", "3.4% (277 of 8,049)"]) assert.ok(yml.includes(s), `action.yml C claim: ${s}`);
   assert.equal(noticeHint([{ path: "a.c", newStart: 3, text: " x\n-if (n > cap) return -1;\n y" }], { path: "a.c", newStart: 3 }), "review the removed lines");
   assert.equal(noticeHint([{ path: "a.c", newStart: 3, text: " x\n+memcpy(buf, src, n);" }], { path: "a.c", newStart: 3 }), "review the added code");
 });
