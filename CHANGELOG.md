@@ -5,6 +5,15 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.10.26] — 2026-10-15
+
+### Changed
+- The hosted engine now scores Rust hunks with a Rust-only detector (diff-v19) on top of the served detectors
+  (heisen-slop docs/55M-REAL-CVE.md §4.16, pre-registered, read once). On **214 unseen Rust CVE advisories** the commit
+  that introduced the bug got a notice in **10.3%** (22; the served detectors alone: 1.9%), on the buggy hunk in 2.3%;
+  **1.8% of 6,107 ordinary Rust commits** of fresh repos got one (95% interval 1.5-2.1%). More Rust bugs are caught at
+  about twice the false-alarm rate of 0.10.23. The Rust note and `action.yml` state the new figures. No egress change.
+
 ## [0.10.25] — 2026-10-15
 
 ### Fixed
