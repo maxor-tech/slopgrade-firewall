@@ -158,15 +158,15 @@ test("C claims: the 0.10.21 numbers are stated with counts, no withdrawn 0.10.19
   const { CPP_REVIEW_NOTE } = await import("../change-review.mjs");   // C++ (0.10.22, §4.12), stated with counts too
   for (const s of ["27 of 217", "on the buggy hunk in 1.8%", "67 of 3,493", "no notice is not a clearance"])
     assert.ok(CPP_REVIEW_NOTE.includes(s), s);
-  const { RUST_REVIEW_NOTE } = await import("../change-review.mjs");   // Rust (0.10.23, §4.13)
-  for (const s of ["19 of 230", "on the buggy hunk in 2.2%", "65 of 6,298", "no notice is not a clearance"])
+  const { RUST_REVIEW_NOTE } = await import("../change-review.mjs");   // Rust (0.10.26: + the Rust route, §4.16)
+  for (const s of ["22 of 214", "on the buggy hunk in 2.3%", "108 of 6,107", "no notice is not a clearance"])
     assert.ok(RUST_REVIEW_NOTE.includes(s), s);
   const root = new URL("../../", import.meta.url);
   const shipped = ["action.yml", "isolation-gate.mjs", "src/change-review.mjs"].map((f) => readFileSync(new URL(f, root), "utf8")).join("\n");
-  for (const old of ["10.7 %", "10.7%", "1,669", "1.60 %", "1.60%", "11% of the C commits", "1.6% of ordinary C", "8 of 356"])
+  for (const old of ["10.7 %", "10.7%", "1,669", "1.60 %", "1.60%", "11% of the C commits", "1.6% of ordinary C", "8 of 356", "19 of 230", "65 of 6,298"])
     assert.ok(!shipped.includes(old), `withdrawn C claim still shipped: ${old}`);
   const yml = readFileSync(new URL("action.yml", root), "utf8");
-  for (const s of ["got a notice in 10%", "on the buggy hunk in 1.5%", "3.4% (277 of 8,049)"]) assert.ok(yml.includes(s), `action.yml C claim: ${s}`);
+  for (const s of ["got a notice in 10%", "on the buggy hunk in 1.5%", "3.4% (277 of 8,049)", "10% (22 of 214)", "1.8% (108 of 6,107)"]) assert.ok(yml.includes(s), `action.yml C claim: ${s}`);
   assert.equal(noticeHint([{ path: "a.c", newStart: 3, text: " x\n-if (n > cap) return -1;\n y" }], { path: "a.c", newStart: 3 }), "review the removed lines");
   assert.equal(noticeHint([{ path: "a.c", newStart: 3, text: " x\n+memcpy(buf, src, n);" }], { path: "a.c", newStart: 3 }), "review the added code");
 });
