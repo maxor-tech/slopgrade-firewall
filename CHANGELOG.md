@@ -5,6 +5,14 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.10.25] — 2026-10-15
+
+### Fixed
+- The C false-alarm figure was too low. A pre-registered check on a larger pool of fresh repos (heisen-slop
+  docs/55M-REAL-CVE.md §4.14, read once) found that **3.4% of 8,049 ordinary C commits** (277; 95% interval 3.1-3.9%)
+  get a notice, not 2.2% (8 of 356). The summary and `action.yml` now state 3.4%. Recall is unchanged (10% of 1,091
+  C advisories). A stricter C cutoff was tried and failed its pre-registered recall bar, so C is scored as before.
+
 ## [0.10.24] — 2026-10-14
 
 ### Changed

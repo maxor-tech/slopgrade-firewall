@@ -7,8 +7,9 @@
 // pointing at the buggy hunk in 3.9 % (0.10.17, pair with diff-v12: 17 % vs 1.9 %, 2.7 %; 0.10.16, one detector: 9 % vs 1.0 %, 0.7 %). The `p` of a notice is the
 // engine's calibrated score (each detector's cutoff at 0.5), not a probability. TRIAGE: notices, never blocking.
 // C (.c / .h, 0.10.21): the same union, measured at THIS cut (64 hunks) — pre-registered bar passed on val, held-out once
-// (heisen-slop docs/55M-REAL-CVE.md §4.10): 10.45 % of 1,091 real C CVE-introducing commits get a notice vs 2.25 % of
-// 356 ordinary C commits; on the buggy hunk 1.47 %. (0.10.19 sent C on a 400-hunk measurement and was withdrawn.)
+// (heisen-slop docs/55M-REAL-CVE.md §4.10): 10.45 % of 1,091 real C CVE-introducing commits get a notice; on the buggy
+// hunk 1.47 %. Ordinary C commits (0.10.25, §4.14, pre-registered, read once): 3.44 % of 8,049 of fresh repos — the
+// 2.25 % of 356 published before came from a small sample and understated the rate. (0.10.19 sent C on a 400-hunk measurement and was withdrawn.)
 // C++ (.cpp .cc .cxx .hpp .hh, 0.10.22): scored by the engine's C++-routed detector (diff-v17, §4.12), measured at THIS
 // cut — held-out once: 12.44 % of 217 unseen C++ advisories get a notice vs 1.92 % of 3,493 ordinary C++ commits of
 // fresh repos; on the buggy hunk 1.84 %.
@@ -41,10 +42,10 @@ export const RUST_REVIEW_NOTE = "  Rust (.rs, held-out, this 64-hunk cut): the c
 export const CPP_REVIEW_NOTE = "  C++ (.cpp/.cc/.cxx/.hpp/.hh, held-out, this 64-hunk cut): the commit that introduced the bug got a" +
   " notice in 12% of unseen C++ CVE advisories (27 of 217), on the buggy hunk in 1.8%; 1.9% (67 of 3,493) of ordinary" +
   " C++ commits got one. Most notices are false alarms, and no notice is not a clearance.";
-/** Held-out at this 64-hunk cut (heisen-slop docs/55M-REAL-CVE.md §4.10), counts with the rates; the 95 % interval of
- *  the ordinary-commit rate is 1.1-4.4 %. A notice is a PR-level flag: it lands on the buggy hunk in 1.5 % only. */
+/** Held-out at this 64-hunk cut (heisen-slop docs/55M-REAL-CVE.md §4.10, ordinary rate §4.14), counts with the rates;
+ *  the 95 % interval of the ordinary-commit rate is 3.1-3.9 %. A notice is a PR-level flag: it lands on the buggy hunk in 1.5 % only. */
 export const C_REVIEW_NOTE = "  C (.c/.h, held-out, this 64-hunk cut): the commit that introduced the bug got a notice in 10% of" +
-  " real C CVE advisories (114 of 1,091), on the buggy hunk in 1.5%; 2.2% (8 of 356) of ordinary C commits got one." +
+  " real C CVE advisories (114 of 1,091), on the buggy hunk in 1.5%; 3.4% (277 of 8,049) of ordinary C commits of fresh repos got one." +
   " Most notices are false alarms, and no notice is not a clearance. .h files are read as C.";
 
 /** The notice's advice, from the hunk it flags: removed lines to look at, or only added code. */
