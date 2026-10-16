@@ -5,6 +5,16 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.10.27] — 2026-10-16
+
+### Changed
+- C hunks are now scored by a **C-exclusive detector** (diff-v20) that REPLACES the served union on C, instead of the
+  union measured before (heisen-slop docs/55M-REAL-CVE.md §4.17, pre-registered, held-out read once; served as int8).
+  On **1,426 unseen real C CVE advisories** the commit that introduced the bug got a notice in **11.7%** (167), on the
+  buggy hunk in 2.1%; **2.3% of 8,196 ordinary C commits** of fresh repos got one (191; 95% interval 2.0-2.7%). This is
+  both higher recall and lower false alarm than the union it replaced (8.84% / 4.06%). The 0.10.21–0.10.25 union C
+  figures (10% of 1,091; 3.4% of 8,049) are superseded.
+
 ## [0.10.26] — 2026-10-15
 
 ### Changed
