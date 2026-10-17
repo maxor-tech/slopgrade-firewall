@@ -5,6 +5,17 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.10.28] — 2026-10-17
+
+### Changed
+- C hunks are now scored by **diff-v22**, which REPLACES diff-v20 on the C-exclusive route (heisen-slop
+  docs/55M-REAL-CVE.md §4.18, pre-registered, held-out read once; served as int8). v22 = the v21b recipe (PrimeVul
+  trusted-introducing positives + real-diff negatives) on a fresh held-out split. On ccr-heldout-c (0 training overlap)
+  real C CVE advisories: **18.2% get a notice (199 of 1,091), on the buggy hunk 3.4%**, vs 13.47% for diff-v20 on the
+  same set; **2.3% (185 of 8,196) of ordinary C commits** (diff-v20: 2.20%). Higher recall at essentially the same false
+  alarm; the int8 served model agrees with PyTorch on 99.49% of decisions at the cutoff. The 0.10.27 C figures (diff-v20,
+  11.7% / 2.33% on the 1,426-advisory set) are superseded.
+
 ## [0.10.27] — 2026-10-16
 
 ### Changed
