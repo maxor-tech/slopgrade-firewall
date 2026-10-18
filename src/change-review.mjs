@@ -10,9 +10,11 @@
 // — pre-registered, held-out read once (heisen-slop docs/55M-REAL-CVE.md §4.18), served as int8: 18.24 % of 1,091 unseen
 // real C CVE advisories get a notice; on the buggy hunk 3.39 %. Ordinary C commits: 2.26 % (185 of 8,196) of fresh repos
 // — higher recall than the diff-v20 it replaces (13.47 % / 2.20 %) at essentially the same false alarm. (0.10.19 sent C on a 400-hunk measurement and was withdrawn.)
-// C++ (.cpp .cc .cxx .hpp .hh, 0.10.22): scored by the engine's C++-routed detector (diff-v17, §4.12), measured at THIS
-// cut — held-out once: 12.44 % of 217 unseen C++ advisories get a notice vs 1.92 % of 3,493 ordinary C++ commits of
-// fresh repos; on the buggy hunk 1.84 %.
+// C++ (.cpp .cc .cxx .hpp .hh, 0.10.29): a C++-EXCLUSIVE detector (diff-v22, the same model as C at its own C++ cutoff)
+// REPLACES diff-v17 and the union on C++ hunks — pre-registered, held-out read once (heisen-slop docs/55M-REAL-CVE.md
+// §4.19), served as int8, at THIS cut: 11.32 % of 159 unseen C++ advisories (ccr-heldout-cpp) get a notice (diff-v17 on the
+// same set: 1.89 %); on the buggy hunk 1.89 %. Ordinary C++ commits: 1.81 % (48 of 2,652) of fresh repos. (0.10.22 stated
+// diff-v17 on a 217-advisory set: 12.44 % / 1.92 %; superseded.)
 // Rust (.rs, 0.10.23): the served union as it is (§4.13). 0.10.26: the engine adds a Rust-routed detector (diff-v19,
 // §4.16, pre-registered, read once) — 10.28 % of 214 unseen Rust advisories get a notice (the union alone: 1.87 % on the
 // same advisories) vs 1.77 % of 6,107 ordinary Rust commits of fresh repos; on the buggy hunk 2.34 %.
@@ -39,10 +41,10 @@ export const RUST_HUNK = /\.rs$/i;
 export const RUST_REVIEW_NOTE = "  Rust (.rs, held-out, this 64-hunk cut): the commit that introduced the bug got a notice in 10% of" +
   " unseen Rust CVE advisories (22 of 214), on the buggy hunk in 2.3%; 1.8% (108 of 6,107) of ordinary Rust commits got one." +
   " Most notices are false alarms, and no notice is not a clearance.";
-/** Held-out at this 64-hunk cut (heisen-slop docs/55M-REAL-CVE.md §4.12); 95 % interval of the ordinary rate 1.5-2.4 %. */
-export const CPP_REVIEW_NOTE = "  C++ (.cpp/.cc/.cxx/.hpp/.hh, held-out, this 64-hunk cut): the commit that introduced the bug got a" +
-  " notice in 12% of unseen C++ CVE advisories (27 of 217), on the buggy hunk in 1.8%; 1.9% (67 of 3,493) of ordinary" +
-  " C++ commits got one. Most notices are false alarms, and no notice is not a clearance.";
+/** Held-out at this 64-hunk cut (heisen-slop docs/55M-REAL-CVE.md §4.19), the C++-exclusive route (diff-v22); 95 % interval of the ordinary rate 1.37-2.39 %. */
+export const CPP_REVIEW_NOTE = "  C++ (.cpp/.cc/.cxx/.hpp/.hh, held-out, this 64-hunk cut, a C++-only detector): the commit that introduced the bug got a" +
+  " notice in 11.3% of unseen C++ CVE advisories (18 of 159), on the buggy hunk in 1.9%; 1.8% (48 of 2,652) of ordinary" +
+  " C++ commits of fresh repos got one. Most notices are false alarms, and no notice is not a clearance.";
 /** Held-out at this 64-hunk cut (heisen-slop docs/55M-REAL-CVE.md §4.18), the C-exclusive route (diff-v22), counts with
  *  the rates; the 95 % interval of the ordinary-commit rate is 1.96-2.60 %. A notice is a PR-level flag: it lands on the buggy hunk in 3.4 % only. */
 export const C_REVIEW_NOTE = "  C (.c/.h, held-out, this 64-hunk cut, a C-only detector): the commit that introduced the bug got a notice in 18.2% of" +
