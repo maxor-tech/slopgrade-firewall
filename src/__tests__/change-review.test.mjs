@@ -155,18 +155,18 @@ test("C claims: the 0.10.28 exclusive-route numbers are stated with counts, no w
   const { C_REVIEW_NOTE, noticeHint } = await import("../change-review.mjs");
   for (const s of ["199 of 1,091", "on the buggy hunk in 3.4%", "2.3% (185 of 8,196)", "no notice is not a clearance", ".h files are read as C"])
     assert.ok(C_REVIEW_NOTE.includes(s), s);
-  const { CPP_REVIEW_NOTE } = await import("../change-review.mjs");   // C++ (0.10.22, §4.12), stated with counts too
-  for (const s of ["27 of 217", "on the buggy hunk in 1.8%", "67 of 3,493", "no notice is not a clearance"])
+  const { CPP_REVIEW_NOTE } = await import("../change-review.mjs");   // C++ (0.10.29: diff-v22 exclusive, §4.19), stated with counts too
+  for (const s of ["18 of 159", "on the buggy hunk in 1.9%", "48 of 2,652", "no notice is not a clearance"])
     assert.ok(CPP_REVIEW_NOTE.includes(s), s);
   const { RUST_REVIEW_NOTE } = await import("../change-review.mjs");   // Rust (0.10.26: + the Rust route, §4.16)
   for (const s of ["22 of 214", "on the buggy hunk in 2.3%", "108 of 6,107", "no notice is not a clearance"])
     assert.ok(RUST_REVIEW_NOTE.includes(s), s);
   const root = new URL("../../", import.meta.url);
   const shipped = ["action.yml", "isolation-gate.mjs", "src/change-review.mjs"].map((f) => readFileSync(new URL(f, root), "utf8")).join("\n");
-  for (const old of ["10.7 %", "10.7%", "1,669", "1.60 %", "1.60%", "11% of the C commits", "1.6% of ordinary C", "8 of 356", "19 of 230", "65 of 6,298", "114 of 1,091", "277 of 8,049", "167 of 1,426", "191 of 8,196", "got a notice in 11.7%"])
+  for (const old of ["10.7 %", "10.7%", "1,669", "1.60 %", "1.60%", "11% of the C commits", "1.6% of ordinary C", "8 of 356", "19 of 230", "65 of 6,298", "114 of 1,091", "277 of 8,049", "167 of 1,426", "191 of 8,196", "got a notice in 11.7%", "27 of 217", "67 of 3,493", "12% of unseen C++"])
     assert.ok(!shipped.includes(old), `superseded C claim still shipped: ${old}`);
   const yml = readFileSync(new URL("action.yml", root), "utf8");
-  for (const s of ["got a notice in 18.2%", "on the buggy hunk in 3.4%", "2.3% (185 of 8,196)", "10% (22 of 214)", "1.8% (108 of 6,107)"]) assert.ok(yml.includes(s), `action.yml C claim: ${s}`);
+  for (const s of ["got a notice in 18.2%", "on the buggy hunk in 3.4%", "2.3% (185 of 8,196)", "10% (22 of 214)", "1.8% (108 of 6,107)", "11.3% (18 of 159)", "1.8% (48 of 2,652)"]) assert.ok(yml.includes(s), `action.yml C claim: ${s}`);
   assert.equal(noticeHint([{ path: "a.c", newStart: 3, text: " x\n-if (n > cap) return -1;\n y" }], { path: "a.c", newStart: 3 }), "review the removed lines");
   assert.equal(noticeHint([{ path: "a.c", newStart: 3, text: " x\n+memcpy(buf, src, n);" }], { path: "a.c", newStart: 3 }), "review the added code");
 });

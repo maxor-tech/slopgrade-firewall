@@ -5,6 +5,15 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.10.29] — 2026-10-18
+
+### Changed
+- C++ hunks are now scored by **diff-v22** on a C++-EXCLUSIVE route (the same model as C, at its own C++ cutoff
+  0.94041), which REPLACES diff-v17 and the union on C++ hunks (heisen-slop docs/55M-REAL-CVE.md §4.19, pre-registered,
+  held-out read once; served as int8). On ccr-heldout-cpp real C++ CVE advisories: **11.3% get a notice (18 of 159), on
+  the buggy hunk 1.9%**, vs 1.9% (3 of 159) for diff-v17 on the same set; **1.8% (48 of 2,652) of ordinary C++ commits**
+  of fresh repos. The 0.10.22 C++ figures (diff-v17, 12% / 1.9% on a 217-advisory set) are superseded.
+
 ## [0.10.28] — 2026-10-17
 
 ### Changed
