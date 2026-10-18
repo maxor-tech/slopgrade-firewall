@@ -5,6 +5,15 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.10.30] — 2026-10-18
+
+### Changed
+- C note figures RE-MEASURED on the int8 SERVED model (deployed engine b421f19), replacing the §4.18 PyTorch
+  numbers that shipped under "served as int8". On ccr-heldout-c (0 training overlap): **17.3% get a notice (189 of
+  1,091), on the buggy hunk 3.3%** (PyTorch read 18.24% / 199), and **2.2% (180 of 8,196) of ordinary C commits**
+  (PyTorch 2.26% / 185). The alarm is within noise; recall is ~0.9 pt lower on the served int8 than the PyTorch read.
+  An honesty fix: the shipped number now matches the model the client actually hits. Copy + version + tests only.
+
 ## [0.10.29] — 2026-10-18
 
 ### Changed

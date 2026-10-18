@@ -6,10 +6,10 @@
 // that REALLY introduced 5,468 CVEs (SZZ, windows cut since 0.10.16), 19 % of commits flagged vs 2.1 % of ordinary ones,
 // pointing at the buggy hunk in 3.9 % (0.10.17, pair with diff-v12: 17 % vs 1.9 %, 2.7 %; 0.10.16, one detector: 9 % vs 1.0 %, 0.7 %). The `p` of a notice is the
 // engine's calibrated score (each detector's cutoff at 0.5), not a probability. TRIAGE: notices, never blocking.
-// C (.c / .h, 0.10.28): a C-EXCLUSIVE detector (diff-v22) REPLACES the union on C hunks, measured at THIS cut (64 hunks)
-// — pre-registered, held-out read once (heisen-slop docs/55M-REAL-CVE.md §4.18), served as int8: 18.24 % of 1,091 unseen
-// real C CVE advisories get a notice; on the buggy hunk 3.39 %. Ordinary C commits: 2.26 % (185 of 8,196) of fresh repos
-// — higher recall than the diff-v20 it replaces (13.47 % / 2.20 %) at essentially the same false alarm. (0.10.19 sent C on a 400-hunk measurement and was withdrawn.)
+// C (.c / .h, 0.10.30): a C-EXCLUSIVE detector (diff-v22) REPLACES the union on C hunks, measured at THIS cut (64 hunks)
+// — pre-registered, held-out read once (heisen-slop docs/55M-REAL-CVE.md §4.18), served as int8: 17.33 % of 1,091 unseen
+// real C CVE advisories get a notice; on the buggy hunk 3.30 %. Ordinary C commits: 2.20 % (180 of 8,196) of fresh repos
+// — higher recall than the diff-v20 it replaces (13.47 % / 2.20 %) at essentially the same false alarm. These are the int8 SERVED model, re-measured LIVE on the deployed engine 2026-10-18 (the §4.18 PyTorch read was ~0.9 pt higher on recall: 18.24 % / 199). (0.10.19 sent C on a 400-hunk measurement and was withdrawn.)
 // C++ (.cpp .cc .cxx .hpp .hh, 0.10.29): a C++-EXCLUSIVE detector (diff-v22, the same model as C at its own C++ cutoff)
 // REPLACES diff-v17 and the union on C++ hunks — pre-registered, held-out read once (heisen-slop docs/55M-REAL-CVE.md
 // §4.19), served as int8, at THIS cut: 11.32 % of 159 unseen C++ advisories (ccr-heldout-cpp) get a notice (diff-v17 on the
@@ -47,8 +47,8 @@ export const CPP_REVIEW_NOTE = "  C++ (.cpp/.cc/.cxx/.hpp/.hh, held-out, this 64
   " C++ commits of fresh repos got one. Most notices are false alarms, and no notice is not a clearance.";
 /** Held-out at this 64-hunk cut (heisen-slop docs/55M-REAL-CVE.md §4.18), the C-exclusive route (diff-v22), counts with
  *  the rates; the 95 % interval of the ordinary-commit rate is 1.96-2.60 %. A notice is a PR-level flag: it lands on the buggy hunk in 3.4 % only. */
-export const C_REVIEW_NOTE = "  C (.c/.h, held-out, this 64-hunk cut, a C-only detector): the commit that introduced the bug got a notice in 18.2% of" +
-  " real C CVE advisories (199 of 1,091), on the buggy hunk in 3.4%; 2.3% (185 of 8,196) of ordinary C commits of fresh repos got one." +
+export const C_REVIEW_NOTE = "  C (.c/.h, held-out, this 64-hunk cut, a C-only detector): the commit that introduced the bug got a notice in 17.3% of" +
+  " real C CVE advisories (189 of 1,091), on the buggy hunk in 3.3%; 2.2% (180 of 8,196) of ordinary C commits of fresh repos got one." +
   " Most notices are false alarms, and no notice is not a clearance. .h files are read as C.";
 
 /** The notice's advice, from the hunk it flags: removed lines to look at, or only added code. */
