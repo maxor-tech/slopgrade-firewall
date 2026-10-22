@@ -200,3 +200,16 @@ test("PHP units reach the deep scan, and the PHP markers never make an ordinary 
     "const label = 'include files';\nexport default label;\n",
   ]) assert.equal(hasSinkMarker(code), false, code);
 });
+
+// 0.10.31 — the deep-scan-block real-CVE figure is the one measured on the deployed engine (heisen-slop 7840066,
+// held-out split, 25 of 32), stated as a floor ; the withdrawn 69–73% (2026-09-27) never ships again.
+test("deep-scan-block claim: every surface states >=78% (25 of 32) and no withdrawn 69-73% figure", () => {
+  const read = (p) => readFileSync(new URL(`../../${p}`, import.meta.url), "utf8");
+  for (const p of ["README.md", "action.yml", "isolation-gate.mjs"]) {
+    const s = read(p);
+    assert.doesNotMatch(s, /69\s*[–-]\s*73/, p);
+    assert.match(s, /78%/, p);
+  }
+  assert.match(read("README.md"), /25 of 32/);
+  assert.match(read("action.yml"), /25 of 32/);
+});

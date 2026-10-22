@@ -168,10 +168,10 @@ shell=True)`). It is the **only** mode in which file contents leave your runner,
   fail the check. Set `deep-scan-block: "true"` (with `firewall-mode: gate`) to make a **new** deep-scan finding — one no
   detector pack reported — **fail the check**. What that costs depends on the code, so here are both numbers:
   on labeled **benchmark** code the engine was not tuned on, its blocks are right **68 of 72 (~94%)**; on **real-world
-  CVE code** (GitHub advisories, the vulnerable and the fixed version of the same file — 49 blocks adjudicated one by
-  one, 2026-09-27) they are right **69–73%** of the time — roughly **one false block in three to four**. Most false blocks
-  come from a project's own validation function (`validateId(x)`, `isPathAllowed(x)`) that the engine does not
-  recognise. That is why it is off by default: enable it where a false block is cheaper than a missed flow. A finding on a line another pack already reported is counted as a confirmation, not annotated or
+  CVE code** (GitHub advisories, the vulnerable and the fixed version of the same file — held-out split, 2026-10-22)
+  they are right **at least 78% (25 of 32)** — roughly **one false block in four to five**. That is a floor: every block on
+  the fixed version counts as false, even where a real flow remains after the fix. Most false blocks come from a project's
+  own validation function (`validateId(x)`, `isPathAllowed(x)`) that the engine does not recognise. That is why it is off by default: enable it where a false block is cheaper than a missed flow. A finding on a line another pack already reported is counted as a confirmation, not annotated or
   counted twice. Any failure (timeout, 5xx, malformed answer) is a warning — the verdict is never affected.
 - **Library mode — opt-in, packages only** (`library-mode: "true"`, client ≥ 0.10.6). For a repo that is a **published
   package**, the attack surface is its callers, so the engine can also report **library-tier candidates**: a public
