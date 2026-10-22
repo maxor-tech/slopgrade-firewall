@@ -5,6 +5,14 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.10.31] — 2026-10-22
+
+### Changed
+- `deep-scan-block` real-CVE block precision RE-MEASURED on the deployed engine (heisen-slop 7840066): **at least 78%
+  (25 of 32 blocks) on the held-out GitHub-advisory split**, was 69–73%. Two engine rules turn a known false block into
+  an abstention (Go `http.ServeFile` of the request's own URL path ; a Python statement call to a validator). The figure
+  is a floor : every block on the fixed file counts as false. Benchmark precision (~94%) unchanged. Copy + version only.
+
 ## [0.10.30] — 2026-10-18
 
 ### Changed
