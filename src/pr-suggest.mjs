@@ -274,14 +274,16 @@ const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
  * The PR review body, led by what THIS PR introduced — not by the repo's whole backlog. PURE.
  * `classified` = classifyAgainstDiff output ; `gateMode` = the check blocks at all ; `origin` = the /ci link base.
  */
-export function diffSummaryMarkdown(classified, { origin = "https://app.slopgrade.ai", gateMode = false, cap = 10, wholeRepo = false } = {}) {
+export function diffSummaryMarkdown(classified, { origin = "https://app.slopgrade.ai", gateMode = false, cap = 10, wholeRepo = false, offer = null } = {}) {
   const rows = Array.isArray(classified) ? classified : [];
   const by = (s) => rows.filter((f) => f.scope === s);
   const introduced = by("introduced"), touched = by("touched"), debt = by("debt");
   const blockingNew = introduced.filter(isBlockingSev).length;
   const out = ["## 🛡 slopGrade Firewall", ""];
   if (introduced.length) {
-    out.push(`### This PR introduces ${plural(introduced.length, "finding")}${blockingNew ? ` · ${blockingNew} blocking` : ""}`, "");
+    // On a repo with no blocking gate (an offer is present) the count is a SEVERITY, not a block : « 1 blocking » above
+    // « Not blocking » read as a contradiction (0.11.0 walk).
+    out.push(`### This PR introduces ${plural(introduced.length, "finding")}${blockingNew ? ` · ${blockingNew} ${offer ? "critical/high" : "blocking"}` : ""}`, "");
     out.push(...introduced.slice(0, cap).map(rowLine));
     if (introduced.length > cap) out.push(`- _…and ${introduced.length - cap} more (inline on the diff + in the Security tab)_`);
   } else {
@@ -295,7 +297,11 @@ export function diffSummaryMarkdown(classified, { origin = "https://app.slopgrad
   if (debt.length) {
     out.push("", `**Existing debt elsewhere in the repo** — ${plural(debt.length, "finding")} this PR did not cause. [Review and burn it down →](${origin}/ci)`);
   }
-  out.push("", gateMode && wholeRepo
+  // `offer` (client-lib advisoryOfferOf — already validated + plain text, links on the server's origin) : this repo has
+  // no blocking gate, so « the gate blocks … » would be false even in gate mode ; say why and who acts instead.
+  out.push("", offer
+    ? `**Not blocking —** ${offer.text} ${offer.actions.map((a) => `[${a.label} →](${a.url})`).join(" · ")}`
+    : gateMode && wholeRepo
     ? "<sub>The gate is temporarily judging the whole repo on this run — pre-existing critical/high findings can block it.</sub>"
     : gateMode
     ? "<sub>The gate blocks only on critical/high findings this PR introduces — pre-existing debt is reported, never blocks your PR.</sub>"

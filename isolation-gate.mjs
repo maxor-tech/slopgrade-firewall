@@ -57,6 +57,7 @@ import {
   parseLeak, leakText, findingLocation, buildSarif, collectPackBlocks, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
   validProBundleResponse, verifyBundleSig, PRO_BUNDLE_PUBKEY, runProPacks, sanitizeProFingerprints, FREE_PACK_COUNT, MAX_SARIF_RESULTS, MAX_PRO_BUNDLE_BYTES,
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs, refusalLine,
+  advisoryOfferOf, offerLogLine,
 } from "./src/client-lib.mjs";
 import { sinkFiles, prChangedPaths, prChangedRanges, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, CANDIDATES_RANKED_NOTE, heisenFeed, splitAgainstFeed, isPaidVerdict, deepScanNudge } from "./src/deep-scan.mjs";
 import { prHunks, validChangeReview, C_HUNK, C_REVIEW_NOTE, CPP_HUNK, CPP_REVIEW_NOTE, RUST_HUNK, RUST_REVIEW_NOTE, noticeHint, unreviewedNote } from "./src/change-review.mjs";
@@ -378,6 +379,9 @@ export async function main(argv = [], env = process.env) {
   const v = await postVerdict(origin, body);
   if (v === null) return noVerdict();
   if (!validVerdict(v)) { ghWarn("malformed verdict from server — treating as no verdict."); return noVerdict(); }
+  // 0.11.0 — the server says WHY an advisory private repo does not block and who acts (a Team member asks the owner ;
+  // a free account sees the Team plan). Validated once (links only on `origin`) ; null on an older server.
+  const offer = advisoryOfferOf(v, origin);
 
   // F1 (2026-09-14) — SILENT DOWNGRADE guard. loadProPacks returns silently (" (free tier)") on a 402, which is correct
   // for a genuinely-free repo. But if the server's verdict says this repo IS entitled (`gateEntitled`) while the pro
@@ -540,7 +544,7 @@ export async function main(argv = [], env = process.env) {
     const deps = { readEvent, log: (m) => line(m), warn: (m) => ghWarn(m), diff: prDiff };
     const blocking = feed.filter((f) => f.severity === "high" || f.severity === "critical").length;
     const summary = classified
-      ? diffSummaryMarkdown(classified, { origin, gateMode, wholeRepo: gateScopeOf(v) === "repo" })
+      ? diffSummaryMarkdown(classified, { origin, gateMode, wholeRepo: gateScopeOf(v) === "repo", offer })
       : `## 🛡 slopGrade Firewall\n\n**${blocking}** blocking (critical/high) · ${feed.length - blocking} advisory · ${feed.length} finding(s) located.\n\nBlocking findings fail the check when the gate is enabled on this repo. See all findings + enable the gate: ${origin}/ci`;
     const review = await postFindingReview(env, feed, summary, deps);
     if (review.review !== "skipped" || review.comments) line(`\nslopGrade Firewall — ${review.comments} finding(s) inline in ONE PR review (${review.review}) — one notification, not one per finding.`);
@@ -606,7 +610,7 @@ export async function main(argv = [], env = process.env) {
   try {
     const blobBase = githubBlobBase(env, (prCtx && prCtx.headSha) || env.GITHUB_SHA || null);
     const scope = classified ? { introduced: classified.filter((f) => f.scope === "introduced").length, blocking: gateHard + gatePack + gateDeep, preexistingBlocking: scoped.preexistingBlocking } : null;
-    emitStepSummary(env, stepSummaryMarkdown(v, { origin, blobBase, decision: decision.kind, scope }), appendFileSync);
+    emitStepSummary(env, stepSummaryMarkdown(v, { origin, blobBase, decision: decision.kind, scope, offer }), appendFileSync);
   } catch (e) { ghWarn(`step summary skipped (${errMsg(e)}).`); }
   const ofPr = scoped ? " introduced by this PR" : "";
   if (decision.kind === "gate-blocked") {
@@ -621,10 +625,11 @@ export async function main(argv = [], env = process.env) {
     line(`\nslopGrade Firewall: ${scoped.preexistingBlocking} pre-existing blocking finding(s) this PR did not introduce — reported, not blocking (the gate blocks only what a PR adds). Burn the debt down: ${origin}/ci`);
   }
   if (decision.kind === "gate-unpaid") {
-    line(`\nslopGrade Firewall: ${v.hardLeaks} hard leak(s) found, but this repo is ADVISORY (no paid gate) — non-blocking. Enable the gate to block (from $24/repo/mo, graduated down to $11 · Team $299/mo unlimited · 14-day free trial, no card): ${origin}/ci`);
+    // No price in the client (0.11.0) : the server's offer says why and who acts ; an older server gets a plain link.
+    line(`\nslopGrade Firewall: ${v.hardLeaks} hard leak(s) found, but this repo is ADVISORY — non-blocking. ${offer ? offerLogLine(offer) : `Enable the gate to block: ${origin}/ci`}`);
     return 0;
   }
-  line(`\nslopGrade Firewall: ${gateMode ? "no blocking hard leaks." : "advisory (non-blocking)."}`);
+  line(`\nslopGrade Firewall: ${gateMode ? "no blocking hard leaks." : "advisory (non-blocking)."}${offer ? ` ${offerLogLine(offer)}` : ""}`);
   return 0;
 }
 
