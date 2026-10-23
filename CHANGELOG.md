@@ -5,6 +5,15 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.11.1] — 2026-10-23
+
+### Changed
+- README ready to be the GitHub Marketplace listing: what the Action catches and what is free come first, then a
+  9-line **Quick start** pinned to the current release (it replaced a `<sha>` placeholder that failed on copy-paste).
+  The full option block follows. A test fails any release whose Quick start does not pin `package.json`'s version.
+- The README's link to slopgrade.ai pricing carries UTM tags (`utm_source=github&utm_medium=readme`), so traffic from
+  the listing is attributable without a tracking pixel. No code change.
+
 ## [0.11.0] — 2026-10-23
 
 ### Added

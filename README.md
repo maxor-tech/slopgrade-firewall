@@ -6,7 +6,35 @@ runner** — only a structural fingerprint (table/column names + `{file, line, k
 classification. The one exception is the opt-in [`deep-scan`](#deep-scan--opt-in-paid-the-one-mode-that-sends-code)
 (off unless you turn it on). This repository is the exact code that runs in your runner: **audit every line before you pin it.**
 
-## Add it to your repo
+**What it catches in a pull request, before it merges:** cross-tenant data access (a query that forgets the tenant
+filter), SQL and command injection, SSRF, XSS, path traversal and secrets in code — the 10 open-source classes
+(22 detector packs) on JS/TS and Python; Go and .NET cover six of them.
+
+- **Free where it matters first.** It blocks on public repos and on your first private repo. Other private repos get
+  the full report and are never blocked; the [Team plan](https://www.slopgrade.ai/pricing?utm_source=github&utm_medium=readme&utm_campaign=firewall-action) blocks on 50 of them.
+- **Your code stays on your runner.** Only a structural fingerprint is sent. Print it with `--print-payload`.
+- **No secret to store.** GitHub's OIDC token proves which repo is calling.
+- **Only what the pull request adds can block it.** Existing findings are reported, never block the PR.
+
+## Quick start
+
+```yaml
+# .github/workflows/slop-gate.yml
+name: slop-gate
+on: { pull_request: {} }
+jobs:
+  slop:
+    runs-on: ubuntu-latest
+    permissions: { contents: read, id-token: write, pull-requests: write }
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: maxor-tech/slopgrade-firewall@v0.11.1
+```
+
+`id-token: write` is required (it is how the repo proves itself). `pull-requests: write` posts the findings on the PR.
+
+## Add it to your repo (all options)
 
 ```yaml
 # .github/workflows/slop-gate.yml
