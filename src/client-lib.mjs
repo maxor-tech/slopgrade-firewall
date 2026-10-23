@@ -4,7 +4,7 @@ import { gzipSync } from "node:zlib"; // builtin, pure (no I/O) — for the Code
 import { verify as edVerify, createPublicKey } from "node:crypto"; // builtin — Ed25519 verify of the pro-bundle signature.
 
 export const DEFAULT_ORIGIN = "https://app.slopgrade.ai";
-export const CLIENT_VERSION = "0.10.31"; // keep in lock-step with package.json (pinned by client-lib.test.mjs)
+export const CLIENT_VERSION = "0.11.0"; // keep in lock-step with package.json (pinned by client-lib.test.mjs)
 export const FINGERPRINT_VERSION = 1;
 export const MAX_PAYLOAD_BYTES = 8 * 1024 * 1024; // 8MB hard cap on the POST body (clear error, not an opaque 413)
 /** The pro-extractor bundle a PAID repo receives from /api/ci/pro-extractors — bounded like every other input. */
@@ -458,13 +458,53 @@ function fileLink(blobBase, file, lineNo) {
   return blobBase ? `[\`${disp}\`](${blobBase}/${file}#L${n})` : `\`${disp}\``;
 }
 
+// ── The ADVISORY OFFER (server 2026-10-23, client 0.11.0) — why a private repo does not block, and the reader's next
+//    step, said by the server from its one price list. Before, this client hard-coded « not blocking on the free tier »
+//    and per-repo prices the pricing retired, and told a Team MEMBER (who cannot buy) to « enable the gate ». ──
+
+/** Network text rendered into markdown and the log : one line, no markdown / HTML metacharacters. Pure. */
+const offerPlain = (s) => String(s).replace(/[\r\n]+/g, " ").replace(/[`*_[\]<>|\\]/g, "").trim();
+
+/**
+ * The server's `offer` from a verdict, validated — or null (absent, older server, or any malformed part : never a
+ * half-rendered offer). Links must be absolute on `origin` (the server the client called) : a verdict can never point
+ * a reader to another host. Pure.
+ * @returns {{ reason: "team-pool-full"|"free-limit", text: string, actions: { label: string, url: string }[] } | null}
+ */
+export function advisoryOfferOf(v, origin = DEFAULT_ORIGIN) {
+  const o = v && v.offer;
+  if (!o || typeof o !== "object") return null;
+  if (o.reason !== "team-pool-full" && o.reason !== "free-limit") return null;
+  if (typeof o.text !== "string" || !o.text.trim() || o.text.length > 300) return null;
+  if (!Array.isArray(o.actions) || o.actions.length < 1 || o.actions.length > 3) return null;
+  const base = String(origin).replace(/\/+$/, "") + "/";
+  const actions = [];
+  for (const a of o.actions) {
+    if (!a || typeof a.label !== "string" || typeof a.url !== "string") return null;
+    if (!a.label.trim() || a.label.length > 80 || a.url.length > 200) return null;
+    if (!a.url.startsWith(base) || /[\s()<>"'`\\]/.test(a.url)) return null;
+    actions.push({ label: offerPlain(a.label), url: a.url });
+  }
+  return { reason: o.reason, text: offerPlain(o.text), actions };
+}
+
+/** The offer as markdown links (« [label →](url) · … »). Pure. */
+export function offerLinksMarkdown(offer) {
+  return offer.actions.map((a) => `**[${a.label} →](${a.url})**`).join(" · ");
+}
+
+/** The offer as one log line (« text label: url · … »). Pure. */
+export function offerLogLine(offer) {
+  return `${offer.text} ${offer.actions.map((a) => `${a.label}: ${a.url}`).join(" · ")}`;
+}
+
 /**
  * The GitHub Step Summary markdown for a firewall verdict `v` — a scannable, clickable report on the run page:
  * verdict banner + pattern/conformance + cross-tenant leaks (clickable file:line) + per-pack finding counts
  * (data-driven via collectPackBlocks, so a pack the server adds tomorrow renders today) + the "see all / enable"
  * CTA. Pure. `decision` is the firewallVerdict kind (gate-blocked | gate-unpaid | pass).
  */
-export function stepSummaryMarkdown(v, { origin = DEFAULT_ORIGIN, blobBase = null, decision = "pass", scope = null } = {}) {
+export function stepSummaryMarkdown(v, { origin = DEFAULT_ORIGIN, blobBase = null, decision = "pass", scope = null, offer = null } = {}) {
   const hard = Number(v && v.hardLeaks) || 0;
   const packBlocking = Number(v && v.packBlocking) || 0;
   const head = "## 🛡️ slopGrade Firewall — tenant isolation";
@@ -477,7 +517,7 @@ export function stepSummaryMarkdown(v, { origin = DEFAULT_ORIGIN, blobBase = nul
       ? `### ❌ Blocked — ${sBlocking} blocking finding${sBlocking === 1 ? "" : "s"} introduced by this PR`
       : `### ❌ Blocked — ${hard} hard cross-tenant leak${hard === 1 ? "" : "s"}${packBlocking > 0 ? ` · ${packBlocking} blocking finding${packBlocking === 1 ? "" : "s"}` : ""}`)
     : decision === "gate-unpaid"
-      ? `### ⚠️ Advisory — ${hard} hard leak${hard === 1 ? "" : "s"} found, not blocking on the free tier`
+      ? `### ⚠️ Advisory — ${hard} hard leak${hard === 1 ? "" : "s"} found, not blocking ${offer && offer.reason === "team-pool-full" ? "(this repo is outside your Team pool)" : "(no blocking gate on this repo)"}`
       : hard > 0
         ? `### ⚠️ Advisory — ${hard} leak${hard === 1 ? "" : "s"} (this pattern can't be gated reliably)`
         : "### ✅ Clean — no blocking cross-tenant leaks";
@@ -494,7 +534,10 @@ export function stepSummaryMarkdown(v, { origin = DEFAULT_ORIGIN, blobBase = nul
   const packLines = collectPackBlocks(v)
     .map(({ label, block }) => `- **${label}** — ${block.count} finding${Number(block.count) === 1 ? "" : "s"}${Number(block.hidden) > 0 ? ` (+${block.hidden} hidden)` : ""}`);
   const packs = packLines.length ? "\n\n" + packLines.join("\n") : "";
-  const cta = decision === "gate-unpaid"
+  // The offer (when the server sent one) replaces the generic CTA : it says WHY and WHO acts (a member asks the owner).
+  const cta = offer
+    ? `\n\n> **Not blocking —** ${offer.text}\n>\n> ${offerLinksMarkdown(offer)}\n\n<sub><a href="${origin}/ci">See all findings</a></sub>`
+    : decision === "gate-unpaid"
     ? `\n\n> **[Enable the gate on this repo →](${origin}/ci)** to block these before they merge.`
     : `\n\n<sub><a href="${origin}/ci">See all findings · manage the gate</a></sub>`;
   return `${head}\n\n${verdict}\n\n${facts}${leakTable}${packs}${cta}\n`;

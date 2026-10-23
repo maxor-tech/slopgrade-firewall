@@ -32,7 +32,8 @@ test("stepSummaryMarkdown — blocked: red banner, facts, clickable leaks, pack 
 test("stepSummaryMarkdown — advisory (unpaid): amber banner + enable-the-gate CTA", () => {
   const md = stepSummaryMarkdown({ pattern: "orm", tenantKey: null, conformancePct: null, hardLeaks: 3, byId: 0, leaks: ["a.ts:1  unscoped read"] },
     { origin: "https://app.slopgrade.ai", blobBase: null, decision: "gate-unpaid" });
-  assert.match(md, /### ⚠️ Advisory — 3 hard leaks found, not blocking on the free tier/);
+  assert.match(md, /### ⚠️ Advisory — 3 hard leaks found, not blocking \(no blocking gate on this repo\)/);
+  assert.doesNotMatch(md, /free tier|\$\d/, "0.11.0 : no plan name or price is hard-coded in the client");
   assert.match(md, /\*\*Conformance\*\* n\/a/);
   assert.match(md, /\[Enable the gate on this repo →\]\(https:\/\/app\.slopgrade\.ai\/ci\)/);
   assert.match(md, /\| `a\.ts:1` \|/); // no blobBase → plain code, not a link

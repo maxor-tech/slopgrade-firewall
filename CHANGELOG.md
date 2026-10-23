@@ -5,6 +5,24 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-10-23
+
+### Added
+- **Advisory offer.** When a private repo runs advisory, the server now says **why** it does not block and **who acts**
+  (`offer` in the verdict). The run summary, the PR comment footer and the log render it:
+  - a **Team member** whose repo is outside the Team pool gets « Ask your Team owner to cover this repo » (the owner
+    gets « cover it from your pool »);
+  - an account on the free plan gets the Team plan.
+  The offer is validated before rendering: known reason, bounded sizes, links only on the origin the client called,
+  markdown/HTML metacharacters stripped. An older server sends no offer → the previous generic link.
+
+### Fixed
+- The client no longer hard-codes prices. The advisory log line quoted retired per-repo prices ("from $24/repo/mo …");
+  the summary banner said "not blocking on the free tier" even for a Team member's repo. The README pricing section now
+  states the current plans (Team $299/mo flat for 50 private repos, then $4 / $3 per extra repo; Enterprise).
+- In gate mode, the PR comment no longer says "the gate blocks only on critical/high findings this PR introduces" on a
+  repo that has no blocking gate.
+
 ## [0.10.31] — 2026-10-22
 
 ### Changed
