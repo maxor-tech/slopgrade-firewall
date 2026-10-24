@@ -63,8 +63,31 @@ function maskLiterals(l) {
   });
 }
 
+// A BARE quoted `"rc4"` / `"rc2"` is ambiguous: a cipher name, OR a pre-release tag (net-ssh `PRE = "rc4"`, a
+// `"alpha", "beta", "rc1", "rc2", "snapshot"` list). Benchmark 2026-10-24 (P8): both blocked wrongly. A hit that
+// exists ONLY through the bare literal is dropped when the context is a version token: a version file, a
+// `PRE`/`prerelease`/`version` assignment, or the literal sitting in a list beside alpha/beta/snapshot/rcN.
+// A hit with a real API context (ARC4.new, Cipher.getInstance("RC4"), createCipheriv('rc4'), rc4.NewCipher) keeps firing.
+// RC_STRONG = the same rule WITHOUT its trailing bare-literal alternative (an API / constructor / createCipher context).
+const RC_STRONG = Object.fromEntries(HIGH.filter(([k]) => k === "rc4-cipher" || k === "rc2-cipher").map(([k, re]) => {
+  const src = re.source.replace(/\|\['"\](?:\(\?:rc4\|arcfour\)|rc2)\['"\]$/, "");
+  if (src === re.source) throw new Error("crypto-extract: RC bare alternative not found for " + k);
+  return [k, new RegExp(src, re.flags)];
+}));
+const VERSION_FILE = /(?:^|[\/])(?:[\w.-]*[._-])?versions?(?:[._-][\w.-]*)?\.[a-z]+$|__version__/i;
+const VERSION_ASSIGN = /(?:^|[^\w])(?:pre|prerelease|pre_release|release_?(?:tag|type|level|stage)|version)\s*(?::=|=>|[:=])/i;
+const VERSION_SIBLING = /^(?:alpha|beta|snapshot|preview|canary|nightly|dev|rc(?!2$|4$)\d+)$/i;
+function isVersionToken(lines, i, file) {
+  if (file && VERSION_FILE.test(String(file))) return true;
+  if (VERSION_ASSIGN.test(lines[i])) return true;
+  for (let j = Math.max(0, i - 3); j <= Math.min(lines.length - 1, i + 3); j++) {
+    for (const m of lines[j].matchAll(/['"]([A-Za-z][\w.-]{1,12})['"]/g)) if (VERSION_SIBLING.test(m[1])) return true;
+  }
+  return false;
+}
+
 /** Scan one file → [{line, kind, high, secCtx}]. Source line NEVER leaves this function. */
-export function extractCrypto(text) {
+export function extractCrypto(text, file) {
   const out = [];
   const lines = String(text).split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
@@ -74,7 +97,10 @@ export function extractCrypto(text) {
     if (isImport(l)) continue;       // an import/using line names a crypto type, it does not use it
     const code = maskLiterals(l);    // prose / compared string literals blanked (HIGH tier only)
     for (const [kind, re] of HIGH) {
-      if (re.test(code)) out.push({ line: i + 1, kind, high: true, secCtx: true });
+      if (!re.test(code)) continue;
+      const strong = RC_STRONG[kind];
+      if (strong && !strong.test(code) && isVersionToken(lines, i, file)) continue;   // P8: release tag, not a cipher
+      out.push({ line: i + 1, kind, high: true, secCtx: true });
     }
     for (const [kind, re] of HASH) {
       if (!re.test(l)) continue;
@@ -89,5 +115,5 @@ export function extractCrypto(text) {
 
 /** The weak-crypto fingerprint for one file — locations + kinds + tier flags, no source. */
 export function extractCryptoFingerprint(text, file) {
-  return { file, hits: extractCrypto(text) };
+  return { file, hits: extractCrypto(text, file) };
 }

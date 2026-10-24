@@ -169,7 +169,8 @@ export const STRONG_TAINT_SINK = /\b(?:os\.system|subprocess|child_process|execS
 // Dev-only locations (examples, scripts, tests, fixtures, benchmarks, docs). Never excluded — a flaw there is real — but
 // inside a tier they go AFTER production code: on Ghost the 40 slots went to release/bench scripts while
 // core/frontend/src/admin-auth/message-handler.js (6 SSRF) and web/middleware/admin-toolbar.js (open redirect) were cut.
-export const DEV_PATH = /(?:^|\/)(?:examples?|samples?|demos?|scripts?|tools?|bench(?:marks?)?|tests?|__tests__|spec|specs|e2e|fixtures?|mocks?|docs?|stories)(?:\/|$)|\.(?:test|spec|stories)\.[cm]?[jt]sx?$|(?:^|\/)test_[^/]*\.py$|_test\.(?:go|py)$/i;
+// Sample-dir segments (*-examples, example-*, tutorials, courses, labs, workshops) mirror SAMPLE_DIR_SRC in extract.mjs.
+export const DEV_PATH = /(?:^|\/)(?:examples?|samples?|demos?|[^/]*[-_](?:examples?|samples?|demos?)|examples?[-_][^/]*|tutorials?|courses|labs|workshops?|scripts?|tools?|bench(?:marks?)?|tests?|__tests__|spec|specs|e2e|fixtures?|mocks?|docs?|stories)(?:\/|$)|\.(?:test|spec|stories)\.[cm]?[jt]sx?$|(?:^|\/)test_[^/]*\.py$|_test\.(?:go|py)$/i;
 
 /** How many weakness families a source carries — a tie-breaker: a file touching more families goes first. */
 function familyCount(code) {

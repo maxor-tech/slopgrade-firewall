@@ -1,0 +1,47 @@
+// P8 (benchmark 2026-10-24): a bare "rc4"/"rc2" literal that is a release tag is not a cipher. Real cipher uses still fire.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { extractCrypto, extractCryptoFingerprint } from "../crypto-extract.mjs";
+
+const kinds = (src, file) => extractCrypto(src, file).map((h) => h.kind);
+
+test("net-ssh style PRE = \"rc4\" is a version token, not RC4", () => {
+  assert.deepEqual(kinds('module Net; module SSH; class Version\n  PRE = "rc4"\nend; end; end'), []);
+  assert.deepEqual(kinds("pre = 'rc2'"), []);
+  assert.deepEqual(kinds('  PRERELEASE = "rc4"'), []);
+  assert.deepEqual(kinds('const version = "rc2"'), []);
+});
+
+test("a release-stage list beside alpha/beta/rc1/snapshot is not RC2", () => {
+  const go = 'var stages = []string{\n  "alpha", "beta", "rc1", "rc2", "snapshot",\n}';
+  assert.deepEqual(kinds(go), []);
+  assert.deepEqual(kinds('  "alpha",\n  "beta",\n  "rc2",\n  "rc3",'), []);
+});
+
+test("a version file never reports a bare rc token", () => {
+  assert.deepEqual(extractCryptoFingerprint('X = "rc4"', "lib/net/ssh/version.rb").hits, []);
+  assert.deepEqual(extractCryptoFingerprint('x := "rc2"', "pkg/gen/libnamegenerator/version.go").hits, []);
+});
+
+test("real RC4 / RC2 cipher uses keep firing", () => {
+  const rc4 = [
+    "c = ARC4.new(key)",
+    'Cipher c = Cipher.getInstance("RC4");',
+    "crypto.createCipheriv('rc4', key, iv)",
+    "c, _ := rc4.NewCipher(key)",
+    "x = new RC4(key)",
+    "$c = OpenSSL::Cipher.new('rc4')",
+  ];
+  for (const s of rc4) assert.deepEqual(kinds(s), ["rc4-cipher"], s);
+  assert.deepEqual(kinds('Cipher.getInstance("RC2/CBC/PKCS5Padding")'), ["rc2-cipher"]);
+  assert.deepEqual(kinds("crypto.createCipheriv('rc2', k, iv)"), ["rc2-cipher"]);
+});
+
+test("a bare cipher-name literal with no version context still fires, even in a version-named assignment elsewhere", () => {
+  assert.deepEqual(kinds('const opts = { algorithm: "rc4" }'), ["rc4-cipher"]);
+  assert.deepEqual(kinds('ciphers = ["rc2", "rc4"]'), ["rc4-cipher", "rc2-cipher"]);   // two ciphers, no release-stage sibling
+  assert.deepEqual(kinds('  "rc4",\n  "arcfour",'), ["rc4-cipher", "rc4-cipher"]);
+  assert.deepEqual(kinds("crypto.createCipheriv('rc4', key, iv) // version = 1"), ["rc4-cipher"]);
+  // a real use stays real even inside a version-named file (API context beats the filename)
+  assert.deepEqual(extractCryptoFingerprint("c = ARC4.new(key)", "lib/version.py").hits.map((h) => h.kind), ["rc4-cipher"]);
+});
