@@ -3,10 +3,22 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [0.11.2] — 2026-10-24
+
+Fixes found by replaying the client on 52,577 real open-source pull requests (benchmark 2026-10-24).
+
+### Fixed
+- Sample, tutorial and lab directories are no longer scanned : `*-examples`, `*-samples`, `*-demo(s)`, `example(s)-*`,
+  `tutorial(s)`, `courses`, `labs`, `workshop(s)` are excluded from the walk (matched relative to the repo root, so a
+  repository itself named `acme-demo` is still scanned) and ranked last for Deep Scan.
+- `weakCrypto` no longer reports a release tag as a cipher : a bare `"rc4"` / `"rc2"` literal in a version file, a
+  `PRE` / `prerelease` / `version` assignment or a list of pre-release tags is not a hit. Real RC4 / RC2 cipher calls
+  still fire.
+- Cross-tenant « RLS not enabled » findings now carry the file and line of the table definition (`rls.loc` in the
+  fingerprint, bounded by the sanitizer), so a pull request is charged only for the tables it touches.
 
 ### Changed
-- Copy: `deep-scan-block` precision now states the pull-request figure next to the real-CVE floor (≥78%, 25 of 32): on 52,577 ordinary open-source pull requests it blocked 259, 46 of them for a real flaw (benchmark 2026-10-24). No behavior change.
+- Copy: `deep-scan-block` precision now states the pull-request figure next to the real-CVE floor (≥78%, 25 of 32): on 52,577 ordinary open-source pull requests it blocked 259, 46 of them for a real flaw. No behavior change.
 
 ## [0.11.1] — 2026-10-23
 
