@@ -142,6 +142,29 @@ export function refusalLine(status, body) {
 // extractor, so a future extractor bug can never let a source-bearing value ride through tableCols/rls untouched.
 const ident = (x) => String(x).replace(/[ --]/g, "").slice(0, 200);
 
+// rls.loc = { table: { file, line } }  the table's definition site, so an rls leak can be scoped to the PR that touches it
+// (P9). Untrusted at this boundary: d 200 entries, table/file d 300 chars, line a positive integer, file a repo-relative
+// path (no leading slash, no drive letter, no ".." segment, no control chars). A hostile entry is DROPPED, never repaired.
+const LOC_MAX = 200, LOC_STR_MAX = 300;
+function sanitizeLoc(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  let n = 0;
+  for (const [k, v] of Object.entries(raw)) {
+    if (n >= LOC_MAX) break;
+    if (k === "__proto__" || k.length > LOC_STR_MAX || !v || typeof v !== "object") continue;
+    const file = v.file, line = v.line;
+    if (typeof file !== "string" || !file || file.length > LOC_STR_MAX) continue;
+    if (/^[\\/]|^[A-Za-z]:|[\x00-\x1f\x7f]/.test(file) || file.split(/[\\/]/).includes("..")) continue;
+    if (!Number.isInteger(line) || line < 1) continue;
+    const t = ident(k);
+    if (!t) continue;
+    out[t] = { file, line };
+    n++;
+  }
+  return out;
+}
+
 export function sanitizeFingerprint(fp) {
   const s = fp?.signals ?? {};
   const q = Array.isArray(fp?.queries) ? fp.queries : [];
@@ -164,6 +187,7 @@ export function sanitizeFingerprint(fp) {
       // table read as a gate #1 hard leak on the free tier.
       granted: (Array.isArray(fp?.rls?.granted) ? fp.rls.granted : []).map(ident),
       revoked: (Array.isArray(fp?.rls?.revoked) ? fp.rls.revoked : []).map(ident),
+      loc: sanitizeLoc(fp?.rls?.loc),
     },
     queries: q.map((x) => ({
       kind: x.kind, table: x.table, verb: x.verb, method: x.method,

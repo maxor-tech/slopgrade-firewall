@@ -11,23 +11,34 @@ import { readdirSync, lstatSync } from "node:fs";
 // product's own surface, and scanning it makes the client fingerprint its own regex sources (release-audit B-P3-2).
 const DEFAULT_EXCL = /(node_modules|\/vendor\/|\/dist\/|\/build\/|\.min\.|\.venv|__pycache__|\/\.git\/|\.next|\.(test|spec|stories)\.[a-z]+$|_(test|spec)\.[a-z]+$|[._-](examples?|samples?)\.[a-z]+$|(^|\/)(tests?|specs?|__tests__|__mocks__|e2e|fixtures?|mocks?|testdata|examples?|samples?|demos?|sandbox|playground|cookbook)\/|(^|\/)test_[^/]*\.py$|(^|\/)conftest\.py$)/i;
 
+// Sample / tutorial / course / lab directory SEGMENTS beyond the plain `examples/` above (benchmark 2026-10-24, P4: 98 of
+// 233 wrong static PR findings were sample code — spring-cloud-alibaba-examples/, aws-doc-sdk-examples, tutorials).
+// Whole segments only, word-bounded by - or _ : *-examples, *-samples, *-demo(s), example-*, tutorial(s), courses,
+// labs, workshop(s). Product names (exampleservice, sampler, demographics, labstore, samplesheet) do NOT match.
+// SECURITY TRADE-OFF: a PR can move code into such a directory to evade the gate. The list is kept to names that are
+// conventionally non-product, it is matched on the path RELATIVE to the walk root (a repo that is itself called
+// acme-demo is still scanned), and it has the same exposure as the existing examples/ and demos/ entries.
+// The same segments are mirrored in DEV_PATH (deep-scan.mjs) for Deep Scan ordering — keep both in sync.
+export const SAMPLE_DIR_SRC = String.raw`(?:[^/]*[-_](?:examples?|samples?|demos?)|examples?[-_][^/]*|tutorials?|courses|labs|workshops?)`;
+const SAMPLE_DIR_EXCL = new RegExp("(?:^|/)" + SAMPLE_DIR_SRC + "/", "i");
+
 const MAX_DEPTH = 40;      // bound recursion (defense against pathological trees)
 const MAX_FILES = 200_000; // bound total collected files (DoS ceiling)
 
 // Collects candidate files. Uses lstatSync and SKIPS symlinks: a symlink cycle (self -> .) would otherwise recurse
 // unbounded (RangeError) and a symlink out of the tree (link -> /) would fingerprint paths from outside the repo.
 // Depth- and count-capped. `depth` is internal.
-export function walk(dir, exts, excl = DEFAULT_EXCL, out = [], depth = 0) {
+export function walk(dir, exts, excl = DEFAULT_EXCL, out = [], depth = 0, rootLen = dir.length) {
   if (depth > MAX_DEPTH || out.length >= MAX_FILES) return out;
   let entries;
   try { entries = readdirSync(dir); } catch { return out; }
   for (const e of entries) {
     if (out.length >= MAX_FILES) break;
     const p = `${dir}/${e}`;
-    if (excl.test(p)) continue;
+    if (excl.test(p) || (excl === DEFAULT_EXCL && SAMPLE_DIR_EXCL.test(p.slice(rootLen)))) continue;
     let s; try { s = lstatSync(p); } catch { continue; }
     if (s.isSymbolicLink()) continue;              // never follow symlinks (cycle + out-of-tree guard)
-    if (s.isDirectory()) walk(p, exts, excl, out, depth + 1);
+    if (s.isDirectory()) walk(p, exts, excl, out, depth + 1, rootLen);
     else if (s.isFile() && exts.test(p)) out.push(p);
   }
   return out;
