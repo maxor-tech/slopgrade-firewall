@@ -5,6 +5,9 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+### Changed
+- Copy: `deep-scan-block` precision now states the pull-request figure next to the real-CVE floor (≥78%, 25 of 32): on 52,577 ordinary open-source pull requests it blocked 259, 46 of them for a real flaw (benchmark 2026-10-24). No behavior change.
+
 ## [0.11.1] — 2026-10-23
 
 ### Changed
