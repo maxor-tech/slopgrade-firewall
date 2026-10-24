@@ -77,9 +77,13 @@ const RC_STRONG = Object.fromEntries(HIGH.filter(([k]) => k === "rc4-cipher" || 
 const VERSION_FILE = /(?:^|[\/])(?:[\w.-]*[._-])?versions?(?:[._-][\w.-]*)?\.[a-z]+$|__version__/i;
 const VERSION_ASSIGN = /(?:^|[^\w])(?:pre|prerelease|pre_release|release_?(?:tag|type|level|stage)|version)\s*(?::=|=>|[:=])/i;
 const VERSION_SIBLING = /^(?:alpha|beta|snapshot|preview|canary|nightly|dev|rc(?!2$|4$)\d+)$/i;
-function isVersionToken(lines, i, file) {
+// An IMPORT-PATH TABLE maps a package path to its name (dave/jennifer `"crypto/rc4": "rc4",` — benchmark 2026-10-24,
+// dev split): the bare literal is the package NAME of `crypto/rc4`, not a cipher selection.
+const IMPORT_PATH_KEY = /["'][\w.\/-]*\/(?:rc4|rc2)["']\s*:/i;
+function isNotACipherName(lines, i, file) {
   if (file && VERSION_FILE.test(String(file))) return true;
   if (VERSION_ASSIGN.test(lines[i])) return true;
+  if (IMPORT_PATH_KEY.test(lines[i])) return true;
   for (let j = Math.max(0, i - 3); j <= Math.min(lines.length - 1, i + 3); j++) {
     for (const m of lines[j].matchAll(/['"]([A-Za-z][\w.-]{1,12})['"]/g)) if (VERSION_SIBLING.test(m[1])) return true;
   }
@@ -99,7 +103,7 @@ export function extractCrypto(text, file) {
     for (const [kind, re] of HIGH) {
       if (!re.test(code)) continue;
       const strong = RC_STRONG[kind];
-      if (strong && !strong.test(code) && isVersionToken(lines, i, file)) continue;   // P8: release tag, not a cipher
+      if (strong && !strong.test(code) && isNotACipherName(lines, i, file)) continue;   // P8: release tag or package name, not a cipher
       out.push({ line: i + 1, kind, high: true, secCtx: true });
     }
     for (const [kind, re] of HASH) {

@@ -37,6 +37,14 @@ test("real RC4 / RC2 cipher uses keep firing", () => {
   assert.deepEqual(kinds("crypto.createCipheriv('rc2', k, iv)"), ["rc2-cipher"]);
 });
 
+test("an import-path table naming the rc4 / rc2 package is not a cipher (benchmark 2026-10-24, dev split)", () => {
+  assert.deepEqual(kinds('var hints = map[string]string{\n\t"crypto/rc4":                         "rc4",\n}'), []);
+  assert.deepEqual(kinds("  'golang.org/x/crypto/rc2': 'rc2',"), []);
+  // failure pre-conditions : an API use on such a line, or a config key that is not an import path, still fires
+  assert.deepEqual(kinds('\t"crypto/rc4": rc4.NewCipher,'), ["rc4-cipher"]);
+  assert.deepEqual(kinds('{ "cipher": "rc4", "key": k }'), ["rc4-cipher"]);
+});
+
 test("a bare cipher-name literal with no version context still fires, even in a version-named assignment elsewhere", () => {
   assert.deepEqual(kinds('const opts = { algorithm: "rc4" }'), ["rc4-cipher"]);
   assert.deepEqual(kinds('ciphers = ["rc2", "rc4"]'), ["rc4-cipher", "rc2-cipher"]);   // two ciphers, no release-stage sibling
