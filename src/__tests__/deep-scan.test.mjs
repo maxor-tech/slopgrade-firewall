@@ -212,4 +212,11 @@ test("deep-scan-block claim: every surface states >=78% (25 of 32) and no withdr
   }
   assert.match(read("README.md"), /25 of 32/);
   assert.match(read("action.yml"), /25 of 32/);
+  // 2026-10-24 benchmark: the CVE floor must ride with the PR figure, and no surface may claim zero false positives.
+  for (const p of ["README.md", "action.yml", "isolation-gate.mjs", ".github/workflows/slop-gate.yml"]) {
+    const s = read(p);
+    assert.match(s, /52,577 ordinary open-source pull requests it blocked 259, 46 of them for a real flaw/, p);
+    assert.doesNotMatch(s, /zero[- ]false[- ]positive|zero FP|0 false positives|false-positive sweep/i, p);
+    assert.doesNotMatch(s, /1 false block in 3-4/, p);
+  }
 });

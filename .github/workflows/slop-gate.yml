@@ -22,5 +22,5 @@ jobs:
           # (free: the cross-tenant gate + the open-source classes block; a paid repo adds the calibrated pro classes, every finding at file:line — see slopGrade /pricing). advisory = reports, never blocks.
           firewall-mode: gate
           # deep-scan: "true"   # OPT-IN (paid repos): sends the source of the files that hold a sink to the hosted taint engine (cross-function flows). The only mode that sends code — see the Action README.
-          # deep-scan-block: "true"   # with deep-scan + gate: a NEW deep-scan finding (no pack saw it) fails the check. ~1 false block in 3-4 measured on real CVEs — off by default.
+          # deep-scan-block: "true"   # with deep-scan + gate: a NEW deep-scan finding (no pack saw it) fails the check. On real CVEs its blocks are right at least 3 times in 4; on 52,577 ordinary open-source pull requests it blocked 259, 46 of them for a real flaw — off by default.
           # library-mode: "true"   # with deep-scan, published PACKAGE repos only: lists the library-tier candidates (public function parameter → sink) as "to triage" notices. Never blocking; ~2 in 3 remain after the fix.
