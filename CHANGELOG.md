@@ -30,6 +30,16 @@ Fixes found by replaying the client on 52,577 real open-source pull requests (be
 ### Changed
 - Copy: `deep-scan-block` precision now states the pull-request figure next to the real-CVE floor (≥78%, 25 of 32): on 52,577 ordinary open-source pull requests it blocked 259, 46 of them for a real flaw. No behavior change.
 
+### Added
+- **Repository purpose.** A deterministic, local classifier (`src/repo-purpose.mjs`, `repoPurpose()`) tells product repos from
+  teaching / lab / CTF / offensive-tool repos. With `--gate`, a non-product repo gets its **pack and Deep Scan blocks as
+  advisory warnings**, with the reason and the override printed in the log. Cross-tenant hard leaks still block. Motivation
+  (52,577 replayed PRs): tutorials, courses, deliberately vulnerable labs, CTFs and webshell corpora were 185 of 233 wrong
+  static PR blocks and 365 of 581 non-true-positive Deep Scan findings.
+  - Signals: README title / first paragraph, manifest description + keywords, top-level directory names, repository name.
+  - A pull request reads all of it from the **base branch**, so it cannot reclassify its own repo.
+  - Override: `purpose: product` in `.slopgrade.yml` (also read from the base branch). Opt-in: `SLOPGRADE_PURPOSE_CLASSIFIER=on` (default off while it is calibrated).
+
 ## [0.11.1] — 2026-10-23
 
 ### Changed
