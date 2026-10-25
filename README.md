@@ -29,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: maxor-tech/slopgrade-firewall@v0.11.2
+      - uses: maxor-tech/slopgrade-firewall@v0.11.3
 ```
 
 `id-token: write` is required (it is how the repo proves itself). `pull-requests: write` posts the findings on the PR.
