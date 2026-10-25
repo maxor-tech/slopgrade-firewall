@@ -190,7 +190,7 @@ Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <p
   --library-mode   OPT-IN, with --deep-scan, PACKAGE repos only: also list library-tier candidates (a public function's
                    parameter reaching a sink) as notices to triage - never findings, never blocking.
                    Block precision: ~94% on benchmark code, ≥78% on real-world CVE code (~1 false block in 4-5);
-                   on 52,577 ordinary open-source pull requests it blocked 259, 46 of them for a real flaw — off by default.
+                   on 52,089 ordinary open-source pull requests it blocked 245, 46 of them for a real flaw — off by default.
   --change-review  OPT-IN, with --deep-scan, pull requests only: ALSO send the PR's diff hunks (changed lines + 3 lines of
                    context, ≤ 64) to the diff-reading 55M, which lists the changes likely to WEAKEN security (a removed
                    check). Notices to triage, never blocking. Held-out: 36% of security fixes undone caught at 0.23% false alarms

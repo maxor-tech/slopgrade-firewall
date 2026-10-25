@@ -3,6 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { prSentence, loadFigures } from "../../scripts/sync-pr-figures.mjs";
 import {
   sinkFiles, selectDeepUnits, hasSinkMarker, prChangedPaths, validHeisenResponse, evidenceLine, heisenFeed, requestDeepScan, splitAgainstFeed, deepScanNudge, isPaidVerdict,
   DEEP_MAX_UNITS, DEEP_MAX_UNIT_CHARS, DEEP_MAX_TOTAL_CHARS,
@@ -215,7 +216,8 @@ test("deep-scan-block claim: every surface states >=78% (25 of 32) and no withdr
   // 2026-10-24 benchmark: the CVE floor must ride with the PR figure, and no surface may claim zero false positives.
   for (const p of ["README.md", "action.yml", "isolation-gate.mjs", ".github/workflows/slop-gate.yml"]) {
     const s = read(p);
-    assert.match(s, /52,577 ordinary open-source pull requests it blocked 259, 46 of them for a real flaw/, p);
+    // generated from benchmark-figures.json (scripts/sync-pr-figures.mjs), never typed
+    assert.ok(s.includes(prSentence(loadFigures())), `${p}: the PR-replay sentence matches benchmark-figures.json`);
     assert.doesNotMatch(s, /zero[- ]false[- ]positive|zero FP|0 false positives|false-positive sweep/i, p);
     assert.doesNotMatch(s, /1 false block in 3-4/, p);
   }

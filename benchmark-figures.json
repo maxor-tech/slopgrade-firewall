@@ -1,0 +1,10 @@
+{
+  "note": "PR-replay benchmark figures quoted by README.md, action.yml, isolation-gate.mjs and .github/workflows/slop-gate.yml. Copied from the slopgrade harness export (bench/pr-replay, figures.py) ; apply with `node scripts/sync-pr-figures.mjs`. Never edit the sentences by hand.",
+  "measured": "2026-10-24",
+  "run": "run2",
+  "heads": "app 916c0b03 · OSS b46aaf0 · engine f56dcba",
+  "labels": 1025,
+  "kappa": 0.933,
+  "deep": { "replayedPrs": 52089, "blockedPrs": 245, "justified": 46 },
+  "static": { "replayedPrs": 52089, "blockedPrs": 59, "justified": 11 }
+}
