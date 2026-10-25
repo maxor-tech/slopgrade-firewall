@@ -40,7 +40,9 @@ const DIRECT_PATTERNS = [
   // per-quote as well : `find_by_sql("… name = '#{params[:name]}'")` embeds the other quote before the #{} (same trap).
   ["interp-sql", new RegExp(`\\b(?:${SINK}|where|find_by_sql)\\s*\\(\\s*(?:"[^"]*#\\{[^}]*(?:${REQ})|'[^']*#\\{[^}]*(?:${REQ})|\`[^\`]*\\$\\{[^}]*(?:${REQ}))`)],
   ["concat-sql", new RegExp(`\\b(?:${SINK})\\s*\\(\\s*[^;]*${SQL_LIT}\\s*(?:\\+|\\.|%)\\s*[^;]*(?:${REQ})`)],
-  ["php-inline-sql", new RegExp(`\\b(?:mysqli_query|mysql_query|pg_query|pg_exec|->\\s*query|->\\s*exec(?:ute)?)\\s*\\([^;]*["'][^"']*\\$_(?:GET|POST|REQUEST|COOKIE)`)],
+  // `->execute([...])` / `->execute(array(...))` binds VALUES to a prepared statement — never SQL text (benchmark
+  // 2026-10-24, dev split : `$stmt->execute([$type, $U['nickname'], $_POST['text']])` matched through the closing quote).
+  ["php-inline-sql", new RegExp(`\\b(?:mysqli_query|mysql_query|pg_query|pg_exec|->\\s*query|->\\s*exec(?:ute)?(?!\\s*\\(\\s*(?:\\[|array\\s*\\()))\\s*\\([^;]*["'][^"']*\\$_(?:GET|POST|REQUEST|COOKIE)`)],
   // Java (JDBC Statement + JPA/Hibernate) — a SQL/JPQL string concatenated with an HttpServletRequest accessor at a
   // query sink. The base concat-sql above covers Python/Node/PHP/Ruby sources only; Java's request.getParameter /
   // getHeader and the createQuery/createNativeQuery (JPA/Hibernate) + executeQuery/executeUpdate (JDBC) sinks are
