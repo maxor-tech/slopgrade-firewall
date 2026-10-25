@@ -3,6 +3,16 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.11.3] — 2026-10-25
+
+Two false-block shapes found on the 52,577-PR benchmark (dev split), fixed in the same code as the hosted copies.
+
+### Fixed
+- `weakCrypto` no longer reads an import-path table as a cipher : a bare `"rc4"` / `"rc2"` whose key is an import path
+  (`"crypto/rc4": "rc4"`) is a package name. Real RC4 / RC2 cipher calls still fire.
+- `sqli` no longer flags PHP `->execute([...])` / `->execute(array(...))` : the values are bound to a prepared
+  statement. Inline SQL built from request data still fires.
+
 ## [0.11.2] — 2026-10-24
 
 Fixes found by replaying the client on 52,577 real open-source pull requests (benchmark 2026-10-24).
