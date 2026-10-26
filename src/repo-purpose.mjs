@@ -57,6 +57,9 @@ const OFFENSIVE = [
   T("exploit/PoC", BOUNDARY("exploits?|pocs?|rce\\s+exp"), 1, 1),
   T("brute-forcer", BOUNDARY("brute[\\s-]?forc(?:e|er|ers|ing)\\s+(?:tool|tools|script|scripts)|password\\s+(?:guessing|cracking)|mass[\\s-]scann(?:er|ing)|reverse\\s+shells?"), 2, 2),
   T("Chinese offensive", plain("渗透|红队|免杀|漏洞利用|提权|后渗透|冰蝎|蚁剑|哥斯拉|反弹shell|内存马|内网扫描"), 2, 2),
+  // v2 (dev labels) : recon / scanning tools — the rubric puts « an offensive or security tool » under DESIGN
+  // (VHostScan « a virtual host scanner », Argus « Information Gathering and Reconnaissance »).
+  T("security scanner", BOUNDARY("reconnaissance|information\\s+gathering|osint|subdomain\\s+(?:enumeration|finder|scanner|takeover)|(?:vulnerability|port|vhost|virtual\\s+host|directory|subdomain)\\s+scanners?|security\\s+testing\\s+(?:resources|tools?|toolkit|collection)"), 2, 2),
 ];
 
 const TEACHING = [
@@ -71,7 +74,15 @@ const TEACHING = [
   T("lectures", BOUNDARY("lectures?|syllabus|udemy|coursera"), 2, 1),
   T("learning material", BOUNDARY("beginners?|step[\\s-]by[\\s-]step|interview|appunti|apuntes|materiale|materiales|study\\s+plan"), 1, 1),
   T("Chinese teaching", plain("教程|课程|讲堂|教学|作业|习题|培训|面试题|面试宝典|学习笔记|学习资料|学习路线|自学|入门到"), 2, 1),
-  T("examples", BOUNDARY("examples?|samples?"), 1, 0),
+  // v2 (2026-10-25, dev labels only) : a title that NAMES the repo as examples / samples / a demo is one strong signal
+  // (« Spring Boot Code Examples », « Smart Home sample using Node.js », « Copilot Studio Samples ») ; in the first
+  // paragraph the bare word stays weight 0 — products link « see the examples ».
+  T("examples", BOUNDARY("examples?|samples?|demos?|code\\s+samples"), 2, 0),
+  // the README states it outright : « This sample contains … », « The files in this repository are examples »
+  T("states sample", BOUNDARY("this\\s+(?:sample|example|demo)\\s+(?:contains|shows|demonstrates|is|app|application|project|repo|repository)|this\\s+(?:repo|repository|project)\\s+(?:contains|is|has|provides|hosts|collects)\\s+(?:a\\s+|an\\s+|the\\s+|some\\s+)?(?:collection\\s+of\\s+)?(?:samples?|examples?|demos?|tutorials?|course\\s+materials?)|(?:files|code)\\s+in\\s+this\\s+repo(?:sitory)?\\s+(?:are|is)\\s+(?:examples?|samples?|demos?)"), 0, 2),
+  // written for a course or a degree : « built as course project in DBMS subject, B.Tech » (rubric : coursework = TEST)
+  T("academic project", BOUNDARY("(?:course|college|university|school|semester|academic|final[\\s-]year|capstone|graduation|degree|b\\.?\\s?tech|bachelor'?s?|master'?s?)\\s+projects?|projects?\\s+for\\s+(?:my|our|the)\\s+(?:course|class|college|university|degree)|dbms\\s+(?:project|subject)"), 2, 2),
+  T("zero to hero", BOUNDARY("zero[\\s-]to[\\s-]hero"), 2, 1),
 ];
 
 const SECURITY_CUE = /(?<![\p{L}\p{N}])(?:vulnerab\w*|exploit\w*|hack\w*|pentest\w*|attack\w*|injection|xss|sqli|csrf|rce)(?![\p{L}\p{N}])|靶场|漏洞/iu;
@@ -80,11 +91,14 @@ const LAB_WORD = BOUNDARY("labs?");
 // Repository-name tokens (a weak, corroborating signal ; the name is visible in the log and cannot be a verdict alone).
 const NAME_LAB = BOUNDARY("ctf|labs?|dvwa|dvwp|dvws|vulnerable|vulnlab|wargame|webgoat|pwn|badtodo|vuln");
 const NAME_OFF = BOUNDARY("exploits?|payloads|webshells?|pentest|redteam|pocs?|rce");
-const NAME_TEACH = BOUNDARY("course|courses|curso|tutorial|tutorials|lessons?|learn|learning|bootcamp|workshop|exercises|cheatsheet|assignments|homework|interview");
+// v2 : examples / samples / demo / study / zero-to-hero (dev labels : spring-boot-examples, chrome-plugin-demo,
+// spring-cloud-study, Jenkins-Zero-To-Hero). Not « training » : ML training frameworks are products.
+const NAME_TEACH = BOUNDARY("course|courses|curso|tutorial|tutorials|lessons?|learn|learning|bootcamp|workshop|exercises|cheatsheet|assignments|homework|interview|examples?|samples?|demos?|study|studies|zero[\\s-]to[\\s-]hero");
 
 // Top-level directory names.
 const DIR_NUMBERED_COURSE = /^(?:week|lesson|lecture|chapter|chap|ch|day|module|unit|session|class|exercise|assignment|hw|homework|tp|section|part|step|episode|level|lab)[-_ .]?\d+/i;
 const DIR_NUMBER_PREFIX = /^\d{1,2}[-_. ][\p{L}]/u;
+const DIR_PRODUCT_PART = /(?:^|[-_. ])(?:sdks?|api|apis|app|apps|platform|server|services?|backend|frontend|web[-_ ]?app|deploy(?:ment)?)(?:$|[-_. ])/i;
 const DIR_TEACH = /^(?:exercises?|assignments?|homework|lessons?|tutorials?|workshops?|courses?|chapters?|appunti|solutions?)$/i;
 const DIR_LAB = /^(?:challenges?|ctf|vulns?|vulnerabilities|wargames?)$/i;
 const DIR_OFF = /^(?:payloads|webshells?|exploits?|pocs?|shells?)$/i;
@@ -160,7 +174,8 @@ export function repoPurpose(read, dirs = () => [], meta = {}) {
   const man = manifestText(read);
   let top = [];
   try { top = (dirs() || []).filter((d) => typeof d === "string" && !d.startsWith(".")).map((d) => d.replace(/^[_-]+/, "")); } catch { top = []; }
-  const name = String(meta.name || "").split(/[/\\]|__/).pop();
+  // camelCase is split so a word boundary can see it (« eCommerceCourse » → « e Commerce Course »)
+  const name = String(meta.name || "").split(/[/\\]|__/).pop().replace(/([a-z\d])([A-Z])/g, "$1 $2");
 
   const sig = { lab: [], offensive: [], teaching: [] };
   const sets = { lab: LAB, offensive: OFFENSIVE, teaching: TEACHING };
@@ -175,7 +190,10 @@ export function repoPurpose(read, dirs = () => [], meta = {}) {
   const numbered = top.filter((d) => DIR_NUMBERED_COURSE.test(d));
   if (numbered.length >= 3) sig.teaching.push({ key: "dirs:numbered", w: 2, why: `numbered lesson directories (${numbered.slice(0, 3).join(", ")}…)` });
   const prefixed = top.filter((d) => DIR_NUMBER_PREFIX.test(d));
-  if (prefixed.length >= 4) sig.teaching.push({ key: "dirs:prefixed", w: prefixed.length >= 6 ? 2 : 1, why: `numbered topic directories (${prefixed.slice(0, 3).join(", ")}…)` });
+  // v2 : numbered directories that name software components (« 1_sdks », « 3_api_platform », « 4_web_app ») are a
+  // product layout, not lessons (dev labels : AIAS, a deployed AI platform, lost 2 right blocks to this signal).
+  const productLayout = prefixed.filter((d) => DIR_PRODUCT_PART.test(d)).length >= 2;
+  if (prefixed.length >= 4 && !productLayout) sig.teaching.push({ key: "dirs:prefixed", w: prefixed.length >= 6 ? 2 : 1, why: `numbered topic directories (${prefixed.slice(0, 3).join(", ")}…)` });
   const teachDirs = top.filter((d) => DIR_TEACH.test(d));
   if (teachDirs.length) sig.teaching.push({ key: "dirs:teach", w: teachDirs.length >= 3 ? 2 : 1, why: `directories ${teachDirs.slice(0, 3).join(", ")}` });
   const labDirs = top.filter((d) => DIR_LAB.test(d));

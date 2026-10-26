@@ -272,3 +272,40 @@ test("e2e (real git) : a PR cannot reclassify its own repo, and a non-product BA
   assert.match(b.text, /findings are advisory/);
 });
 
+
+// ── v2 (2026-10-25, tuned on DEV labels only ; held-out measured once) ─────────────────────────────────────────────
+test("v2: a coursework project is teaching on one strong phrase ; a product that only mentions a course stays product", () => {
+  assert.equal(classify({ "README.md": "# railway-system\n\nRailway Management System website built as course project in DBMS subject, B.Tech. Uses SQL and PHP.\n" }).purpose, "teaching");
+  assert.equal(classify({ "README.md": "# Thesis Tool\n\nMy final year project : a booking website.\n" }).purpose, "teaching");
+  assert.equal(classify({ "README.md": "# Acme LMS\n\nAcme is a learning platform where teachers publish courses for their students.\n" }).purpose, "product", "an LMS product talks about courses and students");
+});
+
+test("v2: a title that names the repo as samples / examples / a demo is teaching ; a product linking its examples is not", () => {
+  for (const t of ["Spring Boot Code Examples", "Smart Home sample using Node.js", "Microsoft Copilot Studio Samples"]) {
+    assert.equal(classify({ "README.md": `# ${t}\n\nSome text.\n` }).purpose, "teaching", t);
+  }
+  assert.equal(classify({ "README.md": "# Acme Router\n\nA fast HTTP router. See the examples folder and the demo site.\n" }).purpose, "product");
+});
+
+test("v2: a README that states it is a sample is teaching (first paragraph, strong)", () => {
+  assert.equal(classify({ "README.md": "# Acme SSO\n\nThe files in this repository are examples and not guaranteed to run.\n" }).purpose, "teaching");
+  assert.equal(classify({ "README.md": "# Home provider\n\nThis sample contains a fully functioning example of a cloud service.\n" }).purpose, "teaching");
+  assert.equal(classify({ "README.md": "# Acme CLI\n\nIn this example config we set the port to 8080.\n" }).purpose, "product", "a config example is not a sample repo");
+});
+
+test("v2: repo-name tokens (examples, demo, study, zero-to-hero, camelCase Course) corroborate, never decide alone", () => {
+  assert.equal(classify({}, [], "acme__spring-boot-examples").purpose, "product", "a name alone stays weak");
+  assert.equal(classify({ "README.md": "# Master Spring\n\nLearn Spring with our Udemy course videos.\n" }, [], "acme__spring-boot-examples").purpose, "teaching");
+  assert.equal(classify({ "README.md": "# Shop\n\nAn online shop built step by step.\n" }, [], "school__eCommerceCourse").purpose, "teaching", "camelCase Course is split");
+  assert.equal(classify({ "README.md": "# Jenkins-Zero-To-Hero\n\nInstall Jenkins and deploy to k8s.\n" }).purpose, "teaching");
+  assert.equal(classify({ "README.md": "# Trainer\n\nDistributed model training at scale.\n" }, [], "acme__llm-training").purpose, "product", "ML training is a product");
+});
+
+test("v2: recon / scanner tools are offensive ; numbered product components are not lessons", () => {
+  assert.equal(classify({ "README.md": "# VHostScan\n\nA virtual host scanner that detects catch-all scenarios.\n" }).purpose, "offensive");
+  assert.equal(classify({ "README.md": "# Argus\n\nA Python-based toolkit for Information Gathering and Reconnaissance.\n" }).purpose, "offensive");
+  const aias = ["0_docs", "1_sdks", "2_training_platform", "3_api_platform", "4_web_app", "5_bigdata", "6_tools"];
+  assert.equal(classify({ "README.md": "# AI platform\n\nA platform with SDKs and web apps.\n" }, aias).purpose, "product", "numbered sdk / api / app directories are a product layout");
+  const lessons = ["00-getting-started", "01-features", "02-use-cases", "03-integrations", "04-best-practices", "05-blueprints"];
+  assert.notEqual(classify({ "README.md": "# Agent samples\n\nRead each folder in order.\n" }, lessons).purpose, "product");
+});
