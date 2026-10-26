@@ -3,6 +3,18 @@
 All notable changes to the open-source slopGrade Firewall client are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+- **Repository purpose.** A deterministic, local classifier (`src/repo-purpose.mjs`, `repoPurpose()`) tells product repos from
+  teaching / lab / CTF / offensive-tool repos. With `--gate`, a non-product repo gets its **pack and Deep Scan blocks as
+  advisory warnings**, with the reason and the override printed in the log. Cross-tenant hard leaks still block.
+  - Signals: README title / first paragraph, manifest description + keywords, top-level directory names, repository name.
+  - A pull request reads all of it from the **base branch**, so it cannot reclassify its own repo.
+  - Override: `purpose: product` in `.slopgrade.yml` (also read from the base branch). Opt-in: `SLOPGRADE_PURPOSE_CLASSIFIER=on` (default off while it is calibrated).
+  - Measured on fresh held-out pull requests no rule was tuned on (benchmark 2026-10-25): static PR-block precision
+    26.3 % → 31.3 %, Deep Scan 16.0 % → 17.4 %, no right block lost.
+
 ## [0.11.3] — 2026-10-25
 
 Two false-block shapes found on the 52,577-PR benchmark (dev split), fixed in the same code as the hosted copies.

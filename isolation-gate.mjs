@@ -63,6 +63,7 @@ import { sinkFiles, prChangedPaths, prChangedRanges, selectDeepUnits, requestDee
 import { prHunks, validChangeReview, C_HUNK, C_REVIEW_NOTE, CPP_HUNK, CPP_REVIEW_NOTE, RUST_HUNK, RUST_REVIEW_NOTE, noticeHint, unreviewedNote } from "./src/change-review.mjs";
 import { fixableHitIndex, attachFixes } from "./src/autofix.mjs";
 import { IGNORE_FILE, parseIgnore, ignoreMatcher, readIgnoreText } from "./src/ignore.mjs";
+import { decidePurpose, purposeAdvisoryLine } from "./src/repo-purpose.mjs";
 
 const CODE_EXTS = /\.(py|ts|tsx|js|jsx|mjs|cjs|sql|rb|go|php|prisma|java|cs|rs|c|cc|cpp|h|hpp|kt|scala|ex|exs)$/;
 const TIMEOUT_MS = 20_000;
@@ -245,6 +246,20 @@ export async function main(argv = [], env = process.env) {
   const ignore = parseIgnore(ignoreSrc.text);
   const isIgnored = ignoreMatcher(ignore.patterns);
   let ignoredCount = 0;
+  // Repository purpose (src/repo-purpose.mjs) — a course / lab / CTF / offensive-tool repo gets ADVISORY pack + Deep Scan
+  // blocks. Gate mode only (nothing blocks otherwise). On a pull request everything is read from the BASE branch, so a PR
+  // cannot reclassify its own repo ; a failure to classify is « product » (blocking unchanged).
+  let purpose = { purpose: "product", why: "", override: false };
+  if (gateMode) {
+    try {
+      purpose = decidePurpose(env,
+        (args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15_000, maxBuffer: 2 * 1024 * 1024 }),
+        (p) => readFileSync(join(root, p), "utf8"),
+        () => readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name));
+    } catch { /* product */ }
+  }
+  const purposeAdvisory = purpose.purpose !== "product";
+  if (purpose.override) line(`slopGrade Firewall: ${sanitizeLogLine(purpose.why)} — blocking stays on.`);
   try {
     const walked = walk(root, CODE_EXTS);
     files = walked.filter((f) => !isIgnored(rel(f)));
@@ -445,8 +460,11 @@ export async function main(argv = [], env = process.env) {
     // A pack in the server's CALIBRATION WINDOW (pro packs not yet swept on the corpus) reports everything but never
     // blocks : its findings annotate as warnings and count as advisory in the feed, so the summary never claims a
     // « blocking » finding the check did not block on.
-    const advisory = block.advisory === true;
-    line(`\nslopGrade Firewall — ${label}: ${block.count} finding(s)${advisory ? " (advisory — calibration window)" : ""}`);
+    const calibrating = block.advisory === true;
+    // A non-product repo (see purpose above) reports the same findings as warnings that never block.
+    const demoted = !calibrating && purposeAdvisory;
+    const advisory = calibrating || demoted;
+    line(`\nslopGrade Firewall — ${label}: ${block.count} finding(s)${calibrating ? " (advisory — calibration window)" : demoted ? ` (advisory — ${purpose.purpose} repository)` : ""}`);
     const findings = Array.isArray(block.findings) ? block.findings : [];
     // Location: most packs put "file:line" in `table`; the AC family (accessControl/dbSafety) puts a DB TABLE NAME
     // there + the real path in `file` — findingLocation resolves both, so annotations/feed/SARIF land on the RIGHT file.
@@ -459,7 +477,8 @@ export async function main(argv = [], env = process.env) {
         : `${label} finding here — the exact rule and the remaining findings are unlocked with the gate: ${origin}/ci`;
       if (loc.file) {
         console.log(`::${advisory ? "warning" : "error"} file=${wfFile(loc.file)},line=${loc.line} title=slopGrade Firewall::[${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(detail)}`);
-        feed.push({ file: loc.file, line: loc.line, pack: key, rule: f.rule, detail, severity: advisory ? "medium" : f.severity });
+        // origSeverity lets the exit decision below count what WOULD have blocked, to print the purpose line only then.
+        feed.push({ file: loc.file, line: loc.line, pack: key, rule: f.rule, detail, severity: advisory ? "medium" : f.severity, ...(demoted ? { origSeverity: f.severity } : {}) });
       }
     }
     for (const f of findings.slice(0, 10)) line(`    - ${sanitizeLogLine(f.table ?? "")}  [${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(f.detail && String(f.detail).trim() ? f.detail : "(detail withheld on the free tier)")}`);
@@ -474,8 +493,9 @@ export async function main(argv = [], env = process.env) {
     const mode = deepBlock ? "blocking — opted in" : "advisory";
     line(`\nslopGrade Firewall — deep scan (heisen taint engine, ${mode}): ${deepLine}${deepRows.length ? ` · ${fresh.length} new finding(s), ${confirmed.length} confirming an existing one` : " · 0 finding(s)"}`);
     for (const f of fresh) {
-      const row = deepBlock ? { ...f, severity: "high" } : f;
-      console.log(`::${deepBlock ? "error" : "warning"} file=${wfFile(row.file)},line=${row.line} title=slopGrade Firewall deep scan::[${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}`);
+      const blocksHere = deepBlock && !purposeAdvisory; // deepBlocking above still counts what WOULD block (see the exit decision)
+      const row = deepBlock ? { ...f, severity: blocksHere ? "high" : "medium", ...(blocksHere ? {} : { origSeverity: "high" }) } : f;
+      console.log(`::${blocksHere ? "error" : "warning"} file=${wfFile(row.file)},line=${row.line} title=slopGrade Firewall deep scan::[${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}`);
       line(`    - ${sanitizeLogLine(row.file)}:${row.line}  [${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}`);
       feed.push(row);
     }
@@ -587,10 +607,17 @@ export async function main(argv = [], env = process.env) {
   // Server kill switch (0.10.1) : `gateScope: "repo"` → whole-repo counts even on a PR (the split is still shown).
   const scopeOverride = classified && gateScopeOf(v) === "repo";
   if (scopeOverride) line(`\nslopGrade Firewall: the server set the gate to judge the whole repo on this run (PR scoping paused).`);
-  const scoped = classified && !scopeOverride ? scopedBlocking(v, classified, { deepBlocking, diff: prDiff }) : null;
+  // Rows demoted by the repo purpose are counted at their ORIGINAL severity here, so we know what would have blocked.
+  const restored = classified ? classified.map((f) => (f.origSeverity ? { ...f, severity: f.origSeverity } : f)) : null;
+  const scoped = restored && !scopeOverride ? scopedBlocking(v, restored, { deepBlocking, diff: prDiff }) : null;
   const gateHard = scoped ? scoped.hardLeaks : Number(v.hardLeaks) || 0;
-  const gatePack = scoped ? scoped.packBlocking : Number(v.packBlocking) || 0;
-  const gateDeep = scoped ? scoped.deepBlocking : deepBlocking;
+  let gatePack = scoped ? scoped.packBlocking : Number(v.packBlocking) || 0;
+  let gateDeep = scoped ? scoped.deepBlocking : deepBlocking;
+  // Non-product repo : pack + Deep Scan blocks become advisory (cross-tenant hard leaks are NOT touched).
+  if (purposeAdvisory && gatePack + gateDeep > 0) {
+    console.log(sanitizeLogLine(`\n${purposeAdvisoryLine(purpose)}`, 480)); // longer than line()'s 240 : the override hint must never be cut
+    gatePack = 0; gateDeep = 0;
+  }
   const decision = firewallVerdict({ gateMode, reliable: v.reliable, hardLeaks: gateHard, gateEntitled: v.gateEntitled, packBlocking: gatePack, deepBlocking: gateDeep });
   // Action outputs — surface the verdict + counts to downstream steps (a Slack alert, gating another job, a badge).
   // Fail-soft, no-op off CI. Emitted here (once the verdict is known) — the no-verdict early returns above set none.

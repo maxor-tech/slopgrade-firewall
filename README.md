@@ -253,6 +253,21 @@ origin/<base>:.slopgradeignore`, needs `fetch-depth: 0`), never from the PR — 
 Patterns that would exclude everything (`*`, `**`, `/`), negations (`!`) and over-long lines are refused with a warning.
 The log says how many patterns applied and how many files were skipped.
 
+## Courses, labs and offensive tools — repository purpose
+
+In a course, a tutorial, a deliberately vulnerable lab, a CTF or an offensive tool, the vulnerable code *is* the content. With `--gate`, a repo that **reads as one of those** gets its pack and Deep Scan blocks as **advisory warnings** (same findings, no failed check), and the log says why:
+
+```
+slopGrade Firewall: this repo reads as a teaching repository (README title "Node.js Bootcamp Course" mentions course, bootcamp) — findings are advisory. Set `purpose: product` in .slopgrade.yml to block.
+```
+
+The decision is local and deterministic (no network): README title and first paragraph, `package.json` / `pyproject.toml` / `composer.json` description and keywords, top-level directory names (`week-1`, `lesson_01`, `exercises/`, `payloads/`…) and the repository name. One strong signal (title, first paragraph) or two weaker ones are needed; a library that only links a tutorial stays a product. Cross-tenant hard leaks are **never** affected.
+
+- **Override** — put `purpose: product` in `.slopgrade.yml` at the repo root to keep blocking on.
+- **Opt-in** — `SLOPGRADE_PURPOSE_CLASSIFIER=on` in the step `env:` enables the classifier (default `off` while it is calibrated).
+- **A pull request cannot reclassify its own repo:** on a `pull_request` run the README, manifests, directory list and `.slopgrade.yml` are read from the **base branch** (`origin/<base>`, needs `fetch-depth: 0`), like `.slopgradeignore`. An unreadable base means `product` (blocking unchanged).
+- **Threat note** — a product can still dodge the gate by merging a course-like README to its default branch. That change is a visible commit on the base branch, and every demoted run prints the classification and the override line. The classifier only lowers pack and Deep Scan *blocks*; findings stay in the log, the PR review and the Security tab.
+
 ## Fail-open, always
 
 A missing OIDC token, a timeout (each call bounded at 20s), a network failure, or a server error **never** breaks
