@@ -53,3 +53,15 @@ test("a bare cipher-name literal with no version context still fires, even in a 
   // a real use stays real even inside a version-named file (API context beats the filename)
   assert.deepEqual(extractCryptoFingerprint("c = ARC4.new(key)", "lib/version.py").hits.map((h) => h.kind), ["rc4-cipher"]);
 });
+
+test("a hash-identifier catalog literal and a DESKeySpec signature are not DES uses (benchmark 2026-10-26, dev split)", () => {
+  assert.deepEqual(kinds('    HashInfo(name="DES(Unix)", hashcat=1500, john="descrypt"),'), []);
+  assert.deepEqual(kinds('  Prototype("DES(Oracle)", [HashInfo(...)])'), []);
+  assert.deepEqual(kinds("    private static DESKeySpec getDesKeySpec(String key) throws Exception {"), []);
+  assert.deepEqual(kinds("        DESKeySpec spec = getDesKeySpec(key);"), []);
+  // the real uses on the same file shape keep firing
+  for (const s of ["        DESKeySpec spec = new DESKeySpec(key.getBytes());", "    boolean ok = DESKeySpec.isParityAdjusted(k, 0);",
+                   '    Cipher c = Cipher.getInstance("DES/ECB/PKCS5Padding");', "    from Crypto.Cipher import DES\n    c = DES.new(k, DES.MODE_ECB)"]) {
+    assert.ok(kinds(s).includes("des-cipher"), s);
+  }
+});

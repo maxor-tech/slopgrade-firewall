@@ -16,7 +16,7 @@ const HIGH = [
   // corpus FP, a real project). So the bare `\bDES\b` alternative was replaced by use-forms.
   // The `DES(` call form excludes a DECLARATION (real-code corpus FP): a Java constructor `DES(String key) {`
   // (typed params, or a `) {` body) defines a class named DES — it does not call a DES cipher.
-  ["des-cipher",   /\bdes\.NewCipher\b|Cipher\.getInstance\(\s*["'](?:DESede|DES)(?:\/|["'])|OpenSSL::Cipher(?:::|\.new\(\s*['"])(?:DES|des)|DESCryptoServiceProvider|TripleDESCryptoServiceProvider|MCRYPT_(?:3?DES|TRIPLEDES)|['"]des-(?:ede-)?(?:cbc|ecb)['"]|\bnew\s+(?:DESede|TripleDES|DES)\b|\b(?:DESede|TripleDES|3DES|DES)\s*(?:\.\s*(?:new|Create)\b|\((?![^)\n]*\)\s*(?:throws\s[^{]*)?\{)(?!\s*(?:final\s+)?[A-Z][\w.]*(?:<[^>\n]*>)?(?:\[\])*\s+[a-z_]\w*\s*[,)]))|\balgorithms\s*\.\s*(?:TripleDES|DES)\b|\bDESK(?:ey)?Spec\b|\bcreateCipher(?:iv)?\s*\(\s*["']des\b|\bDES3\s*(?:\.\s*new\b|\()/],
+  ["des-cipher",   /\bdes\.NewCipher\b|Cipher\.getInstance\(\s*["'](?:DESede|DES)(?:\/|["'])|OpenSSL::Cipher(?:::|\.new\(\s*['"])(?:DES|des)|DESCryptoServiceProvider|TripleDESCryptoServiceProvider|MCRYPT_(?:3?DES|TRIPLEDES)|['"]des-(?:ede-)?(?:cbc|ecb)['"]|\bnew\s+(?:DESede|TripleDES|DES)\b|\b(?:DESede|TripleDES|3DES|DES)\s*(?:\.\s*(?:new|Create)\b|\((?![^)\n]*\)\s*(?:throws\s[^{]*)?\{)(?!\s*(?:final\s+)?[A-Z][\w.]*(?:<[^>\n]*>)?(?:\[\])*\s+[a-z_]\w*\s*[,)]))|\balgorithms\s*\.\s*(?:TripleDES|DES)\b|\bnew\s+DES(?:ede)?K(?:ey)?Spec\b|\bDES(?:ede)?K(?:ey)?Spec\s*\.\s*\w+\s*\(|\bcreateCipher(?:iv)?\s*\(\s*["']des\b|\bDES3\s*(?:\.\s*new\b|\()/],
   // RC4 / RC2 — like DES above, the bare `\bRC4\b`/`\bRC2\b` was a real-code FP (real-code corpus): it
   // matched "RC2"/"RC4" as RADIO-CONTROL channels/servos (ArduPilot `(high RC2) pitches the nose`, ESP32
   // `RCSERVO_MOTOR{"RC1","RC2",...}`), a `/** RC4 */` doc comment (TikTokDownloader), and `case 0x…:/* RC2 */`
@@ -54,11 +54,15 @@ const isImport = (l) => /^\s*(?:import\s+[\w.]|from\s+[\w.]+\s+import\s|using\s+
 //     literal (`"DES/CBC/PKCS5Padding"`, `'des-ede3-cbc'`, `"rc4"`) never holds whitespace, so it is kept.
 //   • COMPARED literals — `strcasecmp($algo, 'rc4')`, `alg === "rc4"`, `"DES".equals(x)`, `case 'rc4':` TEST a name,
 //     they do not select a cipher (the real use, if any, fires on its own line).
+//   • CATALOG literals that hold a parenthesis — a hash-identifier table entry `"DES(Unix)"` / `"DES(Oracle)"` names a
+//     format, it does not call DES (benchmark 2026-10-26, dev split : 2 wrong blocks). No algorithm name holds a paren.
+// A `DESKeySpec` TYPE in a signature (`static DESKeySpec getKey(…)`) is not a use either : only `new DESKeySpec(` or a
+// static `DESKeySpec.x(` call is (benchmark 2026-10-26, dev split : 3 wrong blocks on one EncryptUtils.java).
 const CMP_BEFORE = /(?:[=!]==?|\bcase|\b(?:strn?cmp|strn?casecmp|equals(?:IgnoreCase)?|EqualFold|startsWith|endsWith|in_array|includes)\s*\([^()]*)\s*$/;
 const CMP_AFTER = /^\s*(?:[=!]==?|\.\s*(?:equals(?:IgnoreCase)?|EqualFold)\b)/;
 function maskLiterals(l) {
   return l.replace(/(["'`])((?:\\.|(?!\1)[^\\])*)\1/g, (m, q, body, off, str) => {
-    const blank = /\s/.test(body) || CMP_BEFORE.test(str.slice(0, off)) || CMP_AFTER.test(str.slice(off + m.length));
+    const blank = /[\s()]/.test(body) || CMP_BEFORE.test(str.slice(0, off)) || CMP_AFTER.test(str.slice(off + m.length));
     return blank ? q + " ".repeat(body.length) + q : m;
   });
 }
