@@ -488,7 +488,10 @@ export async function main(argv = [], env = process.env) {
       if (loc.file) {
         console.log(`::${advisory ? "warning" : "error"} file=${wfFile(loc.file)},line=${loc.line} title=slopGrade Firewall::[${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(detail)}`);
         // origSeverity lets the exit decision below count what WOULD have blocked, to print the purpose line only then.
-        feed.push({ file: loc.file, line: loc.line, pack: key, rule: f.rule, detail, severity: advisory ? "medium" : f.severity, ...(demoted ? { origSeverity: f.severity } : {}) });
+        // The reason rides in the feed row too (review + SARIF), not only in the pack header line (e2e 2026-10-27).
+        const note = calibrating ? "(advisory — calibration window)" : demoted ? `(advisory — ${purpose.purpose} repository)` : "";
+        feed.push({ file: loc.file, line: loc.line, pack: key, rule: f.rule, detail: note ? `${detail} ${note}` : detail, severity: advisory ? "medium" : f.severity,
+          ...(note ? { advisoryNote: note } : {}), ...(demoted ? { origSeverity: f.severity } : {}) });
       }
     }
     for (const f of findings.slice(0, 10)) line(`    - ${sanitizeLogLine(f.table ?? "")}  [${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(f.detail && String(f.detail).trim() ? f.detail : "(detail withheld on the free tier)")}`);
@@ -511,7 +514,10 @@ export async function main(argv = [], env = process.env) {
       // row does not block — not only the annotation (e2e 2026-10-27 : the review showed a bare 🟡 medium).
       const confidenceNote = confidence ? ` (advisory — block confidence ${confidence.score.toFixed(2)} below ${confidence.tau.toFixed(2)})` : "";
       if (confidence) bcDemoted++;
-      const base = confidence ? { ...f, detail: `${f.detail}${confidenceNote}`, bcNote: confidenceNote.trim() } : f;
+      // A row that would block but sits in a non-product repo says so as well (same channels).
+      const purposeNote = promote && !blocksHere ? ` (advisory — ${purpose.purpose} repository)` : "";
+      const note = confidenceNote || purposeNote;
+      const base = note ? { ...f, detail: `${f.detail}${note}`, advisoryNote: note.trim() } : f;
       const row = promote ? { ...base, severity: blocksHere ? "high" : "medium", ...(blocksHere ? {} : { origSeverity: "high" }) } : base;
       console.log(`::${blocksHere ? "error" : "warning"} file=${wfFile(row.file)},line=${row.line} title=slopGrade Firewall deep scan::[${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}`);
       line(`    - ${sanitizeLogLine(row.file)}:${row.line}  [${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}`);

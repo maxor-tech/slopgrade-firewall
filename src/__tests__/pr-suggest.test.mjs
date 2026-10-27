@@ -89,7 +89,7 @@ test("findingCommentBody: severity icon + rule + detail + dedup marker, and NOT 
 
 test("findingCommentBody: a row kept as a warning by block confidence wears ⚪ advisory, never 🟡 medium", () => {
   const note = "(advisory — block confidence 0.13 below 0.45)";
-  const b = findingCommentBody({ rule: "CWE-78", detail: `flow at line 8 ${note}`, severity: "medium", bcNote: note });
+  const b = findingCommentBody({ rule: "CWE-78", detail: `flow at line 8 ${note}`, severity: "medium", advisoryNote: note });
   assert.equal(b, `⚪ **slopGrade Firewall** · CWE-78 · advisory\n\nflow at line 8 ${note}\n\n${FINDING_MARKER}`);
   // An ordinary warning keeps its severity badge.
   assert.equal(findingCommentBody({ rule: "CWE-78", detail: "flow", severity: "medium" }), `🟡 **slopGrade Firewall** · CWE-78 · medium\n\nflow\n\n${FINDING_MARKER}`);

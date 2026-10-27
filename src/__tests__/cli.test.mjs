@@ -196,13 +196,20 @@ test("a pack in the server's calibration window (advisory:true) annotates as a W
       { rule: "aws-sg-open-world", table: "infra/main.tf:3", detail: "security group open to 0.0.0.0/0 on all ports", severity: "high" },
       { rule: "aws-sg-open-world", table: "infra/db.tf:9", detail: "security group open to 0.0.0.0/0 on all ports", severity: "high" },
     ] } };
+  const sarif = join(deepWorkspace(), "calib.sarif");
   await withStubbedNetwork(paid, async ({ out }) => {
-    const code = await main(["--gate"], CI_ENV);
+    const code = await main(["--gate", "--sarif", sarif], { ...CI_ENV, FW_UPLOAD_SARIF: "false" });
     assert.equal(code, 0);                                                     // reported, never blocked
     const text = out.join("\n");
     assert.match(text, /iac: 2 finding\(s\) \(advisory — calibration window\)/);
     assert.match(text, /::warning file=infra\/main\.tf,line=3 title=slopGrade Firewall::\[aws-sg-open-world\]/);
     assert.doesNotMatch(text, /::error file=infra\//);
+    // The reason reaches the feed-built channels too (SARIF here ; the PR review renders the same row).
+    const msgs = JSON.parse(readFileSync(sarif, "utf8")).runs[0].results.map((r) => r.message.text);
+    assert.deepEqual(msgs.filter((m) => m.includes("security group")), [
+      "security group open to 0.0.0.0/0 on all ports (advisory — calibration window)",
+      "security group open to 0.0.0.0/0 on all ports (advisory — calibration window)",
+    ]);
   });
 });
 
