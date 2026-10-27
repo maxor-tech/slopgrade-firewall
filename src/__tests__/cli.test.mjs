@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { main } from "../../isolation-gate.mjs";
@@ -30,7 +30,7 @@ const CI_ENV = {
 // Default : the pro-extractors call answers 402 (a FREE repo) — the shape every non-paying run sees.
 const PRO_FREE = { ok: false, status: 402, json: async () => ({ error: "plan-required", gateLevel: "none" }) };
 
-function withStubbedNetwork(verdict, fn, pro = PRO_FREE) {
+function withStubbedNetwork(verdict, fn, pro = PRO_FREE, deep = verdict) {
   const realFetch = globalThis.fetch;
   const realLog = console.log;
   const calls = [];
@@ -39,6 +39,7 @@ function withStubbedNetwork(verdict, fn, pro = PRO_FREE) {
     calls.push({ url: String(url), opts });
     if (String(url).startsWith("https://oidc.example/")) return { ok: true, status: 200, json: async () => ({ value: "eyJ.oidc.token" }) };
     if (String(url).endsWith("/api/ci/pro-extractors")) return pro;
+    if (String(url).endsWith("/api/ci/heisen")) return { ok: true, status: 200, json: async () => deep };
     return { ok: true, status: 200, json: async () => verdict };
   };
   console.log = (...a) => out.push(a.join(" "));
@@ -267,3 +268,63 @@ test("deep scan on a PAID repo : the sink-bearing file is sent once to the canon
     assert.deepEqual(units.map((u) => u.path), ["app.py"]);
   });
 });
+
+const BC_META = { schema: "heisen-block-confidence/v2", model: "synthetic-v2", disposition: "ADVISORY", score: 0.2, tau: 0.45 };
+const BC_FINDING = { path: "app.py", cwe: "CWE-78", p: 0.94, evidence: "request at line 2 reaches sink at line 5" };
+
+for (const scenario of [
+  { name: "OFF still blocks advisory metadata", on: false, meta: BC_META, blocks: 1 },
+  { name: "ON below tau warns and passes", on: true, meta: BC_META, blocks: 0 },
+  { name: "ON snake_case below tau warns and passes", on: true, meta: BC_META, snake: true, blocks: 0 },
+  { name: "ON equal to tau blocks", on: true, meta: { ...BC_META, score: 0.45 }, blocks: 1 },
+  { name: "ON above tau blocks", on: true, meta: { ...BC_META, score: 0.8 }, blocks: 1 },
+  { name: "ON missing metadata blocks", on: true, blocks: 1 },
+  { name: "ON malformed score blocks", on: true, meta: { ...BC_META, score: "0.2" }, blocks: 1 },
+  { name: "ON unsupported schema blocks", on: true, meta: { ...BC_META, schema: "unknown" }, blocks: 1 },
+  { name: "ON absent context blocks", on: true, meta: BC_META, noRepo: true, blocks: 1 },
+  { name: "ON advisory does not silence an independent pack", on: true, meta: BC_META, pack: true, blocks: 1, deep: 0 },
+  { name: "ON mixed findings count only the promoted row", on: true, meta: BC_META, mixed: true, blocks: 1, deep: 0 },
+  { name: "ON confirmation cannot demote a pack", on: true, meta: BC_META, confirmation: true, blocks: 1 },
+  { name: "ON without deep-scan-block stays advisory", on: true, meta: { ...BC_META, score: 0.8 }, noDeepBlock: true, blocks: 0 },
+]) {
+  test("block confidence CLI: " + scenario.name, async () => {
+    const ws = deepWorkspace();
+    writeFileSync(join(ws, "README.md"), "PRIVATE-README 😀\n", "utf8");
+    const output = join(ws, "outputs.txt"), sarif = join(ws, "report.sarif");
+    const finding = { ...BC_FINDING, ...(scenario.meta ? { [scenario.snake ? "block_confidence" : "blockConfidence"]: scenario.meta } : {}) };
+    const findings = [finding, ...(scenario.mixed ? [{ ...BC_FINDING, evidence: "reaches sink at line 4", blockConfidence: { ...BC_META, score: 0.45 } }] : [])];
+    const independent = scenario.pack || scenario.confirmation;
+    const paid = { ...VERDICT, sqli: undefined, cmdi: undefined, weakCrypto: undefined, secrets: undefined,
+      gateEntitled: true, gateLevel: "paid", packBlocking: independent ? 1 : 0,
+      ...(independent ? { cmdi: { count: 1, hidden: 0, blocking: 1, findings: [
+        { rule: "cmdi", table: scenario.confirmation ? "app.py:5" : "other.py:2", detail: "independent pack", severity: "high" },
+      ] } } : {}),
+    };
+    const deep = { ok: true, scanned: 1, unanswered: 0, findings };
+    await withStubbedNetwork(paid, async ({ calls, out }) => {
+      const args = ["--gate", "--deep-scan", "--sarif", sarif, ...(scenario.noDeepBlock ? [] : ["--deep-scan-block"]), ...(scenario.on ? ["--block-confidence"] : [])];
+      const code = await main(args, { ...CI_ENV, GITHUB_WORKSPACE: ws, GITHUB_REPOSITORY: scenario.noRepo ? undefined : "poc/service",
+        GITHUB_OUTPUT: output, FW_UPLOAD_SARIF: "false", SLOPGRADE_PURPOSE_CLASSIFIER: "off" });
+      assert.equal(code, scenario.blocks ? 1 : 0);
+      const request = JSON.parse(heisenCalls(calls)[0].opts.body);
+      if (scenario.on && !scenario.noRepo) {
+        assert.deepEqual(request.blockConfidence, { schema: "heisen-block-confidence/v2", extractor: "repo-aggregates/1",
+          repo_off: 0, repo_teach: 0, readme_len: Math.log1p(17) });
+      } else assert.equal(Object.hasOwn(request, "blockConfidence"), false);
+      assert.doesNotMatch(heisenCalls(calls)[0].opts.body, /PRIVATE-README/);
+      const text = out.join("\n");
+      const deepBlocks = scenario.deep ?? scenario.blocks;
+      if (!scenario.confirmation) {
+        assert.match(text, new RegExp("::" + (deepBlocks ? "error" : "warning") + " file=app\\.py,line=5 title=slopGrade Firewall deep scan"));
+      }
+      const report = JSON.parse(readFileSync(sarif, "utf8"));
+      const atFive = report.runs[0].results.find((r) => r.locations?.[0]?.physicalLocation?.region?.startLine === 5);
+      assert.ok(atFive);
+      assert.equal(atFive.level, scenario.confirmation || deepBlocks ? "error" : "warning");
+      const values = Object.fromEntries(readFileSync(output, "utf8").trim().split(/\r?\n/).map((s) => s.split("=")));
+      assert.equal(values["blocking-findings"], String(scenario.blocks));
+      assert.equal(values.verdict, scenario.blocks ? "gate-blocked" : "gate-pass");
+      if (scenario.mixed) assert.match(text, /1 deep-scan finding\(s\)/);
+    }, PRO_FREE, deep);
+  });
+}

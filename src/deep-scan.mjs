@@ -12,6 +12,8 @@
 // ADVISORY: the server returns `blocking: 0` while the engine is in its calibration window, so these findings annotate
 // as warnings and never fail the check.
 
+import { BLOCK_CONFIDENCE_SCHEMA, BLOCK_CONFIDENCE_EXTRACTOR } from "./block-confidence.mjs";
+
 export const DEEP_SCAN_EXTS = /\.(py|js|jsx|mjs|cjs|ts|tsx|go|java|rb|php|phtml)$/i;
 // 80 since 0.10.5 (was 40): measured on the 22-app walk, the file cap was the last coverage loss on large monorepos —
 // 76% of the repo-wide findings were inside the sent files at 40 (v0.10.4), 85% with the tiered ranking, 91% at 80
@@ -317,6 +319,8 @@ export function heisenFeed(findings, sentPaths) {
   const sent = new Set(sentPaths);
   return findings.filter((f) => sent.has(f.path)).map((f) => ({
     file: f.path, line: evidenceLine(f.evidence), pack: "heisen", rule: f.cwe, detail: f.evidence, severity: "medium",
+    ...(Object.hasOwn(f, "blockConfidence") ? { blockConfidence: f.blockConfidence } : {}),
+    ...(Object.hasOwn(f, "block_confidence") ? { block_confidence: f.block_confidence } : {}),
   }));
 }
 
@@ -356,10 +360,15 @@ export function deepScanNudge({ deepScan, paid }) {
  * POST the units; `post(url, body)` → {status, json()} is injected (timedFetch in the client). Returns
  * {state: "ok", response} | {state: "plan-required"} | {state: "unavailable", status?} — never throws.
  */
-export async function requestDeepScan(post, origin, oidcToken, sha, units, library = false, hunks = []) {
+export async function requestDeepScan(post, origin, oidcToken, sha, units, library = false, hunks = [], aggregates = null) {
   try {
+    // Whitelist the optional context: README text and arbitrary extractor fields never leave here.
+    const blockConfidence = aggregates ? {
+      schema: BLOCK_CONFIDENCE_SCHEMA, extractor: BLOCK_CONFIDENCE_EXTRACTOR,
+      repo_off: aggregates.repo_off, repo_teach: aggregates.repo_teach, readme_len: aggregates.readme_len,
+    } : null;
     // `hunks` (change review, 0.10.13) are sent only when the option produced some — never an empty field
-    const res = await post(`${origin}/api/ci/heisen`, JSON.stringify({ oidcToken, sha, units, ...(library ? { library: true } : {}), ...(hunks.length ? { hunks } : {}) }));
+    const res = await post(`${origin}/api/ci/heisen`, JSON.stringify({ oidcToken, sha, units, ...(library ? { library: true } : {}), ...(hunks.length ? { hunks } : {}), ...(blockConfidence ? { blockConfidence } : {}) }));
     if (res.status === 402) return { state: "plan-required" };
     if (res.status < 200 || res.status >= 300) return { state: "unavailable", status: res.status };
     const j = await res.json();

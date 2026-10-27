@@ -35,6 +35,10 @@ inputs:
     description: "OPT-IN (default false; needs deep-scan: \"true\" and firewall-mode: gate). A NEW deep-scan finding — one no detector pack reported — BLOCKS the check instead of annotating a warning. Measured block precision of the taint engine: ~94% on labeled benchmark code, but at least 78% (25 of 32) on real-world CVE code (about 1 false block in 4-5, mostly project-specific validators it does not recognise); on 52,089 ordinary open-source pull requests it blocked 245, 46 of them for a real flaw — so it stays off unless you choose it."
     required: false
     default: "false"
+  block-confidence:
+    description: "OPT-IN (default false; needs deep-scan). Send only three repository aggregates plus schema/extractor versions; valid ADVISORY findings below the engine threshold remain warnings under deep-scan-block. Missing or malformed metadata keeps existing blocking."
+    required: false
+    default: "false"
   fix:
     description: "suggest (DEFAULT) — a finding with a deterministic secure rewrite (TLS verification off, debug on, yaml.load…) gets a GitHub « Commit suggestion » in its inline PR comment, verified in your runner (the finding no longer matches ; nothing leaves) | off."
     required: false
@@ -86,6 +90,7 @@ runs:
         FW_UPLOAD_SARIF: ${{ inputs.upload-sarif }}
         FW_DEEP_SCAN: ${{ inputs.deep-scan }}
         FW_DEEP_SCAN_BLOCK: ${{ inputs.deep-scan-block }}
+        FW_BLOCK_CONFIDENCE: ${{ inputs.block-confidence }}
         FW_LIBRARY_MODE: ${{ inputs.library-mode }}
         FW_CHANGE_REVIEW: ${{ inputs.change-review }}
         FW_FIX: ${{ inputs.fix }}
@@ -110,6 +115,7 @@ runs:
         [ -n "${FW_SARIF}" ] && ARGS+=(--sarif "${FW_SARIF}")
         [ "${FW_DEEP_SCAN}" = "true" ] && ARGS+=(--deep-scan)
         [ "${FW_DEEP_SCAN_BLOCK}" = "true" ] && ARGS+=(--deep-scan-block)
+        [ "${FW_BLOCK_CONFIDENCE}" = "true" ] && ARGS+=(--block-confidence)
         [ "${FW_LIBRARY_MODE}" = "true" ] && ARGS+=(--library-mode)
         [ "${FW_CHANGE_REVIEW}" = "true" ] && ARGS+=(--change-review)
         [ "${FW_FIX}" = "off" ] && ARGS+=(--no-fix)
