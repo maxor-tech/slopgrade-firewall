@@ -321,10 +321,17 @@ for (const scenario of [
         `::${deepBlocks ? "error" : "warning"} file=app.py,line=5 title=slopGrade Firewall deep scan::[CWE-78] request at line 2 reaches sink at line 5${scenario.annotation ?? ""}`,
         ...(scenario.mixed ? ["::error file=app.py,line=4 title=slopGrade Firewall deep scan::[CWE-78] reaches sink at line 4"] : []),
       ]);
+      const note = scenario.annotation ?? "";
+      // The reason reaches every channel built from the feed row, not only the annotation (e2e 2026-10-27).
+      if (!scenario.confirmation) assert.ok(out.includes(`    - app.py:5  [CWE-78] request at line 2 reaches sink at line 5${note}`));
+      const countLine = out.filter((l) => l.includes("kept as warnings by block confidence"));
+      assert.deepEqual(countLine, note ? ['  1 new finding(s) kept as warnings by block confidence (score below the engine threshold) — they do not block. Opt out: block-confidence: "false".'] : []);
       const report = JSON.parse(readFileSync(sarif, "utf8"));
       const atFive = report.runs[0].results.find((r) => r.locations?.[0]?.physicalLocation?.region?.startLine === 5);
       assert.ok(atFive);
       assert.equal(atFive.level, scenario.confirmation || deepBlocks ? "error" : "warning");
+      if (note) assert.ok(atFive.message.text.endsWith(note), atFive.message.text);
+      else assert.doesNotMatch(atFive.message.text, /block confidence/);
       const values = Object.fromEntries(readFileSync(output, "utf8").trim().split(/\r?\n/).map((s) => s.split("=")));
       assert.equal(values["blocking-findings"], String(scenario.blocks));
       assert.equal(values.verdict, scenario.blocks ? "gate-blocked" : "gate-pass");

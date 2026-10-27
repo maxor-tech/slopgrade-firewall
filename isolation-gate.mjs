@@ -501,17 +501,23 @@ export async function main(argv = [], env = process.env) {
     // otherwise it stays an advisory warning. A confirming row is never re-annotated (its pack already reported it).
     const mode = deepBlock ? "blocking — opted in" : "advisory";
     line(`\nslopGrade Firewall — deep scan (heisen taint engine, ${mode}): ${deepLine}${deepRows.length ? ` · ${fresh.length} new finding(s), ${confirmed.length} confirming an existing one` : " · 0 finding(s)"}`);
+    let bcDemoted = 0;
     for (const f of fresh) {
       const promote = deepBlock && !(repoAggregates && applyBlockConfidence(f));
       if (promote) deepBlocking++; // Preserve the existing purpose-policy accounting below.
       const blocksHere = promote && !purposeAdvisory;
-      const row = promote ? { ...f, severity: blocksHere ? "high" : "medium", ...(blocksHere ? {} : { origSeverity: "high" }) } : f;
       const confidence = deepBlock && !promote ? (f.blockConfidence ?? f.block_confidence) : null;
+      // The reason rides in `detail`, so the log line, the PR review (summary + inline comment) and SARIF all say WHY the
+      // row does not block — not only the annotation (e2e 2026-10-27 : the review showed a bare 🟡 medium).
       const confidenceNote = confidence ? ` (advisory — block confidence ${confidence.score.toFixed(2)} below ${confidence.tau.toFixed(2)})` : "";
-      console.log(`::${blocksHere ? "error" : "warning"} file=${wfFile(row.file)},line=${row.line} title=slopGrade Firewall deep scan::[${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}${confidenceNote}`);
+      if (confidence) bcDemoted++;
+      const base = confidence ? { ...f, detail: `${f.detail}${confidenceNote}`, bcNote: confidenceNote.trim() } : f;
+      const row = promote ? { ...base, severity: blocksHere ? "high" : "medium", ...(blocksHere ? {} : { origSeverity: "high" }) } : base;
+      console.log(`::${blocksHere ? "error" : "warning"} file=${wfFile(row.file)},line=${row.line} title=slopGrade Firewall deep scan::[${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}`);
       line(`    - ${sanitizeLogLine(row.file)}:${row.line}  [${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}`);
       feed.push(row);
     }
+    if (bcDemoted) line(`  ${bcDemoted} new finding(s) kept as warnings by block confidence (score below the engine threshold) — they do not block. Opt out: block-confidence: "false".`);
   }
   // Library mode: candidates are a SEPARATE triage list — notices, never in `feed` (so never in the gate, the PR review
   // blocking count or SARIF). The measured caveat is printed with them, so nobody reads them as proven findings.
