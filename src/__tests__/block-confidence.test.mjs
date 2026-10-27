@@ -72,9 +72,9 @@ test("only valid ADVISORY metadata below tau demotes; aliases work and ambiguity
     { blockConfidence: null, block_confidence: advisory }]) assert.equal(applyBlockConfidence(row), false);
 });
 
-test("Action wires block-confidence as an OFF-by-default input and CLI flag", () => {
+test("Action wires block-confidence as an ON-by-default input and CLI flag", () => {
   const action = readFileSync(new URL("../../action.yml", import.meta.url), "utf8");
-  assert.match(action, /  block-confidence:\r?\n(?:.*\r?\n){2}    default: "false"/);
+  assert.match(action, /  block-confidence:\r?\n(?:.*\r?\n){2}    default: "true"/);
   assert.ok(action.includes("FW_BLOCK_CONFIDENCE: $" + "{{ inputs.block-confidence }}"));
   assert.ok(action.includes('[ "$' + '{FW_BLOCK_CONFIDENCE}" = "true" ] && ARGS+=(--block-confidence)'));
 });

@@ -506,7 +506,9 @@ export async function main(argv = [], env = process.env) {
       if (promote) deepBlocking++; // Preserve the existing purpose-policy accounting below.
       const blocksHere = promote && !purposeAdvisory;
       const row = promote ? { ...f, severity: blocksHere ? "high" : "medium", ...(blocksHere ? {} : { origSeverity: "high" }) } : f;
-      console.log(`::${blocksHere ? "error" : "warning"} file=${wfFile(row.file)},line=${row.line} title=slopGrade Firewall deep scan::[${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}`);
+      const confidence = deepBlock && !promote ? (f.blockConfidence ?? f.block_confidence) : null;
+      const confidenceNote = confidence ? ` (advisory — block confidence ${confidence.score.toFixed(2)} below ${confidence.tau.toFixed(2)})` : "";
+      console.log(`::${blocksHere ? "error" : "warning"} file=${wfFile(row.file)},line=${row.line} title=slopGrade Firewall deep scan::[${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}${confidenceNote}`);
       line(`    - ${sanitizeLogLine(row.file)}:${row.line}  [${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}`);
       feed.push(row);
     }
