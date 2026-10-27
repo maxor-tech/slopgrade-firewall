@@ -36,9 +36,9 @@ inputs:
     required: false
     default: "false"
   block-confidence:
-    description: "OPT-IN (default false; needs deep-scan). Send only three repository aggregates plus schema/extractor versions; valid ADVISORY findings below the engine threshold remain warnings under deep-scan-block. Missing or malformed metadata keeps existing blocking."
+    description: "ON by default (needs deep-scan). Sends three numbers: repo_off, repo_teach, readme_len, plus schema/extractor versions; README text never leaves the runner. Valid ADVISORY findings below the engine threshold remain warnings under deep-scan-block. Missing or malformed metadata keeps existing blocking. Set block-confidence: \"false\" to opt out."
     required: false
-    default: "false"
+    default: "true"
   fix:
     description: "suggest (DEFAULT) — a finding with a deterministic secure rewrite (TLS verification off, debug on, yaml.load…) gets a GitHub « Commit suggestion » in its inline PR comment, verified in your runner (the finding no longer matches ; nothing leaves) | off."
     required: false

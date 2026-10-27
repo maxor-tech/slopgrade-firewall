@@ -274,17 +274,19 @@ const BC_FINDING = { path: "app.py", cwe: "CWE-78", p: 0.94, evidence: "request 
 
 for (const scenario of [
   { name: "OFF still blocks advisory metadata", on: false, meta: BC_META, blocks: 1 },
-  { name: "ON below tau warns and passes", on: true, meta: BC_META, blocks: 0 },
-  { name: "ON snake_case below tau warns and passes", on: true, meta: BC_META, snake: true, blocks: 0 },
+  { name: "ON below tau warns and passes", on: true, meta: BC_META, blocks: 0, annotation: " (advisory — block confidence 0.20 below 0.45)" },
+  { name: "ON snake_case below tau warns and passes", on: true, meta: BC_META, snake: true, blocks: 0, annotation: " (advisory — block confidence 0.20 below 0.45)" },
+  { name: "ON formats the row score and threshold to two decimals", on: true, meta: { ...BC_META, score: 0.314, tau: 0.567 }, blocks: 0, annotation: " (advisory — block confidence 0.31 below 0.57)" },
   { name: "ON equal to tau blocks", on: true, meta: { ...BC_META, score: 0.45 }, blocks: 1 },
   { name: "ON above tau blocks", on: true, meta: { ...BC_META, score: 0.8 }, blocks: 1 },
   { name: "ON missing metadata blocks", on: true, blocks: 1 },
   { name: "ON malformed score blocks", on: true, meta: { ...BC_META, score: "0.2" }, blocks: 1 },
   { name: "ON unsupported schema blocks", on: true, meta: { ...BC_META, schema: "unknown" }, blocks: 1 },
   { name: "ON absent context blocks", on: true, meta: BC_META, noRepo: true, blocks: 1 },
-  { name: "ON advisory does not silence an independent pack", on: true, meta: BC_META, pack: true, blocks: 1, deep: 0 },
-  { name: "ON mixed findings count only the promoted row", on: true, meta: BC_META, mixed: true, blocks: 1, deep: 0 },
+  { name: "ON advisory does not silence an independent pack", on: true, meta: BC_META, pack: true, blocks: 1, deep: 0, annotation: " (advisory — block confidence 0.20 below 0.45)" },
+  { name: "ON mixed findings count only the promoted row", on: true, meta: BC_META, mixed: true, blocks: 1, deep: 0, annotation: " (advisory — block confidence 0.20 below 0.45)" },
   { name: "ON confirmation cannot demote a pack", on: true, meta: BC_META, confirmation: true, blocks: 1 },
+  { name: "ON below tau without deep-scan-block keeps the original advisory text", on: true, meta: BC_META, noDeepBlock: true, blocks: 0 },
   { name: "ON without deep-scan-block stays advisory", on: true, meta: { ...BC_META, score: 0.8 }, noDeepBlock: true, blocks: 0 },
 ]) {
   test("block confidence CLI: " + scenario.name, async () => {
@@ -314,9 +316,11 @@ for (const scenario of [
       assert.doesNotMatch(heisenCalls(calls)[0].opts.body, /PRIVATE-README/);
       const text = out.join("\n");
       const deepBlocks = scenario.deep ?? scenario.blocks;
-      if (!scenario.confirmation) {
-        assert.match(text, new RegExp("::" + (deepBlocks ? "error" : "warning") + " file=app\\.py,line=5 title=slopGrade Firewall deep scan"));
-      }
+      const annotations = out.filter((line) => line.includes(" title=slopGrade Firewall deep scan::"));
+      assert.deepEqual(annotations, scenario.confirmation ? [] : [
+        `::${deepBlocks ? "error" : "warning"} file=app.py,line=5 title=slopGrade Firewall deep scan::[CWE-78] request at line 2 reaches sink at line 5${scenario.annotation ?? ""}`,
+        ...(scenario.mixed ? ["::error file=app.py,line=4 title=slopGrade Firewall deep scan::[CWE-78] reaches sink at line 4"] : []),
+      ]);
       const report = JSON.parse(readFileSync(sarif, "utf8"));
       const atFive = report.runs[0].results.find((r) => r.locations?.[0]?.physicalLocation?.region?.startLine === 5);
       assert.ok(atFive);

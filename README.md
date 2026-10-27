@@ -64,7 +64,7 @@ jobs:
           # deep-scan: "true"              # OPT-IN, paid: ALSO send the source of sink-bearing files to the hosted taint
           #                                  engine (cross-function flows). Default false — see "Deep scan" below
           # deep-scan-block: "true"        # with deep-scan + gate: a NEW deep-scan finding fails the check (default false)
-          # block-confidence: "true"       # optional advisory demotion below the engine threshold (default false)
+          # block-confidence: "false"      # opt out of advisory demotion below the engine threshold (ON by default)
           # fix: "off"                     # one-click « Commit suggestion » fixes on the PR (default: suggest)
 ```
 
@@ -202,15 +202,16 @@ shell=True)`). It is the **only** mode in which file contents leave your runner,
   the fixed version counts as false, even where a real flow remains after the fix. Most false blocks come from a project's
   own validation function (`validateId(x)`, `isPathAllowed(x)`) that the engine does not recognise. That is why it is off by default: enable it where a false block is cheaper than a missed flow. A finding on a line another pack already reported is counted as a confirmation, not annotated or
   counted twice. Any failure (timeout, 5xx, malformed answer) is a warning — the verdict is never affected.
-- **Block confidence — opt-in, OFF by default** (`block-confidence: "true"`, CLI `--block-confidence`, requires
-  `deep-scan`). With `deep-scan-block` and gate mode, a fresh finding stays a warning only when its
+- **Block confidence — ON by default in the GitHub Action** (requires `deep-scan`). Set
+  `block-confidence: "false"` to opt out. Direct CLI use remains opt-in with `--block-confidence` (default OFF).
+  With `deep-scan-block` and gate mode, a fresh finding stays a warning only when its
   `blockConfidence` (or `block_confidence`) object has schema `heisen-block-confidence/v2`, a nonempty model
   identifier, disposition `ADVISORY`, and finite scores in [0, 1] satisfying **score < tau**. Equality still blocks.
   The engine owns tau and the model; the Action cannot override either. The hosted operator switch
-  `SLOPGRADE_BLOCK_CONFIDENCE` must also permit scoring (server-side, OFF by default).
+  `SLOPGRADE_BLOCK_CONFIDENCE` must also be ON on the hosted side for scoring.
   Findings remain in the report; independent pack findings and cross-tenant leaks retain their gate rules.
   - **Additional egress: three numbers**, `repo_off`, `repo_teach`, `readme_len`, plus schema and extractor
-    (`repo-aggregates/1`) identifiers, in the existing SHA/OIDC-bound Deep Scan request. No README text or author
+    (`repo-aggregates/1`) identifiers, in the existing SHA/OIDC-bound Deep Scan request. README text never leaves the runner; no author
     information is added. These numbers reveal limited repository characteristics.
   - Locally, `owner/name` from `GITHUB_REPOSITORY` becomes `owner__name`. The first existing `README.md`,
     `readme.md`, `README.rst`, or `README` in the scanned working tree is decoded as UTF-8 (invalid bytes replaced),
@@ -220,9 +221,11 @@ shell=True)`). It is the **only** mode in which file contents leave your runner,
   - **Fallback:** OFF adds no request fields. An unreadable context, missing repository identity, old server,
     absent/malformed metadata, unsupported schema, or ambiguous aliases retains existing Deep Scan blocking.
     Disable the input to roll back; the hosted operator can also stop returning confidence metadata.
-  - Any previously measured model gain is a **regression-replay figure, not a release estimate** for this
-    integration. Activation requires a compatible app/engine model and a fresh repository-disjoint evaluation of
-    the shipped path. README-derived inputs are caller assertions and can be manipulated.
+  - **Measured on a fresh sample of 104 blocked pull requests:** PR-block precision rose **21.0% → 41.7%**,
+    and blocked PRs fell **104 → 49**. One justified PR lost its block; **37 of 41 true-positive findings**
+    remained blocking. **Caveat:** one blind labeler, labels not adjudicated; the 95% confidence interval for
+    the resulting precision is **29–56%**. These sample results are not a guarantee for other repositories.
+    Activation requires a compatible hosted app/engine model. README-derived inputs are caller assertions and can be manipulated.
 - **Library mode — opt-in, packages only** (`library-mode: "true"`, client ≥ 0.10.6). For a repo that is a **published
   package**, the attack surface is its callers, so the engine can also report **library-tier candidates**: a public
   function's parameter reaching a sink. The package is recognised from its manifest, locally (npm: not private, publishes

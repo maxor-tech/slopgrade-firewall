@@ -5,6 +5,13 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+### Changed
+- **Block confidence is ON by default in the GitHub Action.** With Deep Scan enabled, it sends three numbers
+  (`repo_off`, `repo_teach`, `readme_len`) plus schema/extractor versions; README text never leaves the runner.
+  Set `block-confidence: "false"` to opt out. Direct CLI use remains opt-in with `--block-confidence`.
+  The hosted switch `SLOPGRADE_BLOCK_CONFIDENCE` must also be ON. Demoted Deep Scan annotations now state
+  the block-confidence score and threshold, each to two decimals; other annotation text is unchanged.
+
 ### Added
 - **Repository purpose.** A deterministic, local classifier (`src/repo-purpose.mjs`, `repoPurpose()`) tells product repos from
   teaching / lab / CTF / offensive-tool repos. With `--gate`, a non-product repo gets its **pack and Deep Scan blocks as
