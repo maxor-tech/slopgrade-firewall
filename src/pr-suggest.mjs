@@ -88,10 +88,14 @@ export const FINDING_MARKER = "<!-- slopgrade-firewall:finding -->";
 export const SUMMARY_MARKER = "<!-- slopgrade-firewall:summary -->";
 const SEV_ICON = { critical: "🔴", high: "🔴", medium: "🟡", low: "⚪" };
 
-/** A plain finding review-comment body: severity icon + rule + detail + the dedup marker. Never a ```suggestion```. */
-export function findingCommentBody({ rule, detail, severity, fix }) {
-  const icon = SEV_ICON[String(severity || "").toLowerCase()] || "🔎";
-  const head = `${icon} **slopGrade Firewall** · ${rule || "finding"}${severity ? ` · ${severity}` : ""}`;
+/** A plain finding review-comment body: severity icon + rule + detail + the dedup marker. Never a ```suggestion```.
+ *  A row kept as a warning for a stated reason (`advisoryNote` : block confidence, repo purpose, calibration window)
+ *  wears ⚪ advisory, not the 🟡 medium of an ordinary warning : it is a real finding that does not block, and the
+ *  note in its detail says why (e2e 2026-10-27). */
+export function findingCommentBody({ rule, detail, severity, fix, advisoryNote }) {
+  const icon = advisoryNote ? "⚪" : SEV_ICON[String(severity || "").toLowerCase()] || "🔎";
+  const label = advisoryNote ? "advisory" : severity;
+  const head = `${icon} **slopGrade Firewall** · ${rule || "finding"}${label ? ` · ${label}` : ""}`;
   // A verified one-click fix (src/autofix.mjs) rides IN the finding's own comment → GitHub shows « Commit suggestion »
   // right on it. The suggestion replaces exactly the commented line, which is the line the fix was computed from.
   const suggestion = fix && typeof fix.after === "string"
@@ -267,7 +271,12 @@ const esc = (s, max = 200) => {
 };
 // The detail often repeats the location (« path:line — … ») that the row already shows as code : drop that prefix.
 const detailOf = (f) => String(f.detail ?? "").replace(new RegExp(`^\\s*${String(f.file ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:${Number(f.line) || 0}\\s*[—-]?\\s*`), "");
-const rowLine = (f) => { const d = detailOf(f); return `- ${SEV_ICON[String(f.severity || "").toLowerCase()] || "🔎"} \`${esc(f.file)}:${f.line}\` · **${esc(f.rule || "finding")}**${f.fix ? " · 🔧 one-click fix" : ""}${d ? ` — ${esc(d, 160)}` : ""}`; };
+// A block-confidence note is kept whole : the detail before it is trimmed, never the note (a 160-char cut dropped it).
+const rowDetail = (f) => {
+  const d = detailOf(f), note = typeof f.advisoryNote === "string" ? f.advisoryNote : "";
+  return note && d.endsWith(note) ? `${esc(d.slice(0, -note.length), 160)} ${esc(note)}` : esc(d, 160);
+};
+const rowLine = (f) => { const d = detailOf(f); return `- ${f.advisoryNote ? "⚪" : SEV_ICON[String(f.severity || "").toLowerCase()] || "🔎"} \`${esc(f.file)}:${f.line}\` · **${esc(f.rule || "finding")}**${f.fix ? " · 🔧 one-click fix" : ""}${d ? ` — ${rowDetail(f)}` : ""}`; };
 const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 /**

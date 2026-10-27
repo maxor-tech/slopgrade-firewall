@@ -196,13 +196,20 @@ test("a pack in the server's calibration window (advisory:true) annotates as a W
       { rule: "aws-sg-open-world", table: "infra/main.tf:3", detail: "security group open to 0.0.0.0/0 on all ports", severity: "high" },
       { rule: "aws-sg-open-world", table: "infra/db.tf:9", detail: "security group open to 0.0.0.0/0 on all ports", severity: "high" },
     ] } };
+  const sarif = join(deepWorkspace(), "calib.sarif");
   await withStubbedNetwork(paid, async ({ out }) => {
-    const code = await main(["--gate"], CI_ENV);
+    const code = await main(["--gate", "--sarif", sarif], { ...CI_ENV, FW_UPLOAD_SARIF: "false" });
     assert.equal(code, 0);                                                     // reported, never blocked
     const text = out.join("\n");
     assert.match(text, /iac: 2 finding\(s\) \(advisory — calibration window\)/);
     assert.match(text, /::warning file=infra\/main\.tf,line=3 title=slopGrade Firewall::\[aws-sg-open-world\]/);
     assert.doesNotMatch(text, /::error file=infra\//);
+    // The reason reaches the feed-built channels too (SARIF here ; the PR review renders the same row).
+    const msgs = JSON.parse(readFileSync(sarif, "utf8")).runs[0].results.map((r) => r.message.text);
+    assert.deepEqual(msgs.filter((m) => m.includes("security group")), [
+      "security group open to 0.0.0.0/0 on all ports (advisory — calibration window)",
+      "security group open to 0.0.0.0/0 on all ports (advisory — calibration window)",
+    ]);
   });
 });
 
@@ -321,10 +328,17 @@ for (const scenario of [
         `::${deepBlocks ? "error" : "warning"} file=app.py,line=5 title=slopGrade Firewall deep scan::[CWE-78] request at line 2 reaches sink at line 5${scenario.annotation ?? ""}`,
         ...(scenario.mixed ? ["::error file=app.py,line=4 title=slopGrade Firewall deep scan::[CWE-78] reaches sink at line 4"] : []),
       ]);
+      const note = scenario.annotation ?? "";
+      // The reason reaches every channel built from the feed row, not only the annotation (e2e 2026-10-27).
+      if (!scenario.confirmation) assert.ok(out.includes(`    - app.py:5  [CWE-78] request at line 2 reaches sink at line 5${note}`));
+      const countLine = out.filter((l) => l.includes("kept as warnings by block confidence"));
+      assert.deepEqual(countLine, note ? ['  1 new finding(s) kept as warnings by block confidence (score below the engine threshold) — they do not block. Opt out: block-confidence: "false".'] : []);
       const report = JSON.parse(readFileSync(sarif, "utf8"));
       const atFive = report.runs[0].results.find((r) => r.locations?.[0]?.physicalLocation?.region?.startLine === 5);
       assert.ok(atFive);
       assert.equal(atFive.level, scenario.confirmation || deepBlocks ? "error" : "warning");
+      if (note) assert.ok(atFive.message.text.endsWith(note), atFive.message.text);
+      else assert.doesNotMatch(atFive.message.text, /block confidence/);
       const values = Object.fromEntries(readFileSync(output, "utf8").trim().split(/\r?\n/).map((s) => s.split("=")));
       assert.equal(values["blocking-findings"], String(scenario.blocks));
       assert.equal(values.verdict, scenario.blocks ? "gate-blocked" : "gate-pass");

@@ -82,6 +82,18 @@ test("a blocking finding the PR adds on its own line blocks — and only it coun
   assert.match(body, /Already in the files you changed/);
 });
 
+test("a block-confidence row in the review summary: ⚪ badge, and a long detail is cut BEFORE the note, never through it", () => {
+  const note = "(advisory — block confidence 0.13 below 0.45)";
+  const long = "x".repeat(200);
+  const cls = classifyAgainstDiff([{ file: "app/files.py", line: 8, pack: "heisen", rule: "CWE-78", detail: `${long} ${note}`, severity: "medium", advisoryNote: note }],
+    diffOf({ changed: ["app/files.py:8"], files: ["app/files.py"] }));
+  const row = diffSummaryMarkdown(cls, { gateMode: true }).split("\n").find((l) => l.includes("app/files.py:8"));
+  assert.ok(row.startsWith("- ⚪ `app/files.py:8` · **CWE-78** — "), row);
+  assert.ok(row.endsWith(` ${note}`), row);
+  assert.match(body0(), /This PR introduces 1 finding$/m);
+  function body0() { return diffSummaryMarkdown(cls, { gateMode: true }); }
+});
+
 test("fail-closed : a blocking pack count the feed could not locate is attributed to the PR", () => {
   const diff = diffOf({ files: ["a.ts"] });
   const s = scopedBlocking({ hardLeaks: 0, packBlocking: 2 }, classifyAgainstDiff([{ file: "old.ts", line: 1, pack: "sqli", severity: "high" }], diff), { diff });

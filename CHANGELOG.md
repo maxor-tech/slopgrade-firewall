@@ -5,6 +5,12 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.12.1] — 2026-10-27
+
+### Fixed
+- A Deep Scan finding kept as a warning by block confidence now says why in **every** channel : the PR review (summary bullet + inline comment), the log line and the SARIF message carry `(advisory — block confidence 0.13 below 0.45)`, not only the annotation. A count line under the Deep Scan header says how many findings block confidence kept as warnings and how to opt out. In the PR review such a row wears ⚪ **advisory** instead of 🟡 medium, and a long detail is trimmed before the note, never through it.
+- The same holds for the two other reasons a finding does not block : a pack in the server calibration window `(advisory — calibration window)` and a non-product repository `(advisory — teaching repository)` now carry their reason in the PR review and SARIF, with the ⚪ advisory badge. Found on a live end-to-end PR, where the review showed a bare 🟡 medium with no reason.
+
 ## [0.12.0] — 2026-10-27
 
 First tagged release after 0.11.2 : it also carries the 0.11.3 fixes below.

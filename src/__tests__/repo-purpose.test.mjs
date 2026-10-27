@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { repoPurpose, readmeHead, purposeEnabled, parsePurposeOverride, readPurposeInputs, decidePurpose, purposeAdvisoryLine, PURPOSE_FILE } from "../repo-purpose.mjs";
@@ -216,10 +216,14 @@ test("e2e : a Deep Scan block in a product repo blocks (control) and in a course
   assert.equal(a.code, 1, "control : the product repo must block, or this test proves nothing");
   assert.match(a.text, /::error file=app.py,line=5 title=slopGrade Firewall deep scan::/);
   const course = deepWs(COURSE);
-  const b = await run(course, CI(course, { SLOPGRADE_PURPOSE_CLASSIFIER: "on" }), DEEP_VERDICT, ["--gate", "--deep-scan", "--deep-scan-block"], DEEP_ANSWER);
+  const sarif = join(course, "r.sarif");
+  const b = await run(course, CI(course, { SLOPGRADE_PURPOSE_CLASSIFIER: "on" }), DEEP_VERDICT, ["--gate", "--deep-scan", "--deep-scan-block", "--sarif", sarif], DEEP_ANSWER);
   assert.equal(b.code, 0);
-  assert.match(b.text, /::warning file=app.py,line=5 title=slopGrade Firewall deep scan::/);
+  assert.match(b.text, /::warning file=app.py,line=5 title=slopGrade Firewall deep scan::\[CWE-78\] request value reaches a shell call at line 5 \(advisory — teaching repository\)$/m);
   assert.match(b.text, /findings are advisory/);
+  // Same reason in the feed-built SARIF message (the PR review renders the same row with ⚪ advisory).
+  const msg = JSON.parse(readFileSync(sarif, "utf8")).runs[0].results.find((r) => r.locations?.[0]?.physicalLocation?.region?.startLine === 5).message.text;
+  assert.equal(msg, "request value reaches a shell call at line 5 (advisory — teaching repository)");
 });
 
 test("e2e : `purpose: product` in .slopgrade.yml keeps blocking on", async () => {

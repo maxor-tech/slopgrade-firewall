@@ -87,6 +87,14 @@ test("findingCommentBody: severity icon + rule + detail + dedup marker, and NOT 
   assert.ok(!b.includes("```suggestion"), "a finding comment is not a fix suggestion");
 });
 
+test("findingCommentBody: a row kept as a warning by block confidence wears ⚪ advisory, never 🟡 medium", () => {
+  const note = "(advisory — block confidence 0.13 below 0.45)";
+  const b = findingCommentBody({ rule: "CWE-78", detail: `flow at line 8 ${note}`, severity: "medium", advisoryNote: note });
+  assert.equal(b, `⚪ **slopGrade Firewall** · CWE-78 · advisory\n\nflow at line 8 ${note}\n\n${FINDING_MARKER}`);
+  // An ordinary warning keeps its severity badge.
+  assert.equal(findingCommentBody({ rule: "CWE-78", detail: "flow", severity: "medium" }), `🟡 **slopGrade Firewall** · CWE-78 · medium\n\nflow\n\n${FINDING_MARKER}`);
+});
+
 test("buildFindingComments keeps only findings with a real file:line", () => {
   const cs = buildFindingComments([
     { file: "a.py", line: 5, rule: "sqli", detail: "d", severity: "high" },
