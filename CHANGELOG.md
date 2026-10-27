@@ -5,12 +5,19 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-10-27
+
+First tagged release after 0.11.2 : it also carries the 0.11.3 fixes below.
+
 ### Changed
 - **Block confidence is ON by default in the GitHub Action.** With Deep Scan enabled, it sends three numbers
   (`repo_off`, `repo_teach`, `readme_len`) plus schema/extractor versions; README text never leaves the runner.
   Set `block-confidence: "false"` to opt out. Direct CLI use remains opt-in with `--block-confidence`.
   The hosted switch `SLOPGRADE_BLOCK_CONFIDENCE` must also be ON. Demoted Deep Scan annotations now state
   the block-confidence score and threshold, each to two decimals; other annotation text is unchanged.
+
+### Fixed
+- `weakCrypto` no longer reads a parenthesised catalog literal (`"DES(Unix)"`, a hash-identifier table) or a `DESKeySpec` type in a signature as a cipher use ; `new DESKeySpec(` and `DESKeySpec.x(` still fire (benchmark 2026-10-26, dev split : 5 wrong blocks).
 
 ### Added
 - **Repository purpose.** A deterministic, local classifier (`src/repo-purpose.mjs`, `repoPurpose()`) tells product repos from
