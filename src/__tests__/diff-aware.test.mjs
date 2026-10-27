@@ -159,3 +159,25 @@ test("server kill switch (0.10.1) : gateScope \"repo\" → whole-repo gate ; any
   assert.match(body, /temporarily judging the whole repo/);
   assert.ok(!/never blocks your PR/.test(body), "never promises PR scoping while it is paused");
 });
+
+test("confidence advisories stay visible but do not consume PR blocking counts", async () => {
+  const { heisenFeed, splitAgainstFeed } = await import("../deep-scan.mjs");
+  const { applyBlockConfidence } = await import("../block-confidence.mjs");
+  const meta = { schema: "heisen-block-confidence/v2", model: "synthetic-v2", disposition: "ADVISORY", score: 0.2, tau: 0.45 };
+  const findings = [
+    { path: "a.py", cwe: "CWE-78", p: 0.94, evidence: "reaches sink at line 2", blockConfidence: meta },
+    { path: "a.py", cwe: "CWE-89", p: 0.94, evidence: "reaches sink at line 3", blockConfidence: { ...meta, score: 0.45 } },
+    { path: "b.py", cwe: "CWE-78", p: 0.94, evidence: "reaches sink at line 9" },
+  ];
+  const diff = diffOf({ changed: ["a.py:2", "a.py:3"], files: ["a.py"] });
+  const { fresh } = splitAgainstFeed(heisenFeed(findings, ["a.py", "b.py"]), []);
+  const rows = fresh.map((f) => ({ ...f, severity: applyBlockConfidence(f) ? "medium" : "high" }));
+  const classified = classifyAgainstDiff(rows, diff);
+  assert.equal(classified.length, 3);
+  assert.equal(classified[0].scope, "introduced");
+  assert.equal(classified[0].severity, "medium");
+  const scoped = scopedBlocking({ hardLeaks: 0, packBlocking: 0 }, classified, { deepBlocking: 2, diff });
+  assert.equal(scoped.deepBlocking, 1);
+  assert.equal(scoped.preexistingBlocking, 1);
+  assert.match(diffSummaryMarkdown(classified, { gateMode: true }), /This PR introduces 2 findings · 1 blocking/);
+});

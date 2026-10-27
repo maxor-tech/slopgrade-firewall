@@ -64,6 +64,7 @@ import { prHunks, validChangeReview, C_HUNK, C_REVIEW_NOTE, CPP_HUNK, CPP_REVIEW
 import { fixableHitIndex, attachFixes } from "./src/autofix.mjs";
 import { IGNORE_FILE, parseIgnore, ignoreMatcher, readIgnoreText } from "./src/ignore.mjs";
 import { decidePurpose, purposeAdvisoryLine } from "./src/repo-purpose.mjs";
+import { readRepoAggregates, applyBlockConfidence } from "./src/block-confidence.mjs";
 
 const CODE_EXTS = /\.(py|ts|tsx|js|jsx|mjs|cjs|sql|rb|go|php|prisma|java|cs|rs|c|cc|cpp|h|hpp|kt|scala|ex|exs)$/;
 const TIMEOUT_MS = 20_000;
@@ -179,7 +180,7 @@ async function loadProPacks(origin, oidcToken, root, rel, isIgnored = () => fals
 }
 
 const HELP = `slopGrade Firewall — CI leak detection (free tier: 10 flagship classes · paid repos: the full catalogue, extracted in your runner)
-Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <path>] [--deep-scan [--deep-scan-block] [--library-mode] [--change-review]] [--help]
+Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <path>] [--deep-scan [--deep-scan-block] [--block-confidence] [--library-mode] [--change-review]] [--help]
   --gate           block (exit 1) on a reliable hard leak in an entitled repo (default: advisory, never blocks) ;
                    on a pull request, only what the PR introduced counts (pre-existing debt is reported, never blocks)
   --strict         with --gate, fail CLOSED (exit 1) when no server verdict is available (default: fail open)
@@ -188,6 +189,8 @@ Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <p
   --deep-scan      OPT-IN, paid repos: ALSO send the SOURCE of the sink-bearing files (≤ 80) to the hosted taint engine
                    (heisen). The only mode where code leaves the runner; --print-payload lists the files. Advisory.
   --deep-scan-block  OPT-IN, with --deep-scan and --gate: a NEW deep-scan finding (one no pack reported) BLOCKS the build.
+  --block-confidence  OPT-IN, default OFF: send three repository aggregates with --deep-scan; valid advisory scores
+                   below the engine threshold stay warnings. Missing or malformed metadata keeps existing blocking.
   --library-mode   OPT-IN, with --deep-scan, PACKAGE repos only: also list library-tier candidates (a public function's
                    parameter reaching a sink) as notices to triage - never findings, never blocking.
                    Block precision: ~94% on benchmark code, ≥78% on real-world CVE code (~1 false block in 4-5);
@@ -198,7 +201,7 @@ Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <p
                    per hunk; on real CVE-introducing commits, 19% of commits flagged vs 2.1% of ordinary commits.
   --help           show this help
 Exit codes: 1 only on a gate-blocked verdict (or --strict with no verdict); 0 otherwise (fail open).`;
-const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-block", "--library-mode", "--change-review", "--no-fix"]);
+const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-block", "--block-confidence", "--library-mode", "--change-review", "--no-fix"]);
 
 export async function main(argv = [], env = process.env) {
   if (argv.includes("--help")) { console.log(HELP); return 0; }
@@ -210,6 +213,7 @@ export async function main(argv = [], env = process.env) {
   const printPayload = argv.includes("--print-payload");
   const deepScan = argv.includes("--deep-scan");
   const deepBlock = deepScan && argv.includes("--deep-scan-block");
+  const blockConfidence = deepScan && argv.includes("--block-confidence");
   const libraryMode = deepScan && argv.includes("--library-mode");
   const changeReview = deepScan && argv.includes("--change-review");
   const noFix = argv.includes("--no-fix"); // one-click fix suggestions are ON by default (input `fix: off` opts out)
@@ -333,12 +337,18 @@ export async function main(argv = [], env = process.env) {
   // source — so the engine analyses the functions the PR touched (and their callers), not the whole file again.
   const prRanges = prFiles ? prChangedRanges(env, prEvent, git) : null;
   const deep = deepScan ? selectDeepUnits(files.map(rel), (p) => readFileSync(join(root, p), "utf8"), sinkFiles(packFingerprints), prFiles ?? [], prRanges) : null;
+  let repoAggregates = null;
+  if (blockConfidence) {
+    try { repoAggregates = readRepoAggregates(root, env.GITHUB_REPOSITORY); }
+    catch (error) { ghWarn(`block confidence context unavailable (${errMsg(error)}) — existing Deep Scan blocking retained.`); }
+  }
   // Library mode: only for a checkout that IS a published package (manifest-only, local) — an application never asks.
   const libKind = libraryMode ? repoKind((rel) => { try { return readFileSync(join(root, rel), "utf8"); } catch { return null; } },
     () => { try { return readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith(".")).map((e) => e.name); } catch { return []; } }) : null;
   // Change review (0.10.13): the PR's own diff hunks, read locally like the ranges — listed by --print-payload too.
   const change = changeReview ? prHunks(env, prEvent, git) : null;
   const deepAudit = deep ? { deepScan: { note: "SOURCE of these files is sent (opt-in --deep-scan) — only when the server confirms this repo is paid", files: deep.units.map((u) => u.path), chars: deep.chars, skipped: deep.skipped, fromPr: deep.fromPr, scopedToPrLines: deep.scoped, ...(libKind ? { libraryMode: libKind.kind === "library", repoKind: libKind.why } : {}),
+    ...(repoAggregates ? { blockConfidence: repoAggregates } : {}),
     ...(change ? { changeReview: { note: "these PR hunks (changed lines + 3 lines of context) are sent (opt-in --change-review)", hunks: change.hunks.map((h) => `${h.path}:${h.newStart}`), skipped: change.skipped } } : {}) } } : {};
 
   // 2. EXFILTRATION guard — a custom origin would mint a token for an attacker audience. Run DRY unless opted in.
@@ -424,7 +434,7 @@ export async function main(argv = [], env = process.env) {
     else if (!deep.units.length) deepLine = "no sink-bearing file in an engine-modelled language — nothing sent.";
     else {
       const post = (url, body) => timedFetch(url, { method: "POST", headers: { "content-type": "application/json" }, body });
-      const r = await requestDeepScan(post, origin, oidcToken, sha, deep.units, libKind?.kind === "library", change?.hunks ?? []);
+      const r = await requestDeepScan(post, origin, oidcToken, sha, deep.units, libKind?.kind === "library", change?.hunks ?? [], repoAggregates);
       if (r.state === "plan-required") ghWarn(`deep scan is a paid feature — no source was analysed. Enable it: ${origin}/ci`);
       else if (r.state === "unavailable") ghWarn(`deep scan unavailable (${r.status}) — verdict unaffected.`);
       else {
@@ -489,12 +499,13 @@ export async function main(argv = [], env = process.env) {
     const { fresh, confirmed } = splitAgainstFeed(deepRows, feed);
     // Opt-in `deep-scan-block`: a NEW finding (no pack reported that line) is blocking (high) and counts toward the gate;
     // otherwise it stays an advisory warning. A confirming row is never re-annotated (its pack already reported it).
-    deepBlocking = deepBlock ? fresh.length : 0;
     const mode = deepBlock ? "blocking — opted in" : "advisory";
     line(`\nslopGrade Firewall — deep scan (heisen taint engine, ${mode}): ${deepLine}${deepRows.length ? ` · ${fresh.length} new finding(s), ${confirmed.length} confirming an existing one` : " · 0 finding(s)"}`);
     for (const f of fresh) {
-      const blocksHere = deepBlock && !purposeAdvisory; // deepBlocking above still counts what WOULD block (see the exit decision)
-      const row = deepBlock ? { ...f, severity: blocksHere ? "high" : "medium", ...(blocksHere ? {} : { origSeverity: "high" }) } : f;
+      const promote = deepBlock && !(repoAggregates && applyBlockConfidence(f));
+      if (promote) deepBlocking++; // Preserve the existing purpose-policy accounting below.
+      const blocksHere = promote && !purposeAdvisory;
+      const row = promote ? { ...f, severity: blocksHere ? "high" : "medium", ...(blocksHere ? {} : { origSeverity: "high" }) } : f;
       console.log(`::${blocksHere ? "error" : "warning"} file=${wfFile(row.file)},line=${row.line} title=slopGrade Firewall deep scan::[${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}`);
       line(`    - ${sanitizeLogLine(row.file)}:${row.line}  [${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}`);
       feed.push(row);

@@ -222,3 +222,34 @@ test("deep-scan-block claim: every surface states >=78% (25 of 32) and no withdr
     assert.doesNotMatch(s, /1 false block in 3-4/, p);
   }
 });
+
+test("block confidence OFF is byte-identical; ON adds only the versioned aggregate object", async () => {
+  const bodies = [];
+  const post = async (_url, body) => { bodies.push(body); return { status: 200, json: async () => ({ ok: true, findings: [], scanned: 1, unanswered: 0 }) }; };
+  const units = [{ path: "a.py", code: "x" }];
+  for (const [library, hunks] of [[false, []], [true, [{ path: "a.py", newStart: 1 }]]]) {
+    const legacy = JSON.stringify({ oidcToken: "tok", sha: "sha", units, ...(library ? { library: true } : {}), ...(hunks.length ? { hunks } : {}) });
+    await requestDeepScan(post, "o", "tok", "sha", units, library, hunks);
+    assert.equal(bodies.at(-1), legacy);
+    await requestDeepScan(post, "o", "tok", "sha", units, library, hunks, { repo_off: 2, repo_teach: 3, readme_len: 4, readme: "PRIVATE-README", author: "PRIVATE-AUTHOR" });
+    assert.deepEqual(JSON.parse(bodies.at(-1)), { ...JSON.parse(legacy), blockConfidence: {
+      schema: "heisen-block-confidence/v2", extractor: "repo-aggregates/1", repo_off: 2, repo_teach: 3, readme_len: 4,
+    } });
+    assert.doesNotMatch(bodies.at(-1), /PRIVATE/);
+  }
+});
+
+test("heisenFeed preserves both confidence spellings without rejecting malformed optional metadata", () => {
+  const finding = { path: "a.py", cwe: "CWE-78", p: 0.94, evidence: "reaches sink at line 3" };
+  for (const key of ["blockConfidence", "block_confidence"]) {
+    for (const value of [{ schema: "heisen-block-confidence/v2", model: "synthetic-v2", disposition: "ADVISORY", score: 0.2, tau: 0.45 }, null, { score: "bad" }]) {
+      const findings = [{ ...finding, [key]: value }];
+      assert.equal(validHeisenResponse({ ok: true, findings, scanned: 1, unanswered: 0 }), true);
+      const feed = heisenFeed(findings, ["a.py"]);
+      assert.equal(feed.length, 1);
+      assert.deepEqual(feed[0][key], value);
+      assert.equal(feed[0].severity, "medium");
+      assert.equal(feed[0].line, 3);
+    }
+  }
+});
