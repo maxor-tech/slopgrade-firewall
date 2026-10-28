@@ -12,7 +12,7 @@ jobs:
       # Sends findings to the Security tab (Code Scanning: inline PR annotations, tracked + dismissible, free on public repos). Missing → it skips cleanly.
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
       # Dogfood : this repo IS the Action, so it runs the checked-out code under review (`./`), not a pinned release.
       # A pinned older release scanned this repo's own detector pattern tables with the patterns a PR is fixing, so a

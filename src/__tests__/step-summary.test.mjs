@@ -64,3 +64,19 @@ test("emitStepSummary — a write error is swallowed (never breaks the gate)", (
   const boom = () => { throw new Error("EACCES"); };
   assert.equal(emitStepSummary({ GITHUB_STEP_SUMMARY: "/tmp/s.md" }, "## report", boom), false);
 });
+
+// e2e 2026-10-27 (slopgrade-gate-e2e#9) : the run page showed « This PR 2 new findings » under a green check, with no
+// blocking count and no word on Deep Scan or block confidence.
+test("stepSummaryMarkdown : the PR line carries the blocking count and Deep Scan says what block confidence kept", () => {
+  const v = { pattern: "none", hardLeaks: 0, packBlocking: 0, conformancePct: null, leaks: [] };
+  const md = stepSummaryMarkdown(v, { decision: "gate-pass", scope: { introduced: 2, blocking: 0, preexistingBlocking: 0 },
+    deep: { findings: 2, mode: "blocking", blocking: 0, kept: 2 } });
+  const lines = md.split("\n");
+  assert.ok(lines.includes("- **This PR** 2 new findings · 0 blocking"), md);
+  assert.ok(lines.includes("- **Deep Scan** (blocking) 2 new findings · 0 blocking · 2 kept as warnings by block confidence (score below the engine threshold)"), md);
+  // Advisory Deep Scan : no blocking count, no confidence clause when nothing was kept.
+  const adv = stepSummaryMarkdown(v, { decision: "gate-pass", deep: { findings: 1, mode: "advisory", blocking: 0, kept: 0 } });
+  assert.ok(adv.split("\n").includes("- **Deep Scan** (advisory) 1 new finding"), adv);
+  // No Deep Scan run → no Deep Scan line.
+  assert.doesNotMatch(stepSummaryMarkdown(v, { decision: "gate-pass" }), /Deep Scan/);
+});

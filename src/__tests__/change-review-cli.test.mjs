@@ -64,7 +64,7 @@ test("--change-review on a PR: the removed check is sent as a hunk and printed a
     assert.match(hunks[0].text, /^-    if not os\.path\.realpath\(path\)\.startswith\(BASE\):$/m);
     const text = out.join("\n");
     assert.match(text, /change review \(heisen-slop-55m, triage\): 1 of 1 PR hunk\(s\) look like they weaken a security check/);
-    assert.match(text, /::notice file=files\.py,line=\d+ title=slopGrade change review \(triage\)::this change may weaken a security check \(p=0\.9995\)/);
+    assert.match(text, /::notice file=files\.py,line=\d+,title=slopGrade change review \(triage\)::this change may weaken a security check \(p=0\.9995\)/);
   } finally {
     globalThis.fetch = realFetch;
     console.log = realLog;

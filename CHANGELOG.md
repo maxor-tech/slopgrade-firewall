@@ -10,6 +10,9 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 ### Fixed
 - A Deep Scan finding kept as a warning by block confidence now says why in **every** channel : the PR review (summary bullet + inline comment), the log line and the SARIF message carry `(advisory — block confidence 0.13 below 0.45)`, not only the annotation. A count line under the Deep Scan header says how many findings block confidence kept as warnings and how to opt out. In the PR review such a row wears ⚪ **advisory** instead of 🟡 medium, and a long detail is trimmed before the note, never through it.
 - The same holds for the two other reasons a finding does not block : a pack in the server calibration window `(advisory — calibration window)` and a non-product repository `(advisory — teaching repository)` now carry their reason in the PR review and SARIF, with the ⚪ advisory badge. Found on a live end-to-end PR, where the review showed a bare 🟡 medium with no reason.
+- **Annotations landed on line 0 with no title — for every pack, every customer.** GitHub separates workflow-command properties with commas ; the Action wrote `line=8 title=…` with a space, so GitHub read the line as « 8 title=… », stored line 0 and dropped the title. The check-run annotations therefore never showed inline on the diff. All five file annotations (cross-tenant, packs, Deep Scan, library candidates, change review) now write `line=8,title=…` ; a test parses every emitted annotation with GitHub's grammar.
+- The Step Summary (run page) says what this PR blocks on (`This PR 2 new findings · 0 blocking`) and, when Deep Scan ran, what it found, what blocked and how many findings block confidence kept as warnings.
+- Every run printed « Node.js 20 is deprecated » because the Action pinned `actions/setup-node` v4 : now pinned (by SHA) to v7.1.0, which runs on node24. The README snippet uses `actions/checkout@v7`.
 
 ## [0.12.0] — 2026-10-27
 

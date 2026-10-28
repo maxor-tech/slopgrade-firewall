@@ -528,7 +528,7 @@ export function offerLogLine(offer) {
  * (data-driven via collectPackBlocks, so a pack the server adds tomorrow renders today) + the "see all / enable"
  * CTA. Pure. `decision` is the firewallVerdict kind (gate-blocked | gate-unpaid | pass).
  */
-export function stepSummaryMarkdown(v, { origin = DEFAULT_ORIGIN, blobBase = null, decision = "pass", scope = null, offer = null } = {}) {
+export function stepSummaryMarkdown(v, { origin = DEFAULT_ORIGIN, blobBase = null, decision = "pass", scope = null, offer = null, deep = null } = {}) {
   const hard = Number(v && v.hardLeaks) || 0;
   const packBlocking = Number(v && v.packBlocking) || 0;
   const head = "## 🛡️ slopGrade Firewall — tenant isolation";
@@ -548,8 +548,13 @@ export function stepSummaryMarkdown(v, { origin = DEFAULT_ORIGIN, blobBase = nul
   const facts = `- **Pattern** \`${(v && v.pattern) || "n/a"}\`${v && v.tenantKey ? ` · **Tenant key** \`${v.tenantKey}\`` : ""}\n`
     + `- **Conformance** ${v && v.conformancePct == null ? "n/a" : Number(v.conformancePct).toFixed(1) + "%"}`
     + (Number(v && v.byId) > 0 ? `\n- **+${v.byId}** conditional by-id access${Number(v.byId) === 1 ? "" : "es"} (review)` : "")
-    + (scoped ? `\n- **This PR** ${Number(scope.introduced) || 0} new finding${Number(scope.introduced) === 1 ? "" : "s"}`
-      + (Number(scope.preexistingBlocking) > 0 ? ` · ${scope.preexistingBlocking} pre-existing blocking (reported, never blocks this PR)` : "") : "");
+    + (scoped ? `\n- **This PR** ${Number(scope.introduced) || 0} new finding${Number(scope.introduced) === 1 ? "" : "s"} · ${sBlocking} blocking`
+      + (Number(scope.preexistingBlocking) > 0 ? ` · ${scope.preexistingBlocking} pre-existing blocking (reported, never blocks this PR)` : "") : "")
+    // Deep Scan (opt-in) : what it found, what blocked, and how many block confidence kept as warnings (e2e 2026-10-27 :
+    // the run page said « 2 new findings » under a green check with no word on why none blocked).
+    + (deep && typeof deep === "object" ? `\n- **Deep Scan** (${deep.mode === "blocking" ? "blocking" : "advisory"}) ${Number(deep.findings) || 0} new finding${Number(deep.findings) === 1 ? "" : "s"}`
+      + (deep.mode === "blocking" ? ` · ${Number(deep.blocking) || 0} blocking` : "")
+      + (Number(deep.kept) > 0 ? ` · ${deep.kept} kept as warning${Number(deep.kept) === 1 ? "" : "s"} by block confidence (score below the engine threshold)` : "") : "");
   const leaks = (Array.isArray(v && v.leaks) ? v.leaks : []).slice(0, 20).map(parseLeak).filter((p) => p.file);
   const leakTable = leaks.length
     ? "\n\n| Cross-tenant leak |\n|:--|\n" + leaks.map((p) => `| ${fileLink(blobBase, p.file, p.line)} |`).join("\n")

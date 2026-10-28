@@ -9,6 +9,7 @@ import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { main } from "../../isolation-gate.mjs";
+import { parseWorkflowCommand } from "./_workflow-command.mjs";
 
 // The walk excludes `__tests__/` (so CI_ENV's workspace scans nothing — fast, deterministic). The pro tests need a
 // workspace with real files to extract from : a throwaway dir with one code file and one non-code file.
@@ -92,8 +93,8 @@ test("renders EVERY pack the server returns (sqli/cmdi/weakCrypto/secrets), not 
     assert.match(text, /hardcoded secrets: 1 finding\(s\)/);
     assert.doesNotMatch(text, /cross-site scripting: 0/);                 // count 0 → not rendered
     // one ::error annotation per located finding, on the right file:line, never an empty message
-    assert.match(text, /::error file=src\/app\.js,line=10 title=slopGrade Firewall::\[gated\] SQL injection finding here/);
-    assert.match(text, /::error file=src\/ping\.py,line=9 title=slopGrade Firewall::\[gated\] command injection finding here/);
+    assert.match(text, /::error file=src\/app\.js,line=10,title=slopGrade Firewall::\[gated\] SQL injection finding here/);
+    assert.match(text, /::error file=src\/ping\.py,line=9,title=slopGrade Firewall::\[gated\] command injection finding here/);
     assert.doesNotMatch(text, /::error file=[^\n]*::\[gated\] $/m);        // the B-P1-5 empty annotation is gone
     assert.match(text, /\+1 more hidden/);
     assert.equal(calls.length, 3);                                           // 1 OIDC mint + 1 pro ask (402) + 1 POST, nothing else
@@ -190,6 +191,17 @@ test("--print-payload outside CI prints the free payload and contacts nothing (u
   }, proResponse());
 });
 
+test("an annotation on a path with a comma or colon uses GitHub's escapes, so it attaches to the real file", async () => {
+  const paid = { ...VERDICT, gateEntitled: true, gateLevel: "paid", packBlocking: 1,
+    sqli: { count: 1, hidden: 0, blocking: 1, findings: [{ rule: "concat-sql", table: "api/a,b:c%.ts:7", detail: "request data in SQL", severity: "high" }] } };
+  await withStubbedNetwork(paid, async ({ out }) => {
+    await main(["--gate"], { ...CI_ENV, FW_UPLOAD_SARIF: "false" });
+    const a = out.find((l) => l.startsWith("::error file=api/"));
+    assert.equal(a, "::error file=api/a%2Cb%3Ac%25.ts,line=7,title=slopGrade Firewall::[concat-sql] request data in SQL");
+    assert.equal(parseWorkflowCommand(a).props.line, "7");
+  });
+});
+
 test("a pack in the server's calibration window (advisory:true) annotates as a WARNING and never counts as blocking in the feed", async () => {
   const paid = { ...VERDICT, gateEntitled: true, gateLevel: "paid", packBlocking: 0,
     iac: { count: 2, hidden: 0, blocking: 0, advisory: true, findings: [
@@ -202,7 +214,7 @@ test("a pack in the server's calibration window (advisory:true) annotates as a W
     assert.equal(code, 0);                                                     // reported, never blocked
     const text = out.join("\n");
     assert.match(text, /iac: 2 finding\(s\) \(advisory — calibration window\)/);
-    assert.match(text, /::warning file=infra\/main\.tf,line=3 title=slopGrade Firewall::\[aws-sg-open-world\]/);
+    assert.match(text, /::warning file=infra\/main\.tf,line=3,title=slopGrade Firewall::\[aws-sg-open-world\]/);
     assert.doesNotMatch(text, /::error file=infra\//);
     // The reason reaches the feed-built channels too (SARIF here ; the PR review renders the same row).
     const msgs = JSON.parse(readFileSync(sarif, "utf8")).runs[0].results.map((r) => r.message.text);
@@ -240,7 +252,7 @@ test("a paid verdict with packBlocking>0 exits 1 AND names the located findings"
     const code = await main(["--gate"], CI_ENV);
     assert.equal(code, 1);
     const text = out.join("\n");
-    assert.match(text, /::error file=src\/app\.js,line=14 title=slopGrade Firewall::\[interp-sql\] template literal query/);
+    assert.match(text, /::error file=src\/app\.js,line=14,title=slopGrade Firewall::\[interp-sql\] template literal query/);
     assert.match(text, /2 blocking security finding\(s\)[^\n]*build blocked/);
   });
 });
@@ -313,7 +325,7 @@ for (const scenario of [
     await withStubbedNetwork(paid, async ({ calls, out }) => {
       const args = ["--gate", "--deep-scan", "--sarif", sarif, ...(scenario.noDeepBlock ? [] : ["--deep-scan-block"]), ...(scenario.on ? ["--block-confidence"] : [])];
       const code = await main(args, { ...CI_ENV, GITHUB_WORKSPACE: ws, GITHUB_REPOSITORY: scenario.noRepo ? undefined : "poc/service",
-        GITHUB_OUTPUT: output, FW_UPLOAD_SARIF: "false", SLOPGRADE_PURPOSE_CLASSIFIER: "off" });
+        GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: join(ws, "summary.md"), FW_UPLOAD_SARIF: "false", SLOPGRADE_PURPOSE_CLASSIFIER: "off" });
       assert.equal(code, scenario.blocks ? 1 : 0);
       const request = JSON.parse(heisenCalls(calls)[0].opts.body);
       if (scenario.on && !scenario.noRepo) {
@@ -323,11 +335,17 @@ for (const scenario of [
       assert.doesNotMatch(heisenCalls(calls)[0].opts.body, /PRIVATE-README/);
       const text = out.join("\n");
       const deepBlocks = scenario.deep ?? scenario.blocks;
-      const annotations = out.filter((line) => line.includes(" title=slopGrade Firewall deep scan::"));
+      const annotations = out.filter((line) => line.includes(",title=slopGrade Firewall deep scan::"));
       assert.deepEqual(annotations, scenario.confirmation ? [] : [
-        `::${deepBlocks ? "error" : "warning"} file=app.py,line=5 title=slopGrade Firewall deep scan::[CWE-78] request at line 2 reaches sink at line 5${scenario.annotation ?? ""}`,
-        ...(scenario.mixed ? ["::error file=app.py,line=4 title=slopGrade Firewall deep scan::[CWE-78] reaches sink at line 4"] : []),
+        `::${deepBlocks ? "error" : "warning"} file=app.py,line=5,title=slopGrade Firewall deep scan::[CWE-78] request at line 2 reaches sink at line 5${scenario.annotation ?? ""}`,
+        ...(scenario.mixed ? ["::error file=app.py,line=4,title=slopGrade Firewall deep scan::[CWE-78] reaches sink at line 4"] : []),
       ]);
+      // Every file annotation the run printed parses under GitHub's grammar : integer line, non-empty title.
+      for (const a of out.filter((l) => /^::(error|warning|notice) file=/.test(l))) {
+        const { props } = parseWorkflowCommand(a);
+        assert.match(props.line, /^\d+$/, a);
+        assert.ok(props.title, a);
+      }
       const note = scenario.annotation ?? "";
       // The reason reaches every channel built from the feed row, not only the annotation (e2e 2026-10-27).
       if (!scenario.confirmation) assert.ok(out.includes(`    - app.py:5  [CWE-78] request at line 2 reaches sink at line 5${note}`));
@@ -343,6 +361,13 @@ for (const scenario of [
       assert.equal(values["blocking-findings"], String(scenario.blocks));
       assert.equal(values.verdict, scenario.blocks ? "gate-blocked" : "gate-pass");
       if (scenario.mixed) assert.match(text, /1 deep-scan finding\(s\)/);
+      // The run page (Step Summary) says what Deep Scan found and what block confidence kept as a warning.
+      const deepLine = readFileSync(join(ws, "summary.md"), "utf8").split("\n").find((l) => l.startsWith("- **Deep Scan**"));
+      const nFresh = scenario.confirmation ? 0 : scenario.mixed ? 2 : 1;
+      // Deep Scan blocks = fresh rows promoted : the mixed line-4 row ; never a confirmation ; never the pack's own block.
+      const deepPromoted = scenario.confirmation ? 0 : scenario.mixed ? 1 : scenario.pack ? 0 : scenario.blocks;
+      assert.equal(deepLine, `- **Deep Scan** (${scenario.noDeepBlock ? "advisory" : "blocking"}) ${nFresh} new finding${nFresh === 1 ? "" : "s"}`
+        + (scenario.noDeepBlock ? "" : ` · ${deepPromoted} blocking`) + (note ? " · 1 kept as warning by block confidence (score below the engine threshold)" : ""));
     }, PRO_FREE, deep);
   });
 }

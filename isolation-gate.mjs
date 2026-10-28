@@ -460,9 +460,11 @@ export async function main(argv = [], env = process.env) {
   const feed = []; // normalized {file,line,rule,detail,severity} for the inline PR comment feed (CodeRabbit-style)
 
   // `file=` is a workflow-command argument: sanitize it like every other server string (no `,`/`::` spoof).
-  const wfFile = (f) => sanitizeLogLine(f).replace(/[,:]/g, "_");
+  // GitHub's property escapes (% first) : a `,` or `:` in a path stays the REAL path, so the annotation attaches to the
+  // file (the old `_` replacement pointed at a file that does not exist).
+  const wfFile = (f) => sanitizeLogLine(f).replace(/%/g, "%25").replace(/:/g, "%3A").replace(/,/g, "%2C");
   for (const p of (Array.isArray(v.leaks) ? v.leaks : []).map(parseLeak)) {
-    if (p.file) { console.log(`::error file=${wfFile(p.file)},line=${p.line} title=slopGrade Firewall::${p.message}`); feed.push({ file: p.file, line: p.line, pack: "cross-tenant", rule: "cross-tenant", detail: p.message, severity: "high" }); }
+    if (p.file) { console.log(`::error file=${wfFile(p.file)},line=${p.line},title=slopGrade Firewall::${p.message}`); feed.push({ file: p.file, line: p.line, pack: "cross-tenant", rule: "cross-tenant", detail: p.message, severity: "high" }); }
   }
   // Every detector pack the server returned — DATA-DRIVEN (collectPackBlocks), never a hardcoded key list: a pack
   // missing from a static list would be silently dropped from the log, the feed and the SARIF (release-audit B-P0-2).
@@ -486,7 +488,7 @@ export async function main(argv = [], env = process.env) {
         ? String(f.detail)
         : `${label} finding here — the exact rule and the remaining findings are unlocked with the gate: ${origin}/ci`;
       if (loc.file) {
-        console.log(`::${advisory ? "warning" : "error"} file=${wfFile(loc.file)},line=${loc.line} title=slopGrade Firewall::[${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(detail)}`);
+        console.log(`::${advisory ? "warning" : "error"} file=${wfFile(loc.file)},line=${loc.line},title=slopGrade Firewall::[${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(detail)}`);
         // origSeverity lets the exit decision below count what WOULD have blocked, to print the purpose line only then.
         // The reason rides in the feed row too (review + SARIF), not only in the pack header line (e2e 2026-10-27).
         const note = calibrating ? "(advisory — calibration window)" : demoted ? `(advisory — ${purpose.purpose} repository)` : "";
@@ -498,6 +500,7 @@ export async function main(argv = [], env = process.env) {
     if (block.hidden > 0) line(`    ... +${block.hidden} more hidden — enable the gate to see them all: ${origin}/ci`);
   }
 
+  let deepSummary = null; // for the Step Summary : the run page must say what Deep Scan found and why it did not block
   if (deepLine !== null) {
     const { fresh, confirmed } = splitAgainstFeed(deepRows, feed);
     // Opt-in `deep-scan-block`: a NEW finding (no pack reported that line) is blocking (high) and counts toward the gate;
@@ -519,11 +522,12 @@ export async function main(argv = [], env = process.env) {
       const note = confidenceNote || purposeNote;
       const base = note ? { ...f, detail: `${f.detail}${note}`, advisoryNote: note.trim() } : f;
       const row = promote ? { ...base, severity: blocksHere ? "high" : "medium", ...(blocksHere ? {} : { origSeverity: "high" }) } : base;
-      console.log(`::${blocksHere ? "error" : "warning"} file=${wfFile(row.file)},line=${row.line} title=slopGrade Firewall deep scan::[${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}`);
+      console.log(`::${blocksHere ? "error" : "warning"} file=${wfFile(row.file)},line=${row.line},title=slopGrade Firewall deep scan::[${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}`);
       line(`    - ${sanitizeLogLine(row.file)}:${row.line}  [${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}`);
       feed.push(row);
     }
     if (bcDemoted) line(`  ${bcDemoted} new finding(s) kept as warnings by block confidence (score below the engine threshold) — they do not block. Opt out: block-confidence: "false".`);
+    deepSummary = { findings: fresh.length, mode: deepBlock ? "blocking" : "advisory", kept: bcDemoted };
   }
   // Library mode: candidates are a SEPARATE triage list — notices, never in `feed` (so never in the gate, the PR review
   // blocking count or SARIF). The measured caveat is printed with them, so nobody reads them as proven findings.
@@ -534,7 +538,7 @@ export async function main(argv = [], env = process.env) {
     if (outcomes) line(`  ${outcomes}`);
     if (libRanked) line(`  ${CANDIDATES_RANKED_NOTE}`);
     for (const c of libRows.slice(0, 50)) {
-      console.log(`::notice file=${wfFile(c.file)},line=${c.line} title=slopGrade library candidate (triage)::[${sanitizeLogLine(c.rule)}] ${sanitizeLogLine(c.detail)}`);
+      console.log(`::notice file=${wfFile(c.file)},line=${c.line},title=slopGrade library candidate (triage)::[${sanitizeLogLine(c.rule)}] ${sanitizeLogLine(c.detail)}`);
       line(`    - ${sanitizeLogLine(c.file)}:${c.line}  [${sanitizeLogLine(c.rule)}] candidate`);
     }
     if (libRows.length) line(`  ${CANDIDATE_DISMISS_HINT}`);
@@ -551,7 +555,7 @@ export async function main(argv = [], env = process.env) {
       if (change.hunks.some((h) => CPP_HUNK.test(h.path))) line(CPP_REVIEW_NOTE);
       if (change.hunks.some((h) => RUST_HUNK.test(h.path))) line(RUST_REVIEW_NOTE);
       for (const f of changeBlock.flagged.slice(0, 20)) {
-        console.log(`::notice file=${wfFile(f.path)},line=${f.newStart} title=slopGrade change review (triage)::this change may weaken a security check (p=${f.p.toFixed(4)}) — ${noticeHint(change.hunks, f)}`);
+        console.log(`::notice file=${wfFile(f.path)},line=${f.newStart},title=slopGrade change review (triage)::this change may weaken a security check (p=${f.p.toFixed(4)}) — ${noticeHint(change.hunks, f)}`);
         line(`    - ${sanitizeLogLine(f.path)}:${f.newStart}  p=${f.p.toFixed(4)}`);
       }
     }
@@ -663,7 +667,8 @@ export async function main(argv = [], env = process.env) {
   try {
     const blobBase = githubBlobBase(env, (prCtx && prCtx.headSha) || env.GITHUB_SHA || null);
     const scope = classified ? { introduced: classified.filter((f) => f.scope === "introduced").length, blocking: gateHard + gatePack + gateDeep, preexistingBlocking: scoped.preexistingBlocking } : null;
-    emitStepSummary(env, stepSummaryMarkdown(v, { origin, blobBase, decision: decision.kind, scope, offer }), appendFileSync);
+    const deep = deepSummary ? { ...deepSummary, blocking: gateDeep } : null;
+    emitStepSummary(env, stepSummaryMarkdown(v, { origin, blobBase, decision: decision.kind, scope, offer, deep }), appendFileSync);
   } catch (e) { ghWarn(`step summary skipped (${errMsg(e)}).`); }
   const ofPr = scoped ? " introduced by this PR" : "";
   if (decision.kind === "gate-blocked") {
