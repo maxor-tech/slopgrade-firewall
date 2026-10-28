@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions: { contents: read, id-token: write, pull-requests: write }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
       - uses: maxor-tech/slopgrade-firewall@v0.12.1
 ```
@@ -49,7 +49,7 @@ jobs:
       pull-requests: write       # optional: post the inline finding feed on the PR (omit to skip the feed)
       security-events: write     # optional: send findings to the Security tab (Code Scanning) — free on public repos
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
       - uses: maxor-tech/slopgrade-firewall@<sha>   # pin the commit SHA (a tag can be re-pointed; a SHA cannot)
         with:
