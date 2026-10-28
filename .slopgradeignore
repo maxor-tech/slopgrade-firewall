@@ -1,0 +1,7 @@
+# This repo IS the scanner. These three files hold detector PATTERN TABLES (regexes that name DES/RC4/MD5,
+# libxml NOENT, BinaryFormatter …) plus pure text-matching code with no sink. Scanning them reports the
+# patterns themselves : 4 open Code Scanning alerts on our own Security tab (2026-10-27), and PR #64 blocked
+# by its own detector. Listed by exact path — every other file of the client stays scanned.
+/src/crypto-extract.mjs
+/src/xxe-extract.mjs
+/src/deser-extract.mjs
