@@ -5,6 +5,24 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.12.2] — 2026-10-31
+
+Precision release : the PR-replay benchmark labels (run2) re-checked on the current extractors, every labelled
+file re-scanned at its commit. Wrong blocks still firing : weakCrypto 15 → 0, cmdi / path traversal / sqli / xss
+38 → 23. Every labelled true finding still fires (49/49).
+
+### Fixed
+- `weakCrypto` : a bare `"rc4"` that is one item of a **name list** (a keyword list, a build manifest, a
+  javascript-obfuscator `stringArrayEncoding: ["rc4", "base64"]`), a bare literal only inside a **trailing comment**,
+  and a Java **enum constant** `DES("6", "…"),` are not cipher uses. A list made only of cipher names, an object value
+  (`"cipher": "rc4"`) and every API use still fire.
+- A rule named after a language (`php-`, `ruby-`/`rails-`, `py-`, `node-`/`react-`, `java-`) fires only on that
+  language's files : `ruby-exec` no longer fires on Java or Python, `py-open` no longer on Java.
+- A packed or vendored single-file build (long joined lines, such as Adminer) is skipped by the injection extractors.
+- `xss` : an echo of a ternary that only compares the superglobal and outputs two literals is not XSS.
+- Path traversal : `fopen` / `readfile` / `file_get_contents` on a literal `http(s)://` URL is a fetch, not a local
+  path (`include` of a URL still fires) ; a sink whose first argument is a plain quoted path is a constant file.
+
 ## [0.12.1] — 2026-10-27
 
 ### Fixed
