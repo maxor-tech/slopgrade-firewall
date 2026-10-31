@@ -32,6 +32,17 @@ const isComment = (l) => /^\s*(\/\/|\*|#|--|;|<!--)/.test(l);
 const RESOLVER_WINDOW = 12;
 const PHP_NOENT_TESTED = /(?<!&)&(?!&)\s*~?\s*\\?LIBXML_NOENT\b|~\s*\\?LIBXML_NOENT\b/g;
 const stripLiterals = (l) => l.replace(/(["'])(?:\\.|(?!\1)[^\\])*\1/g, '""');
+// Java — `setExpandEntityReferences(true)` is the JAXP DEFAULT : on its own it expands only the entities the parser may
+// load. On a factory that also turns the DOCTYPE off, or turns BOTH external general and parameter entities off,
+// within FACTORY_WINDOW lines (PR-replay labels 2026-10-31 : craftercms SecuredConf keeps `&amp;` in one text node, 13
+// lines below its hardening),
+// no external entity is ever loaded — not XXE. The feature can be named by its URI or by a constant.
+const FACTORY_WINDOW = 20;
+const FEATURE = (uri, constant, on) => new RegExp(`setFeature\\s*\\(\\s*(?:["'][^"']*${uri}["']|[\\w.]*${constant}\\w*)\\s*,\\s*(?:${on}|Boolean\\.${on.toUpperCase()})\\s*\\)`);
+const DOCTYPE_OFF = FEATURE("disallow-doctype-decl", "DISALLOW_DOCTYPE", "true");
+const GENERAL_OFF = FEATURE("external-general-entities", "EXTERNAL_GENERAL_ENTITIES", "false");
+const PARAMETER_OFF = FEATURE("external-parameter-entities", "EXTERNAL_PARAMETER_ENTITIES", "false");
+const hardenedFactory = (win) => DOCTYPE_OFF.test(win) || (GENERAL_OFF.test(win) && PARAMETER_OFF.test(win));
 
 /** Scan one file → [{line, kind}]. Source line NEVER leaves this function. */
 export function extractXxe(text) {
@@ -48,6 +59,10 @@ export function extractXxe(text) {
       if (kind === "dotnet-dtd" && !/XmlUrlResolver/.test(l)) {
         const win = lines.slice(Math.max(0, i - RESOLVER_WINDOW), Math.min(lines.length, i + RESOLVER_WINDOW + 1)).join("\n");
         if (/\bXmlResolver\s*=\s*null\b/.test(win) && !/XmlUrlResolver/.test(win)) continue;   // no resolver → no XXE
+      }
+      if (kind === "java-entities" && /setExpandEntityReferences\s*\(\s*true\s*\)/.test(l) && !re.test(l.replace(/setExpandEntityReferences\s*\(\s*true\s*\)/, ""))) {
+        const win = lines.slice(Math.max(0, i - FACTORY_WINDOW), Math.min(lines.length, i + FACTORY_WINDOW + 1)).join("\n");
+        if (hardenedFactory(win)) continue;   // external entities and DTDs already off on this factory
       }
       out.push({ line: i + 1, kind });
     }
