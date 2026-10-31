@@ -53,6 +53,7 @@ const DIRECT_PATTERNS = [
   ["java-sql", new RegExp(`\\b(?:createQuery|createNativeQuery|createSQLQuery|executeQuery|executeUpdate|executeLargeUpdate|prepareStatement)\\s*\\(\\s*[^;]*"[^"]*(?:SELECT|INSERT|UPDATE|DELETE|WHERE|FROM|ORDER\\s+BY|UNION)[^"]*"\\s*\\+\\s*[^;]*\\b(?:request|req|httpRequest)\\s*\\.\\s*get(?:Parameter|ParameterValues|Header|QueryString|PathInfo)\\b`)],
 ];
 
+import { isPackedSource, kindAppliesToFile } from "./lang-scope.mjs";
 import { runTaintPass, mentions } from "./taint-core.mjs";
 import { findSinkWrappers, interprocHit } from "./taint-interproc.mjs";
 
@@ -134,14 +135,16 @@ function taintPass(lines, text, importedWrappers) {
 }
 
 /** Scan one file → [{line, kind}]. Direct + taint + inter-proc; `importedWrappers` enables the cross-file layer. */
-export function extractSqli(text, importedWrappers) {
+export function extractSqli(text, importedWrappers, file) {
   const out = [];
+  if (isPackedSource(text)) return out;   // a vendored / packed single-file build (lang-scope.mjs)
   const lines = String(text).split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (l.length > 4000) continue;   // minified blob — noise
     if (isComment(l)) continue;      // a sink named in a comment is documentation, not live code
     for (const [kind, re] of DIRECT_PATTERNS) {
+      if (!kindAppliesToFile(kind, file)) continue;   // a language rule fires only on its own files (lang-scope.mjs)
       if (re.test(l)) out.push({ line: i + 1, kind });
     }
   }
@@ -151,5 +154,5 @@ export function extractSqli(text, importedWrappers) {
 
 /** The SQL-injection fingerprint for one file — locations + kinds, no source. `importedWrappers` enables cross-file. */
 export function extractSqliFingerprint(text, file, importedWrappers) {
-  return { file, hits: extractSqli(text, importedWrappers) };
+  return { file, hits: extractSqli(text, importedWrappers, file) };
 }

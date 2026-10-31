@@ -5,6 +5,7 @@
 // sink — so `open(safe_join(base, request.args['f']))` (sanitized: safe_join is the arg) does NOT fire; only
 // `open(request.args['f'])` does. Precision over recall = ~0 FP; broad path taint would need dataflow.
 
+import { isPackedSource, kindAppliesToFile } from "./lang-scope.mjs";
 import { runTaintPass, mentions } from "./taint-core.mjs";
 import { findSinkWrappers, interprocHit } from "./taint-interproc.mjs";
 
@@ -33,6 +34,10 @@ const PATTERNS = [
 ];
 
 const isComment = (l) => /^\s*(\/\/|\*|#|--|;|<!--)/.test(l);
+// fopen / readfile / file_get_contents on a literal http(s):// URL FETCH a page (the superglobal is a query value), they
+// do not open a local path (hcaptcha siteverify — benchmark re-checked 2026-10-31). include/require with a URL stay
+// flagged : that is remote file inclusion.
+const PHP_URL_FETCH = /\b(?:fopen|readfile|file_get_contents)\s*\(\s*['"]https?:\/\//i;
 
 // ── Taint-pass vocabulary (Python + Node ; fed to the shared runTaintPass engine) ───────────────────────────────
 // Source = a request-derived value on the RHS (property access only; bare `params` excluded per the direct pack).
@@ -44,14 +49,18 @@ const PATH_SANITIZE = /\b(?:basename|secure_filename|realpath|resolve|canonical\
 const HASHED = /\.hexdigest\s*\(|\.digest\s*\(\s*['"]hex['"]|\buuid\d?\s*\(|\buuid\.uuid\d\s*\(/;
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // A file sink containing the tainted var: Python open/send_file/io.open/os.remove|unlink|rename ; Node fs.* / sendFile.
+// A call whose FIRST argument is a plain quoted path reads / writes a CONSTANT file : the tainted value in a later
+// argument is content, not a path (`fs.writeFile('views/qr/code.txt', QRcode, cb)` — benchmark re-checked 2026-10-31).
+// A template literal can interpolate, so only '…' / "…" count as constant.
+const CONST_FIRST = `(?!\\s*['"][^'"\\n]*['"]\\s*[,)])`;
 const sink = (v) => {
   const V = esc(v);
   return new RegExp(
-    `\\b(?:open|send_file)\\s*\\([^)]*\\b${V}\\b` +
-    `|\\bio\\.open\\s*\\([^)]*\\b${V}\\b` +
-    `|\\bos\\.(?:remove|unlink|rename)\\s*\\([^)]*\\b${V}\\b` +
-    `|\\bfs\\s*\\.\\s*(?:readFile|readFileSync|createReadStream|open|openSync|writeFile|writeFileSync|unlink|createWriteStream|readdir|readdirSync)\\s*\\([^)]*\\b${V}\\b` +
-    `|\\.\\s*sendFile\\s*\\([^)]*\\b${V}\\b`
+    `\\b(?:open|send_file)\\s*\\(${CONST_FIRST}[^)]*\\b${V}\\b` +
+    `|\\bio\\.open\\s*\\(${CONST_FIRST}[^)]*\\b${V}\\b` +
+    `|\\bos\\.(?:remove|unlink|rename)\\s*\\(${CONST_FIRST}[^)]*\\b${V}\\b` +
+    `|\\bfs\\s*\\.\\s*(?:readFile|readFileSync|createReadStream|open|openSync|writeFile|writeFileSync|unlink|createWriteStream|readdir|readdirSync)\\s*\\(${CONST_FIRST}[^)]*\\b${V}\\b` +
+    `|\\.\\s*sendFile\\s*\\(${CONST_FIRST}[^)]*\\b${V}\\b`
   );
 };
 
@@ -94,14 +103,17 @@ function taintPass(lines, text, importedWrappers) {
 }
 
 /** Scan one file → [{line, kind}]. Direct regex + path-traversal taint. Source line NEVER leaves this function. */
-export function extractPathTraversal(text, importedWrappers) {
+export function extractPathTraversal(text, importedWrappers, file) {
   const out = [];
+  if (isPackedSource(text)) return out;   // a vendored / packed single-file build (lang-scope.mjs)
   const lines = String(text).split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (l.length > 4000) continue;   // minified blob — noise
     if (isComment(l)) continue;      // a sink named in a comment is documentation, not live code
     for (const [kind, re] of PATTERNS) {
+      if (!kindAppliesToFile(kind, file)) continue;   // a language rule fires only on its own files (lang-scope.mjs)
+      if (kind === "php-include" && PHP_URL_FETCH.test(l)) continue;   // an HTTP fetch, not a local path
       // The NESTED patterns (source anywhere in the args) must respect an inline sanitizer on the same line:
       // open(secure_filename(request.args['f'])) is SAFE. The tight py-open (source directly after open() cannot
       // match a wrapped source, so it stays ungated.
@@ -115,5 +127,5 @@ export function extractPathTraversal(text, importedWrappers) {
 
 /** The path-traversal fingerprint for one file — locations + kinds, no source. */
 export function extractPathTraversalFingerprint(text, file, importedWrappers) {
-  return { file, hits: extractPathTraversal(text, importedWrappers) };
+  return { file, hits: extractPathTraversal(text, importedWrappers, file) };
 }

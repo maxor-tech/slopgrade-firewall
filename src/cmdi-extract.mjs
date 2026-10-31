@@ -58,6 +58,7 @@ function rubyExecLive(l) {
   return false;
 }
 
+import { isPackedSource, kindAppliesToFile } from "./lang-scope.mjs";
 import { runTaintPass, mentions } from "./taint-core.mjs";
 import { findSinkWrappers, interprocHit } from "./taint-interproc.mjs";
 
@@ -116,14 +117,16 @@ function taintPass(lines, text, importedWrappers) {
 }
 
 /** Scan one file → [{line, kind}]. Direct regex + command-injection taint. Source line NEVER leaves this function. */
-export function extractCmdi(text, importedWrappers) {
+export function extractCmdi(text, importedWrappers, file) {
   const out = [];
+  if (isPackedSource(text)) return out;   // a vendored / packed single-file build (lang-scope.mjs)
   const lines = String(text).split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (l.length > 4000) continue;   // minified blob — noise
     if (isComment(l)) continue;      // a sink named in a comment is documentation, not live code
     for (const [kind, re] of DIRECT_PATTERNS) {
+      if (!kindAppliesToFile(kind, file)) continue;   // a language rule fires only on its own files (lang-scope.mjs)
       if (kind === "ruby-exec" && !rubyExecLive(l)) continue;
       if (re.test(l)) out.push({ line: i + 1, kind });
     }
@@ -134,5 +137,5 @@ export function extractCmdi(text, importedWrappers) {
 
 /** The command-injection fingerprint for one file — locations + kinds, no source. */
 export function extractCmdiFingerprint(text, file, importedWrappers) {
-  return { file, hits: extractCmdi(text, importedWrappers) };
+  return { file, hits: extractCmdi(text, importedWrappers, file) };
 }

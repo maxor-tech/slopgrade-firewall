@@ -36,9 +36,13 @@ const PATTERNS = [
     `|\\b(?:echo|print)\\b(?=[^;]*["']\\s*<\\s*[A-Za-z!\\/])[^;]*\\.\\s*\\$_(?:GET|POST|REQUEST|COOKIE)\\b`)],
 ];
 
+import { isPackedSource, kindAppliesToFile } from "./lang-scope.mjs";
 import { runTaintPass, mentions } from "./taint-core.mjs";
 import { findSinkWrappers, interprocHit } from "./taint-interproc.mjs";
 
+// A superglobal that is only COMPARED in a ternary whose two outputs are literals echoes one of two constants
+// (`echo $_GET["t"] == "d" ? "folder" : "file";` — benchmark 2026-10-24 re-checked 2026-10-31 : 4 wrong blocks).
+const PHP_ECHO_CONST_TERNARY = /\b(?:echo|print)\s+\$_(?:GET|POST|REQUEST|COOKIE)\s*\[[^\]]*\]\s*(?:[=!]==?|[<>]=?)\s*(?:"[^"\n]*"|'[^'\n]*'|-?\d+)\s*\?\s*(?:"[^"\n]*"|'[^'\n]*'|-?\d+)\s*:\s*(?:"[^"\n]*"|'[^'\n]*'|-?\d+)\s*;/;
 const isComment = (l) => /^\s*(\/\/|\*|#|--|;|<!--)/.test(l);
 
 // ── Taint-pass vocabulary (fed to the shared runTaintPass engine) ────────────────────────────────────────────────
@@ -95,14 +99,17 @@ function taintPass(lines, text, importedWrappers) {
 }
 
 /** Scan one file → [{line, kind}]. Direct + taint + inter-proc; `importedWrappers` enables the cross-file layer. */
-export function extractXss(text, importedWrappers) {
+export function extractXss(text, importedWrappers, file) {
   const out = [];
+  if (isPackedSource(text)) return out;   // a vendored / packed single-file build (lang-scope.mjs)
   const lines = String(text).split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (l.length > 4000) continue;   // minified blob — noise
     if (isComment(l)) continue;      // a sink named in a comment is documentation, not live code
     for (const [kind, re] of PATTERNS) {
+      if (!kindAppliesToFile(kind, file)) continue;   // a language rule fires only on its own files (lang-scope.mjs)
+      if (kind === "php-echo" && PHP_ECHO_CONST_TERNARY.test(l)) continue;   // compared, not echoed
       if (re.test(l)) out.push({ line: i + 1, kind });
     }
   }
@@ -112,5 +119,5 @@ export function extractXss(text, importedWrappers) {
 
 /** The XSS fingerprint for one file — locations + kinds, no source. `importedWrappers` enables cross-file. */
 export function extractXssFingerprint(text, file, importedWrappers) {
-  return { file, hits: extractXss(text, importedWrappers) };
+  return { file, hits: extractXss(text, importedWrappers, file) };
 }
