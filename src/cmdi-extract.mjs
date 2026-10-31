@@ -58,7 +58,7 @@ function rubyExecLive(l) {
   return false;
 }
 
-import { isPackedSource, kindAppliesToFile, phpCodeLines } from "./lang-scope.mjs";
+import { isDecompiledSource, isPackedSource, kindAppliesToFile, phpCodeLines } from "./lang-scope.mjs";
 import { runTaintPass, mentions } from "./taint-core.mjs";
 import { findSinkWrappers, interprocHit } from "./taint-interproc.mjs";
 
@@ -119,7 +119,7 @@ function taintPass(lines, text, importedWrappers) {
 /** Scan one file → [{line, kind}]. Direct regex + command-injection taint. Source line NEVER leaves this function. */
 export function extractCmdi(text, importedWrappers, file) {
   const out = [];
-  if (isPackedSource(text)) return out;   // a vendored / packed single-file build (lang-scope.mjs)
+  if (isPackedSource(text) || isDecompiledSource(text)) return out;   // a vendored / packed build, or decompiler output (lang-scope.mjs)
   const lines = String(text).split(/\r?\n/);
   // A PHP rule reads only the code inside <?php … ?> blocks (lang-scope.mjs phpCodeLines) ; other rules read the raw line.
   const phpCode = /\.(?:php\d?|phtml)$/i.test(String(file ?? "")) ? phpCodeLines(lines) : lines;

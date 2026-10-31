@@ -5,7 +5,7 @@
 // sink — so `open(safe_join(base, request.args['f']))` (sanitized: safe_join is the arg) does NOT fire; only
 // `open(request.args['f'])` does. Precision over recall = ~0 FP; broad path taint would need dataflow.
 
-import { isPackedSource, kindAppliesToFile } from "./lang-scope.mjs";
+import { isDecompiledSource, isPackedSource, kindAppliesToFile } from "./lang-scope.mjs";
 import { runTaintPass, mentions } from "./taint-core.mjs";
 import { findSinkWrappers, interprocHit } from "./taint-interproc.mjs";
 
@@ -105,7 +105,7 @@ function taintPass(lines, text, importedWrappers) {
 /** Scan one file → [{line, kind}]. Direct regex + path-traversal taint. Source line NEVER leaves this function. */
 export function extractPathTraversal(text, importedWrappers, file) {
   const out = [];
-  if (isPackedSource(text)) return out;   // a vendored / packed single-file build (lang-scope.mjs)
+  if (isPackedSource(text) || isDecompiledSource(text)) return out;   // a vendored / packed build, or decompiler output (lang-scope.mjs)
   const lines = String(text).split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
