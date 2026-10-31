@@ -17,6 +17,12 @@ const kinds = (fn, src, file) => fn(src, new Map(), file).map((h) => h.kind);
 test("a language rule applies only to its own file types; unknown files keep every rule", () => {
   assert.equal(kindAppliesToFile("ruby-exec", "app/models/user.rb"), true);
   assert.equal(kindAppliesToFile("ruby-exec", "src/ExcelExportOfTemplateUtil.java"), false);
+  // JS / TS keep ruby-exec : `eval(params.code)` in a Next.js route handler reads the URL segments (server cmdi.test.ts)
+  assert.equal(kindAppliesToFile("ruby-exec", "app/api/[code]/route.ts"), true);
+  assert.equal(kindAppliesToFile("ruby-exec", "routes/x.js"), true);
+  assert.equal(kindAppliesToFile("ruby-exec", "Templates/Eval.cs"), false);
+  assert.equal(kindAppliesToFile("ruby-exec", "tmpl/eval.go"), false);
+  assert.equal(kindAppliesToFile("ruby-exec", "x.javats"), false);   // a dot is required before the extension
   assert.equal(kindAppliesToFile("py-open", "maven/ParquetPhysicalReader.java"), false);
   assert.equal(kindAppliesToFile("php-echo", "views/index.phtml"), true);
   assert.equal(kindAppliesToFile("node-exec", "src/server.mts"), true);

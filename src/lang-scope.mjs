@@ -26,9 +26,14 @@ export function isPackedSource(text) {
   return avg > PACKED_AVG && long >= PACKED_LONG_SHARE;
 }
 
+// `ruby-exec` also keeps JS / TS files : its `eval(params…)` text is the Next.js route-handler shape there, where `params`
+// carries the URL segments (app/cmdi.test.ts, « JS keeps the pattern »). Java / C# / Go / Python stay out.
+const ALSO = { "ruby-exec": /\.(?:[cm]?[jt]sx?|vue|svelte|astro)$/i };
+
 /** May a DIRECT rule named `kind` fire in `file` ? Rules without a language prefix apply everywhere. */
 export function kindAppliesToFile(kind, file) {
   if (!file) return true;
+  if (ALSO[kind] && ALSO[kind].test(String(file))) return true;
   for (const [prefix, ext] of FAMILY) if (prefix.test(kind)) return ext.test(String(file));
   return true;
 }
