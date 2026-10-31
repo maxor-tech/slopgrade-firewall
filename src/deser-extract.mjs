@@ -73,6 +73,26 @@ const PYYAML_IMPORT = /^\s*(?:import\s+yaml\b(?!\s*\.)|from\s+yaml\s+import\b)/m
 const LOCAL_FILE_ARG = /\byaml\.unsafe_load\s*\(\s*(?:open\s*\(|[\w.]+\.read_(?:text|bytes)\s*\()/;
 const OIS_CTOR = /\bObjectInputStream\s*\(/;
 const OIS_LOCAL_FILE = /\bObjectInputStream\s*\(\s*(?:new\s+)?(?:Buffered(?:Input)?Stream\s*\(\s*(?:new\s+)?)?FileInputStream\s*\(/;
+// An in-memory DEEP CLONE (2026-10-31, PR-replay labels : DataCloneLib BaseParentBean / CloneDataUtils, azkaban
+// SlaOption) : the method writes an object into a ByteArrayOutputStream B through an ObjectOutputStream, then reads
+// B's own bytes back. The bytes are self-produced, never attacker input — the trusted case, demoted to GATED. Every
+// link of the chain must appear in the CLONE_WINDOW lines above the readObject, with no raw write into B.
+const CLONE_WINDOW = 15;
+const esc = (v) => v.replace(/[$]/g, "\\$&");
+function isDeepClone(lines, i) {
+  const w = lines.slice(Math.max(0, i - CLONE_WINDOW), i + 1).join("\n");
+  const bos = /\b(\w+)\s*=\s*new\s+ByteArrayOutputStream\s*\(\s*\)/.exec(w);
+  if (!bos) return false;
+  const B = esc(bos[1]);
+  if (!new RegExp(`new\\s+ObjectOutputStream\\s*\\(\\s*${B}\\s*\\)`).test(w) || !/\.writeObject\s*\(/.test(w)) return false;
+  if (new RegExp(`\\b${B}\\s*\\.\\s*write(?:Bytes|To)?\\s*\\(`).test(w)) return false;   // raw bytes written into B
+  const bytesVar = new RegExp(`\\b(\\w+)\\s*=\\s*${B}\\s*\\.\\s*toByteArray\\s*\\(\\s*\\)`).exec(w);
+  const src = `(?:${B}\\s*\\.\\s*toByteArray\\s*\\(\\s*\\)${bytesVar ? `|${esc(bytesVar[1])}` : ""})`;
+  const baisInline = `new\\s+ByteArrayInputStream\\s*\\(\\s*${src}\\s*\\)`;
+  const bais = new RegExp(`\\b(\\w+)\\s*=\\s*${baisInline}`).exec(w);
+  const oisArg = `(?:${baisInline}${bais ? `|${esc(bais[1])}` : ""})`;
+  return new RegExp(`new\\s+ObjectInputStream\\s*\\(\\s*${oisArg}\\s*\\)`).test(w);
+}
 const TNH_ATTR = /^\s*\[\s*JsonProperty\s*\([^\]]*TypeNameHandling\s*=\s*TypeNameHandling\./;
 const TNH_DANGEROUS_TYPE = /^(?:object|Object|dynamic|System\.Object|I(?:Enumerable|List|Collection|Dictionary|Disposable|Serializable|Comparable|Convertible|Formattable|ReadOnlyList|ReadOnlyCollection|ReadOnlyDictionary))$/;
 // Declared (element) type of the member a C# attribute decorates: the next non-attribute line, innermost generic arg.
@@ -106,7 +126,7 @@ export function extractDeser(text) {
         const t = memberElementType(lines, i);
         if (t && !TNH_DANGEROUS_TYPE.test(t)) continue;   // member typed as an app class → $type must be assignable to it
       }
-      const local = (kind === "py-yaml-unsafe" && LOCAL_FILE_ARG.test(l)) || (kind === "java-readobject" && OIS_LOCAL_FILE.test(l));
+      const local = (kind === "py-yaml-unsafe" && LOCAL_FILE_ARG.test(l)) || (kind === "java-readobject" && (OIS_LOCAL_FILE.test(l) || isDeepClone(lines, i)));
       if (local) { out.push({ line: i + 1, kind, high: false, srcCtx: DIRECT_SRC.test(l) }); continue; } // local-file stream → gated
       out.push({ line: i + 1, kind, high: true, srcCtx: true });
     }
@@ -116,7 +136,7 @@ export function extractDeser(text) {
       // the nearest ObjectInputStream construction within 3 lines above: a local FileInputStream → gated (trusted disk)
       let ctor = null;
       for (let j = i - 1; j >= Math.max(0, i - 3); j--) if (OIS_CTOR.test(lines[j])) { ctor = lines[j]; break; }
-      if (ctor && OIS_LOCAL_FILE.test(ctor)) out.push({ line: i + 1, kind: "java-readobject", high: false, srcCtx: DIRECT_SRC.test(l) });
+      if ((ctor && OIS_LOCAL_FILE.test(ctor)) || isDeepClone(lines, i)) out.push({ line: i + 1, kind: "java-readobject", high: false, srcCtx: DIRECT_SRC.test(l) });
       else out.push({ line: i + 1, kind: "java-readobject", high: true, srcCtx: true });
     }
     for (const [kind, re] of GATED) {
