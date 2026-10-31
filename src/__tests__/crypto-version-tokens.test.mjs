@@ -65,3 +65,20 @@ test("a hash-identifier catalog literal and a DESKeySpec signature are not DES u
     assert.ok(kinds(s).includes("des-cipher"), s);
   }
 });
+
+test("a name list, a trailing comment and an enum constant are not cipher uses (benchmark 2026-10-24 re-checked 2026-10-31)", () => {
+  // the six labelled wrong blocks still firing on main, as they appear in the replayed files
+  assert.deepEqual(kinds('        "base64decode", "rot13", "rc4", "aes", "des",'), []);
+  assert.deepEqual(kinds('  "stringArrayEncoding": ["rc4", "base64"]'), []);
+  assert.deepEqual(kinds("    stringArrayEncoding: ['base64'],           // 'none','base64','rc4'"), []);
+  assert.deepEqual(kinds('  "components": ["core", "x64-core", "enc-base64", "md5", "sha1", "aes", "tripledes", "rc4", "rabbit"],'), []);
+  assert.deepEqual(kinds('    DES("6", "DES加密"),'), []);
+  assert.deepEqual(kinds("    DES(6);"), []);
+  // failure pre-conditions : a cipher list, a single selection, an object value and a real call keep firing
+  assert.deepEqual(kinds('ciphers = ["rc2", "rc4"]'), ["rc4-cipher", "rc2-cipher"]);
+  assert.deepEqual(kinds('  stringArrayEncoding: ["rc4"]'), ["rc4-cipher"]);
+  assert.deepEqual(kinds('{ "cipher": "rc4", "key": k }'), ["rc4-cipher"]);
+  assert.deepEqual(kinds("$out = openssl_encrypt($data, 'rc4', $key); // legacy"), ["rc4-cipher"]);
+  assert.deepEqual(kinds("    Cipher c = DES(key);"), ["des-cipher"]);
+  assert.deepEqual(kinds("    DES(keyBytes),"), ["des-cipher"]);
+});
