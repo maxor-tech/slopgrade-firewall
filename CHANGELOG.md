@@ -5,6 +5,12 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+### Fixed
+- `insecureDeser` : an in-memory **deep clone** (an object written to a `ByteArrayOutputStream` through an
+  `ObjectOutputStream`, then read back from that buffer's own bytes) is self-produced data, not attacker input. It is
+  now gated like a local-file stream. Labelled wrong blocks 16 → 13 ; every labelled true finding still fires (3/3).
+  A buffer that also receives raw bytes, or an `ObjectInputStream` over any other stream, stays HIGH.
+
 ## [0.12.2] — 2026-10-31
 
 Precision release : the PR-replay benchmark labels (run2) re-checked on the current extractors, every labelled
