@@ -93,7 +93,27 @@ function isDeepClone(lines, i) {
   const oisArg = `(?:${baisInline}${bais ? `|${esc(bais[1])}` : ""})`;
   return new RegExp(`new\\s+ObjectInputStream\\s*\\(\\s*${oisArg}\\s*\\)`).test(w);
 }
-const TNH_ATTR = /^\s*\[\s*JsonProperty\s*\([^\]]*TypeNameHandling\s*=\s*TypeNameHandling\./;
+// A YAML load of a file the code OPENS from its own disk (2026-10-31, PR-replay labels : 7 wrong blocks —
+// `with open(path) as f: yaml.load(f)` in ML repos, Java `InputStream s = new FileInputStream(file); yaml.load(s)` in
+// desktop config loaders) is the LOCAL-FILE case above : the stream is opened within LOCAL_WINDOW lines and the nearest
+// assignment of the loaded variable is that open. A string, a parameter or a network stream (`yaml.load(str)`,
+// `yaml.load(userdata)`) stays HIGH. A request-chosen path keeps srcCtx, so it still fires.
+const LOCAL_WINDOW = 8;
+const YAML_LOAD_ARG = /(?:\byaml|\bnew\s+Yaml\s*\(\s*\))\s*\.\s*(?:unsafe_)?load\s*\(\s*(?:(open\s*\(|(?:new\s+)?FileInputStream\s*\()|([A-Za-z_]\w*)(?:\s*\.\s*read\s*\(\s*\))?\s*[,)])/;
+function yamlLocalFile(lines, i) {
+  const m = YAML_LOAD_ARG.exec(lines[i]);
+  if (!m) return null;
+  if (m[1]) return lines[i];
+  const v = esc(m[2]);
+  const assign = new RegExp(`\\bas\\s+${v}\\s*:|\\b${v}\\s*=(?!=)`);
+  const opened = new RegExp(`\\bopen\\s*\\([^\\n]*\\)\\s+as\\s+${v}\\s*:|\\b${v}\\s*=\\s*(?:open\\s*\\(|new\\s+(?:Buffered\\w*\\s*\\(\\s*new\\s+)?(?:FileInputStream|FileReader)\\s*\\(|Files\\s*\\.\\s*new(?:InputStream|BufferedReader)\\s*\\()`);
+  for (let j = i - 1; j >= Math.max(0, i - LOCAL_WINDOW); j--) {
+    if (!assign.test(lines[j])) continue;
+    return opened.test(lines[j]) ? lines[j] : null;
+  }
+  return null;
+}
+const TNH_ATTR =/^\s*\[\s*JsonProperty\s*\([^\]]*TypeNameHandling\s*=\s*TypeNameHandling\./;
 const TNH_DANGEROUS_TYPE = /^(?:object|Object|dynamic|System\.Object|I(?:Enumerable|List|Collection|Dictionary|Disposable|Serializable|Comparable|Convertible|Formattable|ReadOnlyList|ReadOnlyCollection|ReadOnlyDictionary))$/;
 // Declared (element) type of the member a C# attribute decorates: the next non-attribute line, innermost generic arg.
 function memberElementType(lines, i) {
@@ -126,8 +146,9 @@ export function extractDeser(text) {
         const t = memberElementType(lines, i);
         if (t && !TNH_DANGEROUS_TYPE.test(t)) continue;   // member typed as an app class → $type must be assignable to it
       }
-      const local = (kind === "py-yaml-unsafe" && LOCAL_FILE_ARG.test(l)) || (kind === "java-readobject" && (OIS_LOCAL_FILE.test(l) || isDeepClone(lines, i)));
-      if (local) { out.push({ line: i + 1, kind, high: false, srcCtx: DIRECT_SRC.test(l) }); continue; } // local-file stream → gated
+      const yamlOpen = (kind === "py-yaml-unsafe" || kind === "java-readobject") ? yamlLocalFile(lines, i) : null;
+      const local = yamlOpen !== null || (kind === "py-yaml-unsafe" && LOCAL_FILE_ARG.test(l)) || (kind === "java-readobject" && (OIS_LOCAL_FILE.test(l) || isDeepClone(lines, i)));
+      if (local) { out.push({ line: i + 1, kind, high: false, srcCtx: DIRECT_SRC.test(l) || (yamlOpen !== null && DIRECT_SRC.test(yamlOpen)) }); continue; } // local-file stream → gated
       out.push({ line: i + 1, kind, high: true, srcCtx: true });
     }
     // bare ObjectInputStream deserialization (receiver on another line) — only when the file uses ObjectInputStream,
