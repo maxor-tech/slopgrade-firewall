@@ -17,6 +17,9 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 - `cmdi` : the PHP rules read only the code inside `<?php … ?>` blocks. CSS text around a PHP echo
   (`top: expression(eval(…<?php echo … $_GET … ?>))` in a `*.css.php` theme) is not a PHP `eval`. Labelled wrong
   blocks 5 → 2 ; every labelled true finding still fires (2/2). A `?>` inside a quoted string does not close a block.
+- `xxe` : `setExpandEntityReferences(true)` (the JAXP default) on a factory that also disallows the DOCTYPE, or turns
+  both external general and parameter entities off within 20 lines, loads no external entity. Labelled wrong blocks
+  1 → 0. A factory with only one entity kind off, or a feature turned on, still fires.
 
 ## [0.12.2] — 2026-10-31
 
