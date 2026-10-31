@@ -84,15 +84,46 @@ const VERSION_SIBLING = /^(?:alpha|beta|snapshot|preview|canary|nightly|dev|rc(?
 // An IMPORT-PATH TABLE maps a package path to its name (dave/jennifer `"crypto/rc4": "rc4",` — benchmark 2026-10-24,
 // dev split): the bare literal is the package NAME of `crypto/rc4`, not a cipher selection.
 const IMPORT_PATH_KEY = /["'][\w.\/-]*\/(?:rc4|rc2)["']\s*:/i;
+// A NAME LIST holds the bare literal as one item among other quoted names (benchmark 2026-10-24 re-checked on
+// 2026-10-31 : 4 still-wrong blocks) — a triage keyword list `"base64decode", "rot13", "rc4", "aes", "des",`, a
+// crypto-js build manifest `"components": ["core", …, "rc4", …]`, a javascript-obfuscator option
+// `stringArrayEncoding: ["rc4", "base64"]`. A cipher is SELECTED by one name passed to an API ; a list NAMES options.
+// A list made only of CIPHER names (`ciphers = ["rc2", "rc4"]`) is a cipher configuration and keeps firing ; a list
+// with a non-cipher sibling (base64, rot13, core, md5 …) names options. Object keys (`"cipher": "rc4"`) are not items.
+const RC_LITERAL = /['"](?:rc4|rc2|arcfour)['"]/i;
+const CIPHER_NAME = /^(?:rc[24]|arcfour|3?des(?:ede)?3?|tripledes|aes[\w-]*|blowfish|bf[\w-]*|cast5?|idea|seed|camellia[\w-]*|chacha20[\w-]*|salsa20)$/i;
+function isNameList(code) {
+  const items = [...code.matchAll(/(['"])([\w.-]{1,24})\1(?!\s*:)/g)].map((m) => m[2]);
+  return items.length >= 2 && items.some((x) => !CIPHER_NAME.test(x));
+}
+// A trailing line comment that holds the only bare literal (`stringArrayEncoding: ['base64'], // 'none','base64','rc4'`).
+function withoutTrailingComment(l) {
+  let q = null;
+  for (let k = 0; k < l.length; k++) {
+    const c = l[k];
+    if (q) { if (c === "\\") k++; else if (c === q) q = null; continue; }
+    if (c === '"' || c === "'" || c === "`") q = c;
+    else if (c === "/" && l[k + 1] === "/" && l[k - 1] !== ":") return l.slice(0, k);
+  }
+  return l;
+}
 function isNotACipherName(lines, i, file) {
   if (file && VERSION_FILE.test(String(file))) return true;
   if (VERSION_ASSIGN.test(lines[i])) return true;
   if (IMPORT_PATH_KEY.test(lines[i])) return true;
+  const code = withoutTrailingComment(lines[i]);
+  if (!RC_LITERAL.test(code)) return true;
+  if (isNameList(code)) return true;
   for (let j = Math.max(0, i - 3); j <= Math.min(lines.length - 1, i + 3); j++) {
     for (const m of lines[j].matchAll(/['"]([A-Za-z][\w.-]{1,12})['"]/g)) if (VERSION_SIBLING.test(m[1])) return true;
   }
   return false;
 }
+
+// A Java ENUM CONSTANT `DES("6", "DES加密"),` declares a value whose arguments are literals — it calls no cipher
+// (benchmark 2026-10-24 re-checked 2026-10-31 : a wrong block on AlgorithmCrypto.java; the real DES use fires in the
+// class that implements it). A call passes a key or bytes, never only literals ending the line with `,` or `;`.
+const ENUM_CONSTANT = /^\s*(?:DESede|TripleDES|3DES|DES)\s*\(\s*(?:(?:"[^"\n]*"|'[^'\n]*'|-?\d+)\s*(?:,\s*(?:"[^"\n]*"|'[^'\n]*'|-?\d+)\s*)*)?\)\s*[,;]\s*$/;
 
 /** Scan one file → [{line, kind, high, secCtx}]. Source line NEVER leaves this function. */
 export function extractCrypto(text, file) {
@@ -107,7 +138,8 @@ export function extractCrypto(text, file) {
     for (const [kind, re] of HIGH) {
       if (!re.test(code)) continue;
       const strong = RC_STRONG[kind];
-      if (strong && !strong.test(code) && isNotACipherName(lines, i, file)) continue;   // P8: release tag or package name, not a cipher
+      if (strong && !strong.test(code) && isNotACipherName(lines, i, file)) continue;   // P8: release tag, package name, name list or comment, not a cipher
+      if (kind === "des-cipher" && ENUM_CONSTANT.test(l)) continue;                     // an enum value declaration, not a DES call
       out.push({ line: i + 1, kind, high: true, secCtx: true });
     }
     for (const [kind, re] of HASH) {
