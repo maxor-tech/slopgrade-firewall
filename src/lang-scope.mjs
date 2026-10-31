@@ -32,3 +32,36 @@ export function kindAppliesToFile(kind, file) {
   for (const [prefix, ext] of FAMILY) if (prefix.test(kind)) return ext.test(String(file));
   return true;
 }
+
+// PHP TEMPLATE TEXT (2026-10-31, PR-replay labels : phpMyAdmin archived themes `theme_right.css.php`). A .php file is
+// HTML/CSS text with <?php … ?> code blocks. The text outside the blocks never executes : the CSS
+// `top: expression(eval(document.documentElement.scrollTop<?php echo … $_GET … ?>))` has `eval(` in CSS and the
+// superglobal in PHP, and the line-regex `php-exec` read them as one PHP call. `phpCodeLines` blanks the text outside
+// the blocks (same line count, same columns) so a PHP rule only sees code. A `?>` inside a quoted string
+// (`"<?xml … ?>"`) does not close the block. A file with no `<?` opener is returned unchanged.
+export function phpCodeLines(lines) {
+  if (!lines.some((l) => l.includes("<?"))) return lines;
+  let inPhp = false;
+  return lines.map((l) => {
+    let out = "";
+    let quote = null;
+    for (let k = 0; k < l.length; k++) {
+      const c = l[k];
+      if (!inPhp) {
+        if (c === "<" && l[k + 1] === "?") { inPhp = true; out += "<?"; k++; continue; }
+        out += c === "\t" ? "\t" : " ";
+        continue;
+      }
+      if (quote) {
+        if (c === "\\") { out += c + (l[k + 1] ?? ""); k++; continue; }
+        if (c === quote) quote = null;
+        out += c;
+        continue;
+      }
+      if (c === "'" || c === '"') { quote = c; out += c; continue; }
+      if (c === "?" && l[k + 1] === ">") { inPhp = false; out += "?>"; k++; continue; }
+      out += c;
+    }
+    return out;
+  });
+}

@@ -58,7 +58,7 @@ function rubyExecLive(l) {
   return false;
 }
 
-import { isPackedSource, kindAppliesToFile } from "./lang-scope.mjs";
+import { isPackedSource, kindAppliesToFile, phpCodeLines } from "./lang-scope.mjs";
 import { runTaintPass, mentions } from "./taint-core.mjs";
 import { findSinkWrappers, interprocHit } from "./taint-interproc.mjs";
 
@@ -121,6 +121,8 @@ export function extractCmdi(text, importedWrappers, file) {
   const out = [];
   if (isPackedSource(text)) return out;   // a vendored / packed single-file build (lang-scope.mjs)
   const lines = String(text).split(/\r?\n/);
+  // A PHP rule reads only the code inside <?php … ?> blocks (lang-scope.mjs phpCodeLines) ; other rules read the raw line.
+  const phpCode = /\.(?:php\d?|phtml)$/i.test(String(file ?? "")) ? phpCodeLines(lines) : lines;
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (l.length > 4000) continue;   // minified blob — noise
@@ -128,7 +130,7 @@ export function extractCmdi(text, importedWrappers, file) {
     for (const [kind, re] of DIRECT_PATTERNS) {
       if (!kindAppliesToFile(kind, file)) continue;   // a language rule fires only on its own files (lang-scope.mjs)
       if (kind === "ruby-exec" && !rubyExecLive(l)) continue;
-      if (re.test(l)) out.push({ line: i + 1, kind });
+      if (re.test(kind.startsWith("php-") ? phpCode[i] : l)) out.push({ line: i + 1, kind });
     }
   }
   for (const h of taintPass(lines, text, importedWrappers)) out.push(h);
