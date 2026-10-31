@@ -53,7 +53,7 @@ const DIRECT_PATTERNS = [
   ["java-sql", new RegExp(`\\b(?:createQuery|createNativeQuery|createSQLQuery|executeQuery|executeUpdate|executeLargeUpdate|prepareStatement)\\s*\\(\\s*[^;]*"[^"]*(?:SELECT|INSERT|UPDATE|DELETE|WHERE|FROM|ORDER\\s+BY|UNION)[^"]*"\\s*\\+\\s*[^;]*\\b(?:request|req|httpRequest)\\s*\\.\\s*get(?:Parameter|ParameterValues|Header|QueryString|PathInfo)\\b`)],
 ];
 
-import { isPackedSource, kindAppliesToFile } from "./lang-scope.mjs";
+import { isDecompiledSource, isPackedSource, kindAppliesToFile } from "./lang-scope.mjs";
 import { runTaintPass, mentions } from "./taint-core.mjs";
 import { findSinkWrappers, interprocHit } from "./taint-interproc.mjs";
 
@@ -137,7 +137,7 @@ function taintPass(lines, text, importedWrappers) {
 /** Scan one file → [{line, kind}]. Direct + taint + inter-proc; `importedWrappers` enables the cross-file layer. */
 export function extractSqli(text, importedWrappers, file) {
   const out = [];
-  if (isPackedSource(text)) return out;   // a vendored / packed single-file build (lang-scope.mjs)
+  if (isPackedSource(text) || isDecompiledSource(text)) return out;   // a vendored / packed build, or decompiler output (lang-scope.mjs)
   const lines = String(text).split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];

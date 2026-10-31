@@ -9,6 +9,8 @@
 //     signature. So a weak hash fires ONLY when a security keyword sits within SEC_WINDOW lines (secCtx=true).
 
 // HIGH — broken ciphers / modes. Distinctive literals that only name a weak primitive (near-zero base-rate FP).
+import { isDecompiledSource } from "./lang-scope.mjs";
+
 const HIGH = [
   // DES / 3DES (single-DES strength) / RC4 / RC2 — named across ecosystems. The DES token must be in a USE context
   // (a constructor/call/keyspec/getInstance/provider), NOT a bare mention: `import …symmetric.DES`,
@@ -128,6 +130,7 @@ const ENUM_CONSTANT = /^\s*(?:DESede|TripleDES|3DES|DES)\s*\(\s*(?:(?:"[^"\n]*"|
 /** Scan one file → [{line, kind, high, secCtx}]. Source line NEVER leaves this function. */
 export function extractCrypto(text, file) {
   const out = [];
+  if (isDecompiledSource(text)) return out;   // decompiler output is not the author's code (lang-scope.mjs)
   const lines = String(text).split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];

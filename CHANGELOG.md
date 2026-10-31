@@ -20,6 +20,10 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 - `xxe` : `setExpandEntityReferences(true)` (the JAXP default) on a factory that also disallows the DOCTYPE, or turns
   both external general and parameter entities off within 20 lines, loads no external entity. Labelled wrong blocks
   1 → 0. A factory with only one entity kind off, or a feature turned on, still fires.
+- `weakCrypto` · `insecureDeser` · injection rules : a **decompiled** source file (JADX `/* loaded from: … */`, CFR,
+  Procyon, FernFlower, JD, JetBrains decompiler headers in its first 60 lines) is a decompiler's output, not the pull
+  request author's code, and is skipped like a packed build. Labelled design blocks 7 → 0 ; no labelled true finding is
+  in a decompiled file.
 
 ## [0.12.2] — 2026-10-31
 

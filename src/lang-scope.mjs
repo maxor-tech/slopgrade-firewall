@@ -26,6 +26,17 @@ export function isPackedSource(text) {
   return avg > PACKED_AVG && long >= PACKED_LONG_SHARE;
 }
 
+// A DECOMPILED source file (PR-replay labels 2026-10-31 : a decompiled Android malware sample, stage-1-classes.dex/…/as.java)
+// is a decompiler's output, not the pull request author's code : JADX writes `/* loaded from: … */` and `/* compiled from: … */`
+// above each class, CFR / Procyon / FernFlower / JD / the JetBrains decompiler write a fixed header. Only the first
+// DECOMPILED_HEAD lines are read : the markers sit above the first class. Measured on the 205 labelled files : 5 decompiled
+// files, 7 labelled blocks, all DESIGN, no true finding.
+const DECOMPILED_HEAD = 60;
+const DECOMPILED = /^\s*\/\*\s*(?:loaded|compiled) from:[^\n]*\*\/\s*$|Decompiled with CFR\b|Decompiled by Procyon\b|powered by FernFlower decompiler|Source code recreated from a \.class file|JD-Core Version|Decompiled with JetBrains decompiler/m;
+export function isDecompiledSource(text) {
+  return DECOMPILED.test(String(text).split(/\r?\n/, DECOMPILED_HEAD).join("\n"));
+}
+
 // `ruby-exec` also keeps JS / TS files : its `eval(params…)` text is the Next.js route-handler shape there, where `params`
 // carries the URL segments (app/cmdi.test.ts, « JS keeps the pattern »). Java / C# / Go / Python stay out.
 const ALSO = { "ruby-exec": /\.(?:[cm]?[jt]sx?|vue|svelte|astro)$/i };
