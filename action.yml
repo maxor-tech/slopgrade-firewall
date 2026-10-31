@@ -1,5 +1,5 @@
 name: "slopGrade Firewall"
-description: "Blocks cross-tenant leaks, injection and secrets a pull request introduces. Source never leaves your runner. Free."
+description: "Blocks cross-tenant leaks, injection and secrets a pull request introduces. By default, source never leaves your runner."
 author: "Maxor Global LLC"
 branding: { icon: "shield", color: "green" }
 inputs:

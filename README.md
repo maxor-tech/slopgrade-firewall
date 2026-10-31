@@ -1,6 +1,6 @@
 # slopGrade Firewall — CI security-leak detection
 
-The **open-source client** of the [slopGrade Firewall](https://www.slopgrade.ai/firewall). It runs in your CI,
+The **open-source client** of the [slopGrade Firewall](https://www.slopgrade.ai/firewall?utm_source=github-marketplace&utm_medium=listing&utm_campaign=launch-v3). It runs in your CI,
 detects high-severity security leaks in the diff. **By default, your source code and file contents never leave your
 runner** — only a structural fingerprint (table/column names + `{file, line, kind}` locations, no code) is posted for
 classification. The one exception is the opt-in [`deep-scan`](#deep-scan--opt-in-paid-the-one-mode-that-sends-code)
