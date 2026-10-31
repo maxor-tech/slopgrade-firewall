@@ -10,6 +10,9 @@ All notable changes to the open-source slopGrade Firewall client are documented 
   `ObjectOutputStream`, then read back from that buffer's own bytes) is self-produced data, not attacker input. It is
   now gated like a local-file stream. Labelled wrong blocks 16 → 13 ; every labelled true finding still fires (3/3).
   A buffer that also receives raw bytes, or an `ObjectInputStream` over any other stream, stays HIGH.
+- `cmdi` : the PHP rules read only the code inside `<?php … ?>` blocks. CSS text around a PHP echo
+  (`top: expression(eval(…<?php echo … $_GET … ?>))` in a `*.css.php` theme) is not a PHP `eval`. Labelled wrong
+  blocks 5 → 2 ; every labelled true finding still fires (2/2). A `?>` inside a quoted string does not close a block.
 
 ## [0.12.2] — 2026-10-31
 
