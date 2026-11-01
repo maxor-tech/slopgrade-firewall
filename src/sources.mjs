@@ -65,3 +65,31 @@ export function paramSources(lines, i) {
   }
   return out;
 }
+
+// ── Opt-in sources (expert panel P1-5 ; Jeff 2026-11-01 : opt-in per repo) ─────────────────────────────────────
+// CLI arguments and queue-message payloads are untrusted only for a repo that says so (the Action input
+// `untrusted-inputs: "cli,queue"`) : a CLI tool runs with its own user's privileges, so treating argv as hostile in every
+// repo would block intended behaviour. Off by default ; the shared taint engine (taint-core.mjs) reads optInSource().
+const OPT_IN_PATTERNS = {
+  // Python sys.argv / argparse namespace, Node process.argv, Go os.Args / flag.Arg(s), Ruby ARGV, Java/C# main args[i]
+  // (`args = parser.parse_args()` : the whole argparse namespace — persona walk 2026-11-01)
+  cli: /\bsys\s*\.\s*argv\b|\bparse_args\s*\(|\bprocess\s*\.\s*argv\b|\bos\s*\.\s*Args\b|\bflag\s*\.\s*Args?\s*\(|\bARGV\b|\bargs\s*\[\s*\d+\s*\]/,
+  // a consumed message : SQS / SNS / Lambda event records, Kafka / RabbitMQ / NATS / Pub-Sub payloads — attribute
+  // (`message.value`) or subscript (`record["body"]`, the Python SQS form — persona walk 2026-11-01)
+  queue: /\b(?:message|msg|rec|record|event|evt|delivery|payload)\s*(?:\.\s*(?:body|value|data|payload|Body|Value|Data)\b|\[\s*["'](?:body|Body|value|data|payload|Message)["']\s*\])|\bRecords\s*\[[^\]]*\]\s*\.\s*(?:body|Sns|kinesis)\b|\.\s*(?:receive_message|consume|poll)\s*\(/,
+};
+let optIn = [];
+/** The tokens of an opt-in spec : comma and / or space separated, lower-cased. */
+export const optInTokens = (spec) => String(spec ?? "").split(/[\s,;]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+/** Turn the opt-in sources on for this run : `cli` / `queue`, comma or space separated (unknown tokens are ignored —
+ *  the caller names them, see optInTokens). */
+export function setOptInSources(spec) {
+  optIn = [...new Set(optInTokens(spec).filter((k) => Object.prototype.hasOwnProperty.call(OPT_IN_PATTERNS, k)))];
+  return [...optIn];
+}
+/** True when an expression reads an opted-in source (always false when nothing is opted in). */
+export function optInSource(expr) {
+  if (!optIn.length) return false;
+  const s = String(expr ?? "");
+  return optIn.some((k) => OPT_IN_PATTERNS[k].test(s));
+}

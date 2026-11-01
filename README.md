@@ -60,6 +60,7 @@ jobs:
           # firewall-mode: "off"       # disable
           # strict: "true"             # with gate: fail the build if no verdict is available (default: fail open)
           # upload-sarif: "false"          # opt out of the Code Scanning upload (default: true — needs security-events: write)
+          # untrusted-inputs: "cli,queue"  # opt in : CLI arguments and / or queue payloads count as untrusted (default: off)
           # sarif-file: "firewall.sarif"   # ALSO write the SARIF to a file (for a build artifact); upload runs regardless
           # deep-scan: "true"              # OPT-IN, paid: ALSO send the source of sink-bearing files to the hosted taint
           #                                  engine (cross-function flows). Default false — see "Deep scan" below
