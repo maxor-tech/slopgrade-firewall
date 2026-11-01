@@ -115,6 +115,54 @@ function yamlLocalFile(lines, i) {
   }
   return null;
 }
+// SnakeYAML (Java). `yaml.load(x)` in a Java / Kotlin / Groovy / Scala file is SnakeYAML, not PyYAML : it is reported
+// as `java-readobject` (the right label). A file that builds its Yaml with a SafeConstructor loads no arbitrary class.
+// SnakeYAML 2.0 (2023, CVE-2022-1471 fix) rejects every global tag (`!!javax.script.ScriptEngineManager`) unless the
+// code installs its own TagInspector : with the repo's SnakeYAML major ≥ 2 (read from its build files, ctx), a load is
+// the trusted case and is demoted to GATED (fires only with a request source on the line). Unknown version → HIGH.
+const JVM_FILE = /\.(?:java|kt|kts|groovy|scala)$/i;
+const SAFE_CONSTRUCTOR = /\bnew\s+Yaml\s*\(\s*new\s+SafeConstructor\b/;
+const TAG_INSPECTOR = /\bsetTagInspector\s*\(/;
+const SNAKEYAML_LOAD = /\bnew\s+Yaml\s*\([^;]*\)\s*\.\s*load(?:As|All)?\s*\(|\byaml\s*\.\s*load(?:As|All)?\s*\(/;
+
+const majorOf = (v) => { const m = /^\s*(\d+)\./.exec(String(v ?? "")); return m ? Number(m[1]) : null; };
+const minorOf = (v) => { const m = /^\s*\d+\.(\d+)/.exec(String(v ?? "")); return m ? Number(m[1]) : 0; };
+// Spring Boot manages SnakeYAML when the build does not pin it : Boot 3.1+ ships 2.x, Boot ≤ 3.0 ships 1.x.
+const bootSnake = (v) => { const M = majorOf(v); return M === null ? null : (M > 3 || (M === 3 && minorOf(v) >= 1)) ? 2 : 1; };
+
+/**
+ * The SnakeYAML major version a repo builds with, from its build files (pom.xml, build.gradle[.kts],
+ * gradle/libs.versions.toml). The LOWEST major found wins (a 1.x module keeps the repo on 1.x). null = not found.
+ * @param {Array<{path:string, text:string}>} manifests
+ * @returns {number|null}
+ */
+export function snakeyamlMajorOf(manifests) {
+  const majors = [];
+  for (const { path, text } of manifests ?? []) {
+    const t = String(text ?? "");
+    let explicit = null, boot = null;
+    if (/(?:^|\/)pom\.xml$/i.test(path)) {
+      const prop = (name) => { const m = new RegExp(`<${name.replace(/[.]/g, "\\.")}>\\s*([^<\\s]+)\\s*</`).exec(t); return m ? m[1] : null; };
+      const dep = /<artifactId>\s*snakeyaml\s*<\/artifactId>(?:(?!<\/dependency>)[\s\S]){0,400}?<version>\s*([^<\s]+)\s*<\/version>/.exec(t);
+      if (dep) { const v = /^\$\{([^}]+)\}$/.exec(dep[1]); explicit = v ? prop(v[1]) : dep[1]; }
+      explicit = explicit ?? prop("snakeyaml.version");
+      const parent = /<artifactId>\s*spring-boot-(?:starter-parent|dependencies)\s*<\/artifactId>\s*<version>\s*([^<\s]+)\s*<\/version>/.exec(t);
+      if (parent) boot = bootSnake(/^\$\{([^}]+)\}$/.test(parent[1]) ? prop(/^\$\{([^}]+)\}$/.exec(parent[1])[1]) : parent[1]);
+    } else if (/(?:^|\/)build\.gradle(?:\.kts)?$/i.test(path)) {
+      const dep = /['"]org\.yaml:snakeyaml:([^'"$]+)['"]/.exec(t);
+      if (dep) explicit = dep[1];
+      const plug = /id\s*\(?\s*['"]org\.springframework\.boot['"]\s*\)?\s*version\s*['"]([^'"]+)['"]/.exec(t);
+      if (plug) boot = bootSnake(plug[1]);
+    } else if (/(?:^|\/)libs\.versions\.toml$/i.test(path)) {
+      const dep = /['"]org\.yaml:snakeyaml:([^'"]+)['"]|^\s*snakeyaml\s*=\s*['"]([^'"]+)['"]/m.exec(t);
+      if (dep) explicit = dep[1] ?? dep[2];
+    }
+    const M = majorOf(explicit) ?? boot;
+    if (M !== null) majors.push(M);
+  }
+  return majors.length ? Math.min(...majors) : null;
+}
+
 const TNH_ATTR =/^\s*\[\s*JsonProperty\s*\([^\]]*TypeNameHandling\s*=\s*TypeNameHandling\./;
 const TNH_DANGEROUS_TYPE = /^(?:object|Object|dynamic|System\.Object|I(?:Enumerable|List|Collection|Dictionary|Disposable|Serializable|Comparable|Convertible|Formattable|ReadOnlyList|ReadOnlyCollection|ReadOnlyDictionary))$/;
 // Declared (element) type of the member a C# attribute decorates: the next non-attribute line, innermost generic arg.
@@ -130,20 +178,33 @@ function memberElementType(lines, i) {
   return null;
 }
 
-/** Scan one file → [{line, kind, high, srcCtx}]. Source line NEVER leaves this function. */
-export function extractDeser(text, file) {
+/**
+ * Scan one file → [{line, kind, high, srcCtx}]. Source line NEVER leaves this function.
+ * ctx.snakeyamlMajor — the repo's SnakeYAML major (snakeyamlMajorOf), or null/undefined when unknown.
+ */
+export function extractDeser(text, file, ctx = {}) {
   const out = [];
   if (isDecompiledSource(text, file)) return out;   // decompiler output is not the author's code (lang-scope.mjs)
   const s = String(text);
   const hasOIS = /\bObjectInputStream\b/.test(s);   // file-level: is real Java deserialization even in play here?
   const ruamelSafe = RUAMEL_BIND.test(s) && !RUAMEL_UNSAFE.test(s) && !PYYAML_IMPORT.test(s);
+  const jvm = JVM_FILE.test(String(file ?? ""));
+  const snakeSafe = jvm && SAFE_CONSTRUCTOR.test(s);
+  const snake2 = jvm && (ctx?.snakeyamlMajor ?? 0) >= 2 && !TAG_INSPECTOR.test(s);
   const lines = logicalLines(s.split(/\r?\n/));   // statements broken across lines read whole (lang-scope.mjs)
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (l.length > 4000) continue;   // minified blob — noise
     if (isComment(l)) continue;      // a sink named in a comment is documentation, not live code
-    for (const [kind, re] of HIGH) {
+    for (const [k, re] of HIGH) {
       if (!re.test(l)) continue;
+      const snake = jvm && (k === "py-yaml-unsafe" || k === "java-readobject") && SNAKEYAML_LOAD.test(l)
+        && !/\bObjectInputStream\b|\bXMLDecoder\b|\bXStream\b/.test(l);
+      if (snake && snakeSafe) continue;                          // Yaml(new SafeConstructor(…)) — no arbitrary class
+      if (jvm && k === "py-yaml-unsafe" && !snake) continue;     // not a SnakeYAML load either — no PyYAML in a JVM file
+      const kind = snake ? "java-readobject" : k;
+      if (snake && out.some((h) => h.line === i + 1 && h.kind === kind)) continue;   // both patterns hit one line
+      if (snake && snake2 && yamlLocalFile(lines, i) === null) { out.push({ line: i + 1, kind, high: false, srcCtx: DIRECT_SRC.test(l) }); continue; }
       if (kind === "py-yaml-unsafe" && ruamelSafe && !/\byaml\.unsafe_load\b/.test(l)) continue; // ruamel safe/rt load
       if (kind === "dotnet-binaryformatter" && TNH_ATTR.test(l) && !/\bBinaryFormatter\b|Formatter\b|NetDataContractSerializer/.test(l)) {
         const t = memberElementType(lines, i);
@@ -173,6 +234,6 @@ export function extractDeser(text, file) {
 }
 
 /** The insecure-deserialization fingerprint for one file — locations + kinds + tier flags, no source. */
-export function extractDeserFingerprint(text, file) {
-  return { file, hits: extractDeser(text, file) };
+export function extractDeserFingerprint(text, file, ctx = {}) {
+  return { file, hits: extractDeser(text, file, ctx) };
 }
