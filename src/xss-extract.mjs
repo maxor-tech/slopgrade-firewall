@@ -38,6 +38,7 @@ const PATTERNS = [
 
 import { isDecompiledSource, isPackedSource, kindAppliesToFile } from "./lang-scope.mjs";
 import { runTaintPass, mentions } from "./taint-core.mjs";
+import { FRAMEWORK_SOURCE, paramSources } from "./sources.mjs";
 import { findSinkWrappers, interprocHit } from "./taint-interproc.mjs";
 
 // A superglobal that is only COMPARED in a ternary whose two outputs are literals echoes one of two constants
@@ -49,7 +50,7 @@ const isComment = (l) => /^\s*(\/\/|\*|#|--|;|<!--)/.test(l);
 // An untrusted source: a request bag (node/py) OR a DOM-controlled value (location parts, document.URL/referrer,
 // window.name). location.pathname is excluded (server-fixed); only attacker-influenced parts are sources.
 const SRC = "req(?:uest)?\\s*\\.\\s*(?:query|body|params)|request\\s*\\.\\s*(?:args|json|form|values)|location\\s*\\.\\s*(?:hash|search|href)|document\\s*\\.\\s*(?:URL|referrer)|window\\s*\\.\\s*name";
-const SRC_RE = new RegExp(SRC);
+const SRC_RE = new RegExp(`${SRC}|${FRAMEWORK_SOURCE}`);   // + framework / LLM sources (sources.mjs)
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // An HTML sink fed the given var: innerHTML/outerHTML assignment, document.write, insertAdjacentHTML, dsih __html.
 const sink = (v) => new RegExp(
@@ -80,6 +81,7 @@ function taintPass(lines, text, importedWrappers) {
   const imported = importedWrappers instanceof Map ? importedWrappers : new Map();
   const dangerous = (taint) => (a) => SRC_RE.test(a) || [...taint].some(([v, t]) => t === "user" && mentions(v, a));
   return runTaintPass(lines, {
+    paramSources, paramTag: "user",
     sanitizer: XSS_SANITIZE,
     checkSinks(l, taint, emit) {
       if (XSS_SANITIZE.test(l)) return;   // an escaping call on this very line defuses the value — never fire

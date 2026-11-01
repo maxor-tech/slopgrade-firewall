@@ -59,6 +59,7 @@ function directPatterns(pyClients) {
 }
 
 import { runTaintPass, mentions, escapeVar } from "./taint-core.mjs";
+import { FRAMEWORK_SOURCE, paramSources } from "./sources.mjs";
 import { findSinkWrappers, interprocHit } from "./taint-interproc.mjs";
 
 const isComment = (l) => /^\s*(\/\/|\*|#|--|;|<!--)/.test(l);
@@ -69,7 +70,7 @@ const HAS_SINK = /\b(?:requests|httpx|session|urlopen|fetch|axios|got|superagent
 // ── Taint-pass vocabulary (fed to the shared runTaintPass engine) ────────────────────────────────────────────────
 // A user-controlled source on the RHS of an assignment taints the LHS var.
 const PY_SOURCE = new RegExp(PY_SRC);
-const NODE_SOURCE = new RegExp(NODE_SRC);
+const NODE_SOURCE = new RegExp(`${NODE_SRC}|${FRAMEWORK_SOURCE}`);   // + framework / LLM sources (sources.mjs)
 // A validation/normalisation of the var, OR a conditional guard testing it — assume the URL is checked → clear taint.
 const SSRF_SANITIZE = /\b(?:valid\w*|sanitiz\w*|allow\w*|whitelist|allowlist|check\w*|urlparse|urlsplit|parse_url|netloc|host_?name|ip_?address|resolve|assert\w*|ensure\w*|verif\w*|is_safe|ssrf|guard)\b|^\s*(?:if|elif|else\s+if|while|assert|unless)\b/i;
 
@@ -109,6 +110,7 @@ function taintPass(lines, text, importedWrappers) {
   const imported = importedWrappers instanceof Map ? importedWrappers : new Map();
   const dangerous = (taint) => (a) => SSRF_SOURCE.test(a) || [...taint.keys()].some((v) => mentions(v, a));
   return runTaintPass(lines, {
+    paramSources, paramTag: (l) => (/^\s*(?:async\s+)?def\s/.test(l) ? "py" : "node"),
     sanitizer: SSRF_SANITIZE,
     checkSinks(l, taint, emit) {
       for (const [v, lang] of taint) {

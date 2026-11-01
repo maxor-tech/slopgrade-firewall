@@ -60,12 +60,13 @@ function rubyExecLive(l) {
 
 import { isDecompiledSource, isPackedSource, kindAppliesToFile, phpCodeLines } from "./lang-scope.mjs";
 import { runTaintPass, mentions } from "./taint-core.mjs";
+import { FRAMEWORK_SOURCE, paramSources } from "./sources.mjs";
 import { findSinkWrappers, interprocHit } from "./taint-interproc.mjs";
 
 // ── Taint-pass vocabulary (Python + Node ; fed to the shared runTaintPass engine) ───────────────────────────────
 // Source = a request-derived value on the RHS. `params` bare is DELIBERATELY absent (collides with regexp.exec /
 // route params, per the direct pack's note) — property access only.
-const SOURCE = /\brequest\s*\.\s*(?:args|form|values|GET|POST|json|data)\b|\breq(?:uest)?\s*\.\s*(?:query|body|params)\b/;
+const SOURCE = new RegExp(`\\brequest\\s*\\.\\s*(?:args|form|values|GET|POST|json|data)\\b|\\breq(?:uest)?\\s*\\.\\s*(?:query|body|params)\\b|${FRAMEWORK_SOURCE}`);   // + framework / LLM sources (sources.mjs)
 // A cheap file-level gate: no shell-sink token ⇒ skip the inter-procedural pass.
 const HAS_SINK = /\bos\.(?:system|popen)|subprocess\.|(?<!\.)\b(?:eval|exec|execSync)\s*\(|(?:child_process|cp)\s*\.\s*(?:exec|execSync)|new\s+Function/;
 // An escaping / quoting call on the value — assume it makes the argument shell-safe → clear taint.
@@ -97,6 +98,7 @@ function taintPass(lines, text, importedWrappers) {
   const imported = importedWrappers instanceof Map ? importedWrappers : new Map();
   const dangerous = (taint) => (a) => SOURCE.test(a) || [...taint.keys()].some((v) => mentions(v, a));
   return runTaintPass(lines, {
+    paramSources, paramTag: "t",
     sanitizer: CMD_SANITIZE,
     checkSinks(l, taint, emit) {
       for (const v of taint.keys()) if (sink(v).test(l)) { emit("taint-cmd"); return; }

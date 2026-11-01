@@ -72,6 +72,9 @@ export function runTaintPass(lines, cfg) {
     let fired = false;
     cfg.checkSinks(l, taint, (kind) => { if (!fired) { out.push({ line: i + 1, kind }); fired = true; } });
     if (boundary.test(l)) taint.clear();
+    // A route / tool handler declared here : the parameters its framework fills from the request start tainted
+    // (sources.mjs paramSources ; Java methods match no boundary, so this runs on every line, not only after a reset).
+    if (cfg.paramSources) for (const n of cfg.paramSources(lines, i)) taint.set(n, typeof cfg.paramTag === "function" ? cfg.paramTag(l) : cfg.paramTag);
 
     // 2. Sanitizer — by EFFECT, not by mention (sanitizerEffect below).
     const as = l.match(ASSIGN_RE);
