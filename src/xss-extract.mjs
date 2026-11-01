@@ -36,7 +36,7 @@ const PATTERNS = [
     `|\\b(?:echo|print)\\b(?=[^;]*["']\\s*<\\s*[A-Za-z!\\/])[^;]*\\.\\s*\\$_(?:GET|POST|REQUEST|COOKIE)\\b`)],
 ];
 
-import { isDecompiledSource, isPackedSource, kindAppliesToFile } from "./lang-scope.mjs";
+import { isDecompiledSource, isPackedSource, kindAppliesToFile, logicalLines } from "./lang-scope.mjs";
 import { runTaintPass, mentions } from "./taint-core.mjs";
 import { FRAMEWORK_SOURCE, paramSources } from "./sources.mjs";
 import { findSinkWrappers, interprocHit } from "./taint-interproc.mjs";
@@ -104,7 +104,7 @@ function taintPass(lines, text, importedWrappers) {
 export function extractXss(text, importedWrappers, file) {
   const out = [];
   if (isPackedSource(text) || isDecompiledSource(text, file)) return out;   // a vendored / packed build, or decompiler output (lang-scope.mjs)
-  const lines = String(text).split(/\r?\n/);
+  const lines = logicalLines(String(text).split(/\r?\n/));   // statements broken across lines read whole (lang-scope.mjs)
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (l.length > 4000) continue;   // minified blob — noise

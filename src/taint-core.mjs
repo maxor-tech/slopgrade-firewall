@@ -62,14 +62,16 @@ export function runTaintPass(lines, cfg) {
   const out = [];
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].length > 4000 || isComment(lines[i])) continue;   // minified blob / a sink named in a comment is not live code
-    const l = codeOnly(lines[i]);   // a trailing comment never decides a sink, a scope or a sanitizer
+    let fired = false;
+    // Several statements on one line (`const u = req.query.b; const full = u + '/x'; fetch(full)`) are read one by one,
+    // in order, with the line's number (expert panel P0-3 ; mutation-invariance « semicolon » kept 0 / 13 before).
+    for (const l of statementsOf(codeOnly(lines[i]))) {   // a trailing comment never decides a sink, a scope or a sanitizer
 
     // 1. Sink check — the consumer decides which tainted var reaching what sink counts (one hit per line).
     //    BEFORE the boundary reset : a sink line that also carries an inline callback (`exec(cmd, (e, out) => …)`)
     //    matches the `=>` boundary, and clearing first made every such sink invisible (release audit 2026-09-13,
     //    B-P1-6). The sink on this line still sees the taint of the enclosing function ; the reset applies to what
     //    FOLLOWS the new scope opener.
-    let fired = false;
     cfg.checkSinks(l, taint, (kind) => { if (!fired) { out.push({ line: i + 1, kind }); fired = true; } });
     if (boundary.test(l)) taint.clear();
     // A route / tool handler declared here : the parameters its framework fills from the request start tainted
@@ -86,8 +88,35 @@ export function runTaintPass(lines, cfg) {
     //    `s` is clean, `v` stays tainted, and `q = "…" + escape(id) + req.args.b` stays tainted through the raw part.
     const rhs = as ? (effect === "clean-target" ? stripSanitizerCalls(as[2], cfg.sanitizer) : as[2]) : null;
     cfg.updateTaint(as && effect === "clean-target" ? l.replace(as[2], rhs) : l, taint, as ? { name: as[1], rhs } : null);
+    }
   }
   return out;
+}
+
+/** The top-level statements of one code line : split at `;` and after an opening `{` outside quotes and brackets, so
+ *  `function h(req){ const u = req.query.b; fetch(u) }` reads as `function h(req){` · `const u = …` · `fetch(u) }`. A
+ *  `for (;;)` header or a `;` inside a string stays whole. A line with neither is returned unchanged. */
+export function statementsOf(code) {
+  if (!/[;{]/.test(code)) return [code];
+  const out = [];
+  let depth = 0, quote = null, start = 0;
+  for (let k = 0; k < code.length; k++) {
+    const c = code[k];
+    if (quote) { if (c === "\\") k++; else if (c === quote) quote = null; continue; }
+    if (c === '"' || c === "'" || c === "`") { quote = c; continue; }
+    if (c === "(" || c === "[") depth++;
+    else if (c === ")" || c === "]") depth--;
+    // A `{` ends a statement only when it opens a BLOCK (after `)`, `=>`, else, try, do, finally) : an object literal
+    // (`opts = { url: req.query.u }`) stays whole, so its value keeps the taint it carries.
+    else if (depth === 0 && (c === ";" || (c === "{" && /(?:\)|=>|\belse|\btry|\bdo|\bfinally)\s*$/.test(code.slice(start, k))))) {
+      const seg = code.slice(start, c === "{" ? k + 1 : k);
+      if (seg.trim()) out.push(seg);
+      start = k + 1;
+    }
+  }
+  const tail = code.slice(start);
+  if (tail.trim()) out.push(tail);
+  return out.length ? out : [code];
 }
 
 // Expert panel 2026-10-31 (P0-4) : the old sweep cleared every tainted variable named on a sanitizer line, so
