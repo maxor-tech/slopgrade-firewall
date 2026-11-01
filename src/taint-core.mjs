@@ -22,6 +22,28 @@ export const escapeVar = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /** Word-boundaried test for a bare identifier occurring in a line (used by consumers + the sanitizer sweep). */
 export const mentions = (v, line) => new RegExp(`\\b${escapeVar(v)}\\b`).test(line);
 
+/** The code part of a line : a trailing `// …`, `/* … *\/` or `# …` comment is cut, quoted text is kept. Expert-panel red
+ *  team (2026-10-31) : `el.innerHTML = h; // sanitize` and `console.log(c); // validate` matched the sanitizer regex on the
+ *  comment and cleared the taint. A `#` cuts only at the start or after a space and before a space or the line end, so a
+ *  JS private field (`this.#x`) or a Ruby `"#{x}"` stays code. */
+export function codeOnly(l) {
+  let quote = null, out = "";
+  for (let k = 0; k < l.length; k++) {
+    const c = l[k];
+    if (quote) {
+      out += c;
+      if (c === "\\") { out += l[k + 1] ?? ""; k++; } else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { quote = c; out += c; continue; }
+    if (c === "/" && l[k + 1] === "/") break;
+    if (c === "/" && l[k + 1] === "*") { const end = l.indexOf("*/", k + 2); if (end < 0) break; k = end + 1; out += " "; continue; }
+    if (c === "#" && (k === 0 || /\s/.test(l[k - 1])) && (k + 1 >= l.length || /\s/.test(l[k + 1]))) break;
+    out += c;
+  }
+  return out;
+}
+
 /**
  * Run the intra-function taint pass over a file's lines.
  * @param {string[]} lines
@@ -39,8 +61,8 @@ export function runTaintPass(lines, cfg) {
   const taint = new Map(cfg.seed || []);   // optional seed (e.g. a function's params pre-tainted for inter-proc pass 1)
   const out = [];
   for (let i = 0; i < lines.length; i++) {
-    const l = lines[i];
-    if (l.length > 4000 || isComment(l)) continue;   // minified blob / a sink named in a comment is not live code
+    if (lines[i].length > 4000 || isComment(lines[i])) continue;   // minified blob / a sink named in a comment is not live code
+    const l = codeOnly(lines[i]);   // a trailing comment never decides a sink, a scope or a sanitizer
 
     // 1. Sink check — the consumer decides which tainted var reaching what sink counts (one hit per line).
     //    BEFORE the boundary reset : a sink line that also carries an inline callback (`exec(cmd, (e, out) => …)`)

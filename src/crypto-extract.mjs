@@ -130,7 +130,7 @@ const ENUM_CONSTANT = /^\s*(?:DESede|TripleDES|3DES|DES)\s*\(\s*(?:(?:"[^"\n]*"|
 /** Scan one file → [{line, kind, high, secCtx}]. Source line NEVER leaves this function. */
 export function extractCrypto(text, file) {
   const out = [];
-  if (isDecompiledSource(text)) return out;   // decompiler output is not the author's code (lang-scope.mjs)
+  if (isDecompiledSource(text, file)) return out;   // decompiler output is not the author's code (lang-scope.mjs)
   const lines = String(text).split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
