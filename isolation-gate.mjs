@@ -25,6 +25,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { walk } from "./src/extract.mjs";
 import { buildFingerprint } from "./src/fingerprint.mjs";
+import { receiptLine } from "./src/receipt.mjs";
 // The 10 flagship classes (base + go/dotnet variants where they exist).
 import { extractSqliFingerprint, sqliWrapperCfg } from "./src/sqli-extract.mjs";
 import { extractGoSqliFingerprint } from "./src/gosqli-extract.mjs";
@@ -671,6 +672,8 @@ export async function main(argv = [], env = process.env) {
     emitStepSummary(env, stepSummaryMarkdown(v, { origin, blobBase, decision: decision.kind, scope, offer, deep }), appendFileSync);
   } catch (e) { ghWarn(`step summary skipped (${errMsg(e)}).`); }
   const ofPr = scoped ? " introduced by this PR" : "";
+  const receipt = receiptLine(v);   // what judged this run (src/receipt.mjs) — quote it to contest a block
+  if (receipt) line(receipt);
   if (decision.kind === "gate-blocked") {
     const reasons = [];
     if (v.reliable && gateHard > 0 && v.gateEntitled) reasons.push(`${gateHard} hard cross-tenant leak(s)${ofPr}`);
