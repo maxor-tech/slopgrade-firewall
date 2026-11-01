@@ -58,7 +58,7 @@ function directPatterns(pyClients) {
   ];
 }
 
-import { runTaintPass, mentions } from "./taint-core.mjs";
+import { runTaintPass, mentions, escapeVar } from "./taint-core.mjs";
 import { findSinkWrappers, interprocHit } from "./taint-interproc.mjs";
 
 const isComment = (l) => /^\s*(\/\/|\*|#|--|;|<!--)/.test(l);
@@ -132,9 +132,29 @@ function taintPass(lines, text, importedWrappers) {
       if (!sa) return;
       if (PY_SOURCE.test(sa.rhs)) taint.set(sa.name, "py");
       else if (NODE_SOURCE.test(sa.rhs)) taint.set(sa.name, "node");
-      else if (taint.has(sa.name)) taint.delete(sa.name);
+      else {
+        const from = hostControllingVar(sa.rhs, taint);
+        if (from) taint.set(sa.name, taint.get(from));
+        else if (taint.has(sa.name)) taint.delete(sa.name);
+      }
     },
   });
+}
+
+// Propagation through a NEW variable (expert panel P0-3 ; recall-benchmark pinned `full = u + '/x'` as invisible). An
+// SSRF needs the attacker to choose the HOST, so taint follows only when the tainted value starts the new URL
+// (`u + '/x'`, `${u}/x`, f"{u}/x", `u.concat(…)`, urljoin(u, …)) or comes right after a bare scheme
+// (`'https://' + u`, `https://${u}`, f"https://{u}"). A value appended after a fixed host (`BASE + '/users/' + id`)
+// only picks a path : the new variable stays clean.
+function hostControllingVar(rhs, taint) {
+  const r = rhs.trim().replace(/;$/, "");
+  for (const v of taint.keys()) {
+    const e = escapeVar(v);
+    const starts = new RegExp(`^(?:${e}\\s*(?:\\+|\\.\\s*concat\\s*\\(|\\.\\s*replace\\s*\\()|\`\\$\\{\\s*${e}\\s*\\}|f["']\\{\\s*${e}\\s*\\}|(?:urljoin|urllib\\.parse\\.urljoin|new\\s+URL)\\s*\\(\\s*[^,)]*,\\s*${e}\\b|urljoin\\s*\\(\\s*${e}\\b)`);
+    const afterScheme = new RegExp(`^(?:["']\\s*https?:\\/\\/\\s*["']\\s*\\+\\s*${e}\\b|\`https?:\\/\\/\\$\\{\\s*${e}\\s*\\}|f["']https?:\\/\\/\\{\\s*${e}\\s*\\})`);
+    if (starts.test(r) || afterScheme.test(r)) return v;
+  }
+  return null;
 }
 
 /**
