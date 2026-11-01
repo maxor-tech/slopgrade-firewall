@@ -5,6 +5,13 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+### Security
+- **Comment evasion closed** (expert-panel red team). A trailing comment no longer decides a taint sink or sanitizer :
+  `el.innerHTML = h; // sanitize` and `console.log(c); // validate` used to clear the taint of a request value, so the
+  finding vanished. And the decompiled-source skip now applies only to `.java` / `.kt` / `.cs` files with the decompiler
+  banner in the first 5 lines or the JADX marker directly above a type declaration : one `// Decompiled with CFR` comment
+  in a JS / Python file used to switch the injection extractors off for the whole file. No labelled row changes.
+
 ### Fixed
 - `insecureDeser` : an in-memory **deep clone** (an object written to a `ByteArrayOutputStream` through an
   `ObjectOutputStream`, then read back from that buffer's own bytes) is self-produced data, not attacker input. It is

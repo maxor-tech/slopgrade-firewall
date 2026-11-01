@@ -31,10 +31,24 @@ export function isPackedSource(text) {
 // above each class, CFR / Procyon / FernFlower / JD / the JetBrains decompiler write a fixed header. Only the first
 // DECOMPILED_HEAD lines are read : the markers sit above the first class. Measured on the 205 labelled files : 5 decompiled
 // files, 7 labelled blocks, all DESIGN, no true finding.
-const DECOMPILED_HEAD = 60;
-const DECOMPILED = /^\s*\/\*\s*(?:loaded|compiled) from:[^\n]*\*\/\s*$|Decompiled with CFR\b|Decompiled by Procyon\b|powered by FernFlower decompiler|Source code recreated from a \.class file|JD-Core Version|Decompiled with JetBrains decompiler/m;
-export function isDecompiledSource(text) {
-  return DECOMPILED.test(String(text).split(/\r?\n/, DECOMPILED_HEAD).join("\n"));
+// Evasion guard (expert-panel red team, 2026-10-31) : one `// Decompiled with CFR` comment in any file used to switch every
+// injection extractor off. A decompiler writes only JVM / .NET source, and in fixed places : a banner in the first
+// BANNER_HEAD lines, or the JADX marker directly above a type declaration. Any other file, a marker anywhere else, or a
+// call with no file name is never skipped.
+const DECOMPILED_HEAD = 60, BANNER_HEAD = 5;
+const DECOMPILED_LANG = /\.(?:java|kt|cs)$/i;
+const BANNER = /Decompiled with CFR\b|Decompiled by Procyon\b|powered by FernFlower decompiler|Source code recreated from a \.class file|JD-Core Version|Decompiled with JetBrains decompiler/;
+const JADX_MARKER = /^\s*\/\*\s*(?:loaded|compiled) from:[^\n]*\*\/\s*$/;
+const TYPE_DECL = /^\s*(?:(?:public|private|protected|final|abstract|static|sealed|internal|open|data)\s+)*(?:class|interface|enum|object|record|@interface)\s+\w/;
+export function isDecompiledSource(text, file) {
+  if (!file || !DECOMPILED_LANG.test(String(file))) return false;
+  const lines = String(text).split(/\r?\n/, DECOMPILED_HEAD);
+  if (lines.slice(0, BANNER_HEAD).some((l) => BANNER.test(l))) return true;
+  return lines.some((l, i) => {
+    if (!JADX_MARKER.test(l)) return false;
+    const next = lines.slice(i + 1).find((n) => n.trim() !== "" && !JADX_MARKER.test(n));
+    return next !== undefined && TYPE_DECL.test(next);
+  });
 }
 
 // `ruby-exec` also keeps JS / TS files : its `eval(params…)` text is the Next.js route-handler shape there, where `params`

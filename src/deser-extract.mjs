@@ -131,9 +131,9 @@ function memberElementType(lines, i) {
 }
 
 /** Scan one file → [{line, kind, high, srcCtx}]. Source line NEVER leaves this function. */
-export function extractDeser(text) {
+export function extractDeser(text, file) {
   const out = [];
-  if (isDecompiledSource(text)) return out;   // decompiler output is not the author's code (lang-scope.mjs)
+  if (isDecompiledSource(text, file)) return out;   // decompiler output is not the author's code (lang-scope.mjs)
   const s = String(text);
   const hasOIS = /\bObjectInputStream\b/.test(s);   // file-level: is real Java deserialization even in play here?
   const ruamelSafe = RUAMEL_BIND.test(s) && !RUAMEL_UNSAFE.test(s) && !PYYAML_IMPORT.test(s);
@@ -174,5 +174,5 @@ export function extractDeser(text) {
 
 /** The insecure-deserialization fingerprint for one file — locations + kinds + tier flags, no source. */
 export function extractDeserFingerprint(text, file) {
-  return { file, hits: extractDeser(text) };
+  return { file, hits: extractDeser(text, file) };
 }

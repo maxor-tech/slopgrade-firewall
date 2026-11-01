@@ -137,7 +137,7 @@ function taintPass(lines, text, importedWrappers) {
 /** Scan one file → [{line, kind}]. Direct + taint + inter-proc; `importedWrappers` enables the cross-file layer. */
 export function extractSqli(text, importedWrappers, file) {
   const out = [];
-  if (isPackedSource(text) || isDecompiledSource(text)) return out;   // a vendored / packed build, or decompiler output (lang-scope.mjs)
+  if (isPackedSource(text) || isDecompiledSource(text, file)) return out;   // a vendored / packed build, or decompiler output (lang-scope.mjs)
   const lines = String(text).split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
