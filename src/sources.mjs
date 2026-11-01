@@ -16,10 +16,7 @@ export const FRAMEWORK_SOURCE = [
   // Laravel / Symfony
   "\\$request\\s*->\\s*(?:input|query|get|post|all|only|route|cookie|header|json)\\s*\\(",
   "\\bRequest\\s*::\\s*(?:input|query|get|all)\\s*\\(",
-  // Go : net/http, Gin, Echo, Fiber
-  "\\b(?:r|req)\\s*\\.\\s*(?:FormValue|PostFormValue)\\s*\\(",
-  "\\b(?:r|req)\\s*\\.\\s*URL\\s*\\.\\s*Query\\s*\\(\\s*\\)\\s*\\.\\s*Get\\s*\\(",
-  "\\b(?:c|ctx)\\s*\\.\\s*(?:Query|DefaultQuery|Param|PostForm|DefaultPostForm|GetHeader|QueryParam|FormValue|Params)\\s*\\(",
+  // (Go handlers are read by the go* extractors, which keep their own source lists — no Go accessor belongs here.)
   // LLM output : OpenAI-style and Anthropic-style completions
   "\\.\\s*choices\\s*\\[\\s*\\d+\\s*\\]\\s*\\.\\s*(?:message\\s*\\.\\s*content|text)\\b",
   "\\.\\s*content\\s*\\[\\s*\\d+\\s*\\]\\s*\\.\\s*text\\b",

@@ -35,6 +35,8 @@ test("framework-filled values now reach the sinks", () => {
 test("MCP tool arguments and LLM output are untrusted", () => {
   assert.equal(n(extractCmdi, 'server.tool("run", { command: z.string() }, async ({ command }) => {\n  return execSync(command).toString();\n});', "server.ts"), 1, "MCP tool argument → command");
   assert.equal(n(extractCmdi, "const out = completion.choices[0].message.content;\nexecSync(out);", "agent.js"), 1, "LLM output → command");
+  assert.equal(n(extractCmdi, "const out = msg.content[0].text;\nexecSync(out);", "agent.js"), 1, "Anthropic-style LLM output → command");
+  assert.equal(n(extractXss, 'app.get("/x", (req, res) => {\n  const ua = req.headers["user-agent"];\n  el.innerHTML = ua;\n});', "x.js"), 1, "req.headers → HTML");
 });
 
 test("CONTROL : a plain library function's parameter stays clean", () => {
