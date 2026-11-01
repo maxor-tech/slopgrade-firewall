@@ -109,11 +109,20 @@ function withoutTrailingComment(l) {
   }
   return l;
 }
+// A label map line whose key and value are the same word (`'arc4': 'ARC4',` in an i18n table — independent set v1) :
+// a display string for an option, not a cipher in use.
+const LABEL_PAIR_SAME = /^\s*(['"])([\w-]+)\1\s*:\s*(['"])([\w-]+)\3\s*,?\s*$/;
+const labelPairSame = (l) => { const m = LABEL_PAIR_SAME.exec(l); return !!m && m[2].toLowerCase() === m[4].toLowerCase(); };
 function isNotACipherName(lines, i, file) {
   if (file && VERSION_FILE.test(String(file))) return true;
   if (VERSION_ASSIGN.test(lines[i])) return true;
   if (IMPORT_PATH_KEY.test(lines[i])) return true;
-  const code = withoutTrailingComment(lines[i]);
+  // An object KEY (`"rc4": { "exports": "CryptoJS.RC4" … }` — crypto-js build config) and a METADATA value
+  // (`name: "rc4", description: "Implementation of RC4 …"` — jsPDF module table) name a module, they select no cipher
+  // (independent set v1, 2026-11-01). A crypto SETTING (`cipher: "rc4"`, `algorithm: 'rc4'`) keeps firing.
+  const code = withoutTrailingComment(lines[i])
+    .replace(/(^\s*|[{,]\s*)(['"])(?:rc4|rc2|arcfour)\2\s*:/gi, "$1")   // a key follows `{` `,` or the line start — never `?` (a ternary)
+    .replace(/\b(?:name|title|label|description|text|displayName|id|folder|module|exports|key)\s*:\s*(['"])(?:rc4|rc2|arcfour)\1/gi, "");
   if (!RC_LITERAL.test(code)) return true;
   if (isNameList(code)) return true;
   for (let j = Math.max(0, i - 3); j <= Math.min(lines.length - 1, i + 3); j++) {
@@ -142,6 +151,7 @@ export function extractCrypto(text, file) {
       if (!re.test(code)) continue;
       const strong = RC_STRONG[kind];
       if (strong && !strong.test(code) && isNotACipherName(lines, i, file)) continue;   // P8: release tag, package name, name list or comment, not a cipher
+      if (strong && LABEL_PAIR_SAME.test(l) && labelPairSame(l)) continue;              // a UI label map `'arc4': 'ARC4',` (AriaNg i18n)
       if (kind === "des-cipher" && ENUM_CONSTANT.test(l)) continue;                     // an enum value declaration, not a DES call
       out.push({ line: i + 1, kind, high: true, secCtx: true });
     }

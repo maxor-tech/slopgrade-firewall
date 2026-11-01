@@ -5,6 +5,13 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+### Fixed
+- Found by an independent test set (178 findings on 600 repos never used for tuning, labelled blind) :
+  - path traversal : `Image.open(BytesIO(data))`, `pdfplumber.open(BytesIO(...))`, `Image.open(upload.file)` decode an
+    uploaded in-memory stream, not a path. The same `.open` on a request-chosen path still fires.
+  - `weakCrypto` : an `"rc4"` object key, module metadata (`name: "rc4"`), or a label map (`'arc4': 'ARC4'`) names a
+    module or an option ; a cipher setting (`cipher: "rc4"`) and an API use still fire.
+
 ## [0.13.0] — 2026-11-01
 
 Depth release (expert-panel roadmap) : statements instead of physical lines, sanitizers by their effect, framework /
