@@ -95,3 +95,62 @@ export function phpCodeLines(lines) {
     return out;
   });
 }
+
+// LOGICAL STATEMENTS (expert panel 2026-10-31, P0-3 first layer ; mutation-invariance bench) : the extractors read one
+// physical line at a time, so a call broken across lines lost its argument (`yaml.load(raw,` / `Loader=SafeLoader)`
+// read as an unsafe load ; `subprocess.run(cmd,` / `shell=True)` lost the flag). A statement whose `(` or `[` stays open,
+// or that ends in `\`, `+`, `=`, `&&`, `||`, or whose next line starts with `.method`, is joined onto its FIRST line ;
+// the continuation lines become empty, so every line number stays where it was. The comments of a joined statement are
+// moved to its end. At most JOIN_MAX lines are joined (a runaway string or docstring cannot swallow a file).
+const JOIN_MAX = 12;
+const CONTINUES = /(?:\\|\+|(?<![=!<>])=|&&|\|\||\(|\[)\s*$/;
+const LEADING_DOT = /^\s*\.\s*[A-Za-z_$]/;
+function codePart(l) {
+  let quote = null, out = "";
+  for (let k = 0; k < l.length; k++) {
+    const c = l[k];
+    if (quote) { out += c; if (c === "\\") { out += l[k + 1] ?? ""; k++; } else if (c === quote) quote = null; continue; }
+    if (c === '"' || c === "'" || c === "`") { quote = c; out += c; continue; }
+    if (c === "/" && l[k + 1] === "/") break;
+    if (c === "#" && (k === 0 || /\s/.test(l[k - 1])) && (k + 1 >= l.length || /\s/.test(l[k + 1]))) break;
+    out += c;
+  }
+  return out;
+}
+function openDepth(code) {
+  let d = 0, quote = null;
+  for (let k = 0; k < code.length; k++) {
+    const c = code[k];
+    if (quote) { if (c === "\\") k++; else if (c === quote) quote = null; continue; }
+    if (c === '"' || c === "'" || c === "`") quote = c;
+    else if (c === "(" || c === "[") d++;
+    else if (c === ")" || c === "]") d--;
+  }
+  return d;
+}
+export function logicalLines(lines) {
+  const out = lines.slice();
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].length > 4000) continue;
+    let depth = openDepth(codePart(lines[i])), j = i;
+    // A line that ends in `{` opens a BLOCK (a callback body `(req, res) => {`, an options object) — never a continuation :
+    // joining it would fold a whole handler into one line and lose its statement order.
+    while (j - i < JOIN_MAX && j + 1 < lines.length && lines[j + 1].length <= 4000 && !/\{\s*$/.test(codePart(lines[j]).trimEnd()) &&
+      (depth > 0 || CONTINUES.test(codePart(lines[j]).trimEnd()) || LEADING_DOT.test(lines[j + 1]))) {
+      j++;
+      depth += openDepth(codePart(lines[j]));
+    }
+    if (j === i) continue;
+    const parts = [], comments = [];
+    for (let k = i; k <= j; k++) {
+      const code = codePart(lines[k]);
+      parts.push(k === i ? code.trimEnd() : code.trim());
+      const rest = lines[k].slice(code.length).trim();
+      if (rest) comments.push(rest);
+    }
+    out[i] = parts.filter(Boolean).join(" ") + (comments.length ? "  " + comments.join(" ") : "");
+    for (let k = i + 1; k <= j; k++) out[k] = "";
+    i = j;
+  }
+  return out;
+}

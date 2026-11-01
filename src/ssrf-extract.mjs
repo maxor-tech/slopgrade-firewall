@@ -14,6 +14,7 @@
 // job). The direct patterns are unchanged; the taint pass is additive.
 
 // ── Sink vocabulary (parametrised by the file's client group so `import requests as r` is tracked) ───────────────
+import { logicalLines } from "./lang-scope.mjs";
 const PY_BASE = "requests|httpx|session";                 // base Python HTTP clients (aliases appended per file)
 const NODE_C = "fetch|axios|got|superagent|needle";       // Node HTTP clients
 const VERBS = "get|post|put|delete|patch|head|request";   // HTTP verbs
@@ -166,7 +167,7 @@ function hostControllingVar(rhs, taint) {
  */
 export function extractSsrf(text, importedWrappers) {
   const out = [];
-  const lines = String(text).split(/\r?\n/);
+  const lines = logicalLines(String(text).split(/\r?\n/));   // statements broken across lines read whole (lang-scope.mjs)
   const patterns = directPatterns(pyClientGroup(text));   // per-file: client group includes `import requests as r`
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];

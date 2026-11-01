@@ -9,6 +9,7 @@
 // Precision over recall = ~0 FP: a constant ACAO ('https://app.example.com'), a validated-var origin, and a
 // `cors({ origin: '*' })` WITHOUT credentials (a legitimate public API) all stay clean.
 
+import { logicalLines } from "./lang-scope.mjs";
 const PATTERNS = [
   // Reflected Origin — a response header ACAO whose value is pulled from the request headers (req.headers.origin /
   // req.get('Origin') / ctx.set(...req...)). A constant or a validated var never references req.headers inline.
@@ -24,7 +25,7 @@ const isComment = (l) => /^\s*(\/\/|\*|#|--|;|<!--)/.test(l);
 /** Scan one file → [{line, kind}]. Source line NEVER leaves this function. */
 export function extractCors(text) {
   const out = [];
-  const lines = String(text).split(/\r?\n/);
+  const lines = logicalLines(String(text).split(/\r?\n/));   // statements broken across lines read whole (lang-scope.mjs)
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (l.length > 4000) continue;   // minified blob — noise

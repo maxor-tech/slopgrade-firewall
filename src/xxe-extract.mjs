@@ -6,6 +6,7 @@
 // XXE lets an attacker read local files (file:///etc/passwd), reach internal services (SSRF), or exfiltrate data
 // via a crafted DOCTYPE — the classic `<!ENTITY xxe SYSTEM "file:///…">` payload the parser then resolves.
 
+import { logicalLines } from "./lang-scope.mjs";
 const PATTERNS = [
   // PHP — libxml: NOENT substitutes entities; disable_entity_loader(false) re-enables the external loader.
   ["php-libxml", /\bLIBXML_NOENT\b|libxml_disable_entity_loader\s*\(\s*false\s*\)/],
@@ -47,7 +48,7 @@ const hardenedFactory = (win) => DOCTYPE_OFF.test(win) || (GENERAL_OFF.test(win)
 /** Scan one file → [{line, kind}]. Source line NEVER leaves this function. */
 export function extractXxe(text) {
   const out = [];
-  const lines = String(text).split(/\r?\n/);
+  const lines = logicalLines(String(text).split(/\r?\n/));   // statements broken across lines read whole (lang-scope.mjs)
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (l.length > 4000) continue;   // minified blob — noise

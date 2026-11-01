@@ -10,7 +10,7 @@
 //     unserialize on a variable. Legitimate for TRUSTED internal data (a cache, an ML model) → fire ONLY when an
 //     untrusted-source keyword (request/input/body/socket/$_GET…) sits within SRC_WINDOW lines (srcCtx=true).
 
-import { isDecompiledSource } from "./lang-scope.mjs";
+import { isDecompiledSource, logicalLines } from "./lang-scope.mjs";
 
 const HIGH = [
   // Python — yaml.load with no safe loader is RCE; the safe forms (safe_load / Loader=SafeLoader/CSafeLoader) are
@@ -137,7 +137,7 @@ export function extractDeser(text, file) {
   const s = String(text);
   const hasOIS = /\bObjectInputStream\b/.test(s);   // file-level: is real Java deserialization even in play here?
   const ruamelSafe = RUAMEL_BIND.test(s) && !RUAMEL_UNSAFE.test(s) && !PYYAML_IMPORT.test(s);
-  const lines = s.split(/\r?\n/);
+  const lines = logicalLines(s.split(/\r?\n/));   // statements broken across lines read whole (lang-scope.mjs)
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (l.length > 4000) continue;   // minified blob — noise

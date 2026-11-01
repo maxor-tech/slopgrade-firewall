@@ -10,6 +10,7 @@
 // fields, i18n and validation strings (544 hits, mostly FP); (2) a bare JWT / a lone `-----BEGIN PRIVATE KEY-----`
 // HEADER — which appears in PEM-handling code and openapi examples far more than as a committed key. Both need
 // context/verification a static line-scan can't give, so they are deferred.
+import { logicalLines } from "./lang-scope.mjs";
 const PATTERNS = [
   ["aws-access-key", /\bAKIA[0-9A-Z]{16}\b/],
   ["github-token", /\bgh[pousr]_[A-Za-z0-9]{36,}\b/],
@@ -46,7 +47,7 @@ const isPlaceholder = (v) => PLACEHOLDER.test(v);
 /** Scan one file's text → [{line, kind, entropy, placeholder}]. The matched VALUE never leaves this function. */
 export function extractSecrets(text) {
   const out = [];
-  const lines = String(text).split(/\r?\n/);
+  const lines = logicalLines(String(text).split(/\r?\n/));   // statements broken across lines read whole (lang-scope.mjs)
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (l.length > 4000) continue; // skip minified/one-line blobs (noise)
