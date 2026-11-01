@@ -50,6 +50,9 @@ benchmark : 12/12 vulnerable cases flagged, 1/13 false flag (advisory).
 ### Fixed
 - Cross-tenant : a Prisma `where: { id }` **shorthand** is an id constraint. `update({ where: { id }, data })` was
   read as an unscoped update, a false hard leak that blocked the build. Found by the new BOLA benchmark.
+- ORM IDOR advisories (measured on 5,300 public repos) : a controller that uses Pundit / CanCan / Django object
+  permissions / Spring method security anywhere in the file counts as checked ; Spring `existsById` is a probe, not
+  an access.
 - `insecureDeser` : an in-memory **deep clone** (an object written to a `ByteArrayOutputStream` through an
   `ObjectOutputStream`, then read back from that buffer's own bytes) is self-produced data, not attacker input. It is
   now gated like a local-file stream. Labelled wrong blocks 16 → 13 ; every labelled true finding still fires (3/3).
