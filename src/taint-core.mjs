@@ -73,14 +73,73 @@ export function runTaintPass(lines, cfg) {
     cfg.checkSinks(l, taint, (kind) => { if (!fired) { out.push({ line: i + 1, kind }); fired = true; } });
     if (boundary.test(l)) taint.clear();
 
-    // 2. Sanitizer sweep — a validation/escaping line clears every tainted var it references.
-    if (cfg.sanitizer && cfg.sanitizer.test(l)) {
-      for (const v of [...taint.keys()]) if (mentions(v, l)) taint.delete(v);
-    }
-
-    // 3. Assignment — pre-parse the shared simple-assign form, hand it (+ the raw line) to the consumer.
+    // 2. Sanitizer — by EFFECT, not by mention (sanitizerEffect below).
     const as = l.match(ASSIGN_RE);
-    cfg.updateTaint(l, taint, as ? { name: as[1], rhs: as[2] } : null);
+    const effect = cfg.sanitizer ? sanitizerEffect(l, cfg.sanitizer, as, lines, i) : "none";
+    if (effect === "clear") for (const v of [...taint.keys()]) if (mentions(v, l)) taint.delete(v);
+
+    // 3. Assignment — pre-parse the shared simple-assign form, hand it (+ the raw line) to the consumer. For
+    //    `s = escape(v)` the consumer sees the right-hand side WITHOUT the sanitizing calls, so its own rules decide :
+    //    `s` is clean, `v` stays tainted, and `q = "…" + escape(id) + req.args.b` stays tainted through the raw part.
+    const rhs = as ? (effect === "clean-target" ? stripSanitizerCalls(as[2], cfg.sanitizer) : as[2]) : null;
+    cfg.updateTaint(as && effect === "clean-target" ? l.replace(as[2], rhs) : l, taint, as ? { name: as[1], rhs } : null);
   }
   return out;
+}
+
+// Expert panel 2026-10-31 (P0-4) : the old sweep cleared every tainted variable named on a sanitizer line, so
+// `escape(id);` with its result thrown away, `el.textContent = h`, a bare `if (u) {` or `s = escapeHtml(h)` (which
+// cleared `h` itself) all made a request value look safe. A sanitizer now acts by its effect :
+//   · PURE transforms (escape*, sanitize*, quote*, encodeURI*, basename, realpath, .replace(…) …) return a new value —
+//     they clean the variable they are ASSIGNED to, never their argument, and a call whose result is ignored does nothing ;
+//   · VALIDATORS (valid*, check*, assert*, ensure*, verif*, allow-lists, parameter binding) clear the values they are
+//     called on, in a guard or as a statement (they reject by throwing or by the guard) ;
+//   · a bare guard (`if …`) with no sanitizer call clears only when it compares the value AND rejects right after.
+const PURE_NAME = /^(?:escape\w*|sanitiz\w*|quote\w*|encodeURI\w*|DOMPurify|escapeshell\w*|shell[-_]?escape|basename|secure_filename|realpath|abspath|canonical\w*|safe_join|quote_ident|mogrify|textContent|innerText|createTextNode|replace|strip|lstrip|sub|htmlspecialchars|htmlentities|shlex\.quote|pipes\.quote|sql\.Identifier)$/i;
+const GUARD_WORD = /^(?:if|elif|else\s+if|while|unless|assert|guard)$/i;
+const GUARD_LINE = /^\s*(?:if|elif|else\s+if|while|unless|assert|guard)\b|\bif\s*\(/;
+const REJECTS = /\b(?:return|throw|raise|abort|die|exit|continue|break|panic)\b|\bres\s*\.\s*status\s*\(\s*4|\bhttp\s*\.\s*Error\b|\bredirect\b/;
+const PREDICATE_CALL = /\b[A-Za-z_$][\w$.]*\s*\(\s*[^)\s]/;
+const COMPARES =/===?|!==?|\bin\b|\bnot\s+in\b|startsWith|endsWith|includes|\bmatch\w*\s*\(|\.test\s*\(|\bhas\s*\(|<|>/;
+
+function sanitizerNames(code, re) {
+  const g = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
+  return [...code.matchAll(g)].map((m) => m[0].trim().replace(/^\./, ""));
+}
+/** The right-hand side with every sanitizing CALL removed (`escape(x)`, `x.replace(…)`), so what is left is raw. */
+function stripSanitizerCalls(rhs, re) {
+  let s = rhs;
+  for (let guard = 0; guard < 20; guard++) {
+    const g = new RegExp(re.source, re.flags.replace("g", ""));
+    const m = g.exec(s);
+    if (!m) break;
+    let start = m.index, k = m.index + m[0].length;
+    while (k < s.length && /\s/.test(s[k])) k++;
+    if (s[k] !== "(") { s = s.slice(0, start) + " ".repeat(m[0].length) + s.slice(m.index + m[0].length); continue; }
+    if (s[start] === "." || s[start - 1] === ".") {   // method form `recv.replace(…)` : the receiver is sanitized too
+      let r = s[start] === "." ? start : start - 1;
+      while (r > 0 && /[\w$.\])]/.test(s[r - 1])) r--;
+      start = r;
+    }
+    let depth = 0, end = k;
+    for (; end < s.length; end++) { if (s[end] === "(") depth++; else if (s[end] === ")" && --depth === 0) break; }
+    s = s.slice(0, start) + " ".repeat(Math.max(0, end + 1 - start)) + s.slice(end + 1);
+  }
+  return s;
+}
+/** "clear" (clear the values this line names), "clean-target" (only the assigned variable is clean) or "none". */
+export function sanitizerEffect(code, re, assign, lines, i) {
+  if (!re.test(code)) return "none";
+  const names = sanitizerNames(code, re);
+  const calls = names.filter((n) => !GUARD_WORD.test(n));
+  const pureOnly = calls.length > 0 && calls.every((n) => PURE_NAME.test(n));
+  if (GUARD_LINE.test(code)) {
+    if (calls.length && !pureOnly) return "clear";
+    // `if not is_allowed(url): abort(403)` — a predicate CALL or a comparison, followed by a rejection, validates.
+    // A bare truthiness test (`if (u) {`, `if (!u) return`) does neither and clears nothing.
+    const after = [code, ...lines.slice(i + 1, i + 3).map(codeOnly)].join("\n");
+    return (COMPARES.test(code) || PREDICATE_CALL.test(code)) && REJECTS.test(after) ? "clear" : "none";
+  }
+  if (assign) return pureOnly ? "clean-target" : calls.length ? "clear" : "none";
+  return pureOnly || !calls.length ? "none" : "clear";
 }
