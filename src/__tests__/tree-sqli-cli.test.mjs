@@ -33,8 +33,17 @@ async function sentSqli() {
   return Object.fromEntries((body?.sqliFingerprint?.files ?? []).map((f) => [f.file.split("/").pop(), f.hits.length]));
 }
 
-test("the vendored runtime loads (vendor/tree-sitter/ ships with the client)", () => {
-  assert.ok(vendoredRuntime(), "vendor/tree-sitter/tree-sitter.js loads");
+test("the vendored runtime loads (vendor/tree-sitter/ ships with the client) and parses Python", async () => {
+  const rt = vendoredRuntime();
+  assert.equal(typeof rt?.Parser, "function", "vendor/tree-sitter/tree-sitter.js exports Parser");
+  assert.equal(typeof rt?.Language?.load, "function", "and Language.load");
+  assert.match(rt.dir.replace(/\\/g, "/"), /vendor\/tree-sitter$/);
+  const { initIr, parseFile } = await import("../ts-ir.mjs");
+  await initIr(["python"], rt);
+  const p = parseFile("cur.execute(q)\n", "a.py");
+  assert.equal(p.lang, "python");
+  assert.equal(p.tree.rootNode.type, "module");
+  assert.equal(p.tree.rootNode.namedChildren[0].type, "expression_statement");
 });
 
 test("on the tree : the bound f-string is not sent, the interpolated query is", async () => {
