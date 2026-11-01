@@ -193,6 +193,8 @@ export function sanitizeFingerprint(fp) {
       kind: x.kind, table: x.table, verb: x.verb, method: x.method,
       whereIdCols: Array.isArray(x.whereIdCols) ? x.whereIdCols : [],
       hasIdConstraint: !!x.hasIdConstraint, isBulk: !!x.isBulk, isAdmin: !!x.isAdmin,
+      // access facts (BOLA, fingerprint.mjs accessFacts) : two booleans, never source.
+      idFromRequest: x.idFromRequest === true, ownerCheckNear: x.ownerCheckNear === true,
       spState: x.spState, file: x.file, line: x.line,
     })),
   };

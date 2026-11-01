@@ -8,6 +8,7 @@ import {
   extractCallStrings, extractCreateTables, extractPrismaModels, extractPrismaQueries,
   classifyDml, normKey, lineOf, ADMIN_CTX, supabaseChains,
 } from "./extract.mjs";
+import { paramSources } from "./sources.mjs";
 
 // Capture *_id AND ownership columns (owner / owned_by). Without this, a query scoped by `owner` — e.g. a local
 // store whose PK is (owner, …) — has EMPTY whereIdCols → gets read as "LIST/BULK with NO scope at all" = a false
@@ -37,6 +38,35 @@ const relOf = (f, root) => {
   return nf.startsWith(nr + "/") ? nf.slice(nr.length + 1) : short(f);
 };
 const MAX_FILE_BYTES = 4 * 1024 * 1024; // skip files over 4MB — a multi-GB generated file would OOM the read
+
+// ACCESS FACTS of one query (expert panel 2026-10-31, P0-2 BOLA) — two booleans, never source. A query filtered by an id
+// but not by the tenant key is « by-id » : safe when the caller may only reach its own rows, a BOLA when the id comes
+// from the request and nothing checks ownership. The server brain needs both facts to tell them apart :
+//   · idFromRequest — the id is read from the request in the query itself, from a variable assigned from the request
+//     within ACCESS_WINDOW lines above, or from a handler parameter a framework fills (sources.mjs paramSources) ;
+//   · ownerCheckNear — an ownership comparison (`record.orgId !== session.orgId`) or an authorization call
+//     (authorize / can / policy / @PreAuthorize / load_and_authorize_resource …) within ACCESS_WINDOW lines.
+const ACCESS_WINDOW = 15;
+const REQ_ID = /\breq(?:uest)?\s*\.\s*(?:params|query|body)\b|\brequest\s*\.\s*(?:args|GET|POST|json|form|match_info|path_params|query_params)\b|(?<![\w.$])params\s*(?:\[|\.\s*(?:id|\w+Id)\b)|\$_(?:GET|POST|REQUEST)\b|searchParams\s*\.\s*get\s*\(|\bctx\s*\.\s*params\b|\$request\s*->\s*(?:input|route|query)\s*\(/;
+const OWNER_CMP = /\b\w*(?:user|owner|org|organization|tenant|account|team|workspace|customer|creator|author)_?(?:id|Id|ID)\b\s*(?:!==?|===?)|(?:!==?|===?)\s*[\w.]*\b\w*(?:user|owner|org|organization|tenant|account|team|workspace|customer|creator|author)_?(?:id|Id|ID)\b/;
+const AUTHZ_CALL = /\b(?:authori[sz]e\w*|can|cannot|ability\w*|polic(?:y|ies)\w*|assert\w*(?:Owner|Access|Member)\w*|check\w*(?:Owner|Access|Permission|Member)\w*|ensure\w*(?:Owner|Access|Member|Permission)\w*|require\w*(?:Owner|Access|Member|Permission)\w*|verify\w*(?:Owner|Access)\w*|isOwner|hasAccess|hasPermission|permission_required|load_and_authorize_resource|authorize_resource)\s*[(!:]|@PreAuthorize|@Secured|\[Authorize\b|before_action\s+:authorize/;
+function accessFacts(lines, i, queryText) {
+  const from = Math.max(0, i - ACCESS_WINDOW), to = Math.min(lines.length, i + ACCESS_WINDOW + 1);
+  const above = lines.slice(from, i + 1);
+  const reqVars = new Set();
+  above.forEach((l, k) => {
+    for (const n of paramSources(lines, from + k)) reqVars.add(n);
+    if (!REQ_ID.test(l)) return;
+    const de = l.match(/\{([^}]*)\}\s*=/);
+    if (de) for (const raw of de[1].split(",")) { const n = raw.trim().split(":").pop().trim(); if (/^[A-Za-z_$][\w$]*$/.test(n)) reqVars.add(n); }
+    const as = l.match(/(?:^|[\s;(])(\$?[A-Za-z_][\w$]*)\s*=(?!=)/);
+    if (as) reqVars.add(as[1]);
+  });
+  const mentions = (v) => new RegExp(`(?<![\\w$])${v.replace(/[$]/g, "\\$")}(?![\\w$])`).test(queryText);
+  const idFromRequest = REQ_ID.test(queryText) || [...reqVars].some(mentions);
+  const win = lines.slice(from, to).join("\n");
+  return { idFromRequest, ownerCheckNear: OWNER_CMP.test(win) || AUTHZ_CALL.test(win) };
+}
 
 // ── LOCAL — produces the fingerprint (no source leaves) ──────────────────────
 // `root` (the repo root) makes query `file` paths repo-relative; omit it for a 2-segment short form.
@@ -93,6 +123,7 @@ export function buildFingerprint(files, root = "") {
     const isAdmin = ADMIN_CTX.test(f);
     // (a) SQL execute() — linear scan for the search_path state (schema-per-tenant) + the where id-columns.
     const lines = t.split("\n"); let sp = "unknown";
+    const access = (lineIdx, text) => accessFacts(lines, lineIdx, text);
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
       if (/^\s*(async\s+)?def\s/.test(l)) sp = "unknown";
@@ -102,16 +133,18 @@ export function buildFingerprint(files, root = "") {
       const sub = extractCallStrings(lines.slice(i, i + 30).join("\n"), "execute")[0];
       if (!sub) continue;
       const d = classifyDml(sub.text); if (!d || !d.table) continue;
-      queries.push({ kind: "sql", table: d.table, verb: d.verb, whereIdCols: idColsOf(sub.text), spState: sp, isAdmin, file: relOf(f, root), line: i + 1 });
+      queries.push({ kind: "sql", table: d.table, verb: d.verb, whereIdCols: idColsOf(sub.text), spState: sp, isAdmin, file: relOf(f, root), line: i + 1, ...access(i, sub.text) });
     }
     // (b) Supabase chains (`.from("x")…`) — row-column/RLS, no search_path state.
     for (const { text, index } of supabaseChains(t)) {
       const d = classifyDml(text); if (!d || !d.table) continue;
-      queries.push({ kind: "sql", table: d.table, verb: d.verb, whereIdCols: idColsOf(text), spState: "unknown", isAdmin, file: relOf(f, root), line: lineOf(t, index) });
+      const ln = lineOf(t, index);
+      queries.push({ kind: "sql", table: d.table, verb: d.verb, whereIdCols: idColsOf(text), spState: "unknown", isAdmin, file: relOf(f, root), line: ln, ...access(ln - 1, text) });
     }
     // (c) Prisma queries (the dominant ORM case).
     for (const { model, method, body, index } of extractPrismaQueries(t)) {
-      queries.push({ kind: "prisma", table: model, method, whereIdCols: idColsOf(body), hasIdConstraint: /\bid\b\s*:|\buid\b\s*:|\bslug\b\s*:|\btoken\b\s*:/i.test(body), isBulk: /findMany|updateMany|deleteMany/i.test(method), isAdmin, file: relOf(f, root), line: lineOf(t, index) });
+      const ln = lineOf(t, index);
+      queries.push({ kind: "prisma", table: model, method, whereIdCols: idColsOf(body), hasIdConstraint: /\bid\b\s*:|\buid\b\s*:|\bslug\b\s*:|\btoken\b\s*:/i.test(body), isBulk: /findMany|updateMany|deleteMany/i.test(method), isAdmin, file: relOf(f, root), line: ln, ...access(ln - 1, body) });
     }
   }
   return { signals, tableCols, rls: { on: [...rlsOn], policy: [...policy], granted: [...granted], revoked: [...revoked], loc: Object.fromEntries(Object.entries(tableLoc).filter(([t]) => !(rlsOn.has(t) && policy.has(t))).slice(0, 200)) }, queries };
