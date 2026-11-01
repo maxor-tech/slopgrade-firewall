@@ -136,15 +136,44 @@ function isNotACipherName(lines, i, file) {
 // class that implements it). A call passes a key or bytes, never only literals ending the line with `,` or `;`.
 const ENUM_CONSTANT = /^\s*(?:DESede|TripleDES|3DES|DES)\s*\(\s*(?:(?:"[^"\n]*"|'[^'\n]*'|-?\d+)\s*(?:,\s*(?:"[^"\n]*"|'[^'\n]*'|-?\d+)\s*)*)?\)\s*[,;]\s*$/;
 
+// A line that STARTS inside a multi-line string literal is text : a help page or a hash-format table held in a Go raw
+// string (sliver `1500 | descrypt, DES (Unix), Traditional DES |`), a Python docstring, a Java / Kotlin text block.
+// Independent set v3, 2026-11-01 : 2 blocking FP rows. Delimiters per language ; single-line strings and line comments
+// are skipped so a quote or delimiter inside them never opens a literal. A JS template literal stays code (its
+// `${…}` holes run calls).
+function heisenTextLines(raw, file) {
+  const f = String(file ?? "");
+  const delims = /\.go$/i.test(f) ? ["`"] : /\.py$/i.test(f) ? ['"""', "'''"] : /\.(?:java|kt|kts|scala|cs)$/i.test(f) ? ['"""'] : [];
+  const out = new Array(raw.length).fill(false);
+  if (!delims.length) return out;
+  const lineComment = /\.py$/i.test(f) ? "#" : "//";
+  let open = null;   // the delimiter of the multi-line literal we are inside, or null
+  for (let i = 0; i < raw.length; i++) {
+    out[i] = open !== null;
+    const l = raw[i];
+    for (let k = 0; k < l.length; k++) {
+      if (open) { if (l.startsWith(open, k)) { k += open.length - 1; open = null; } else if (l[k] === "\\" && open !== "`") k++; continue; }
+      const d = delims.find((x) => l.startsWith(x, k));
+      if (d) { open = d; k += d.length - 1; continue; }
+      if (l.startsWith(lineComment, k)) break;
+      if (l[k] === '"' || l[k] === "'") { const q = l[k]; for (k++; k < l.length && l[k] !== q; k++) if (l[k] === "\\") k++; }
+    }
+  }
+  return out;
+}
+
 /** Scan one file → [{line, kind, high, secCtx}]. Source line NEVER leaves this function. */
 export function extractCrypto(text, file) {
   const out = [];
   if (isDecompiledSource(text, file)) return out;   // decompiler output is not the author's code (lang-scope.mjs)
-  const lines = logicalLines(String(text).split(/\r?\n/));   // statements broken across lines read whole (lang-scope.mjs)
+  const raw = String(text).split(/\r?\n/);
+  const lines = logicalLines(raw);   // statements broken across lines read whole (lang-scope.mjs)
+  const inText = heisenTextLines(raw, file);
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (l.length > 4000) continue;   // minified/one-line blob — noise
     if (isComment(l)) continue;      // a weak-algo name in a comment is documentation, not live code
+    if (inText[i]) continue;         // a line inside a multi-line string literal is text, not a call
     if (isImport(l)) continue;       // an import/using line names a crypto type, it does not use it
     const code = maskLiterals(l);    // prose / compared string literals blanked (HIGH tier only)
     for (const [kind, re] of HIGH) {
