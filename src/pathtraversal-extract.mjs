@@ -54,10 +54,14 @@ const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // argument is content, not a path (`fs.writeFile('views/qr/code.txt', QRcode, cb)` — benchmark re-checked 2026-10-31).
 // A template literal can interpolate, so only '…' / "…" count as constant.
 const CONST_FIRST = `(?!\\s*['"][^'"\\n]*['"]\\s*[,)])`;
+// `Image.open(BytesIO(data))` / `pdfplumber.open(io.BytesIO(contents))` / `Image.open(upload.file)` decode an IN-MEMORY
+// stream of uploaded bytes : the bytes are never read as a filesystem path (independent set v1, 2026-11-01 : 3 blocking
+// FPs — LaTeX-OCR, HealthRecordAgent). A path argument to the same `.open` still fires.
+const STREAM_FIRST = `(?!\\s*(?:io\\s*\\.\\s*)?(?:BytesIO|StringIO)\\s*\\(|\\s*\\w+\\s*\\.\\s*(?:file|stream|raw)\\s*\\))`;
 const sink = (v) => {
   const V = esc(v);
   return new RegExp(
-    `\\b(?:open|send_file)\\s*\\(${CONST_FIRST}[^)]*\\b${V}\\b` +
+    `\\b(?:open|send_file)\\s*\\(${CONST_FIRST}${STREAM_FIRST}[^)]*\\b${V}\\b` +
     `|\\bio\\.open\\s*\\(${CONST_FIRST}[^)]*\\b${V}\\b` +
     `|\\bos\\.(?:remove|unlink|rename)\\s*\\(${CONST_FIRST}[^)]*\\b${V}\\b` +
     `|\\bfs\\s*\\.\\s*(?:readFile|readFileSync|createReadStream|open|openSync|writeFile|writeFileSync|unlink|createWriteStream|readdir|readdirSync)\\s*\\(${CONST_FIRST}[^)]*\\b${V}\\b` +
