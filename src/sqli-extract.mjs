@@ -25,7 +25,10 @@
 // ${params.tableName}\`)` (a function argument, not request input). `params[…]` keeps the Rails/Sinatra index form.
 const REQ = "request\\s*\\.\\s*(?:args|form|values|GET|POST|json|data)|req(?:uest)?\\s*\\.\\s*(?:query|body|params)|\\$_(?:GET|POST|REQUEST|COOKIE)|(?<![\\w.$])params\\s*(?:\\[|\\.\\s*(?:require|permit|fetch|dig|to_unsafe_h(?:ash)?|values_at|slice)\\b)";
 // A SQL-executing sink.
-const SINK = "execute|executemany|executescript|query|raw|exec|executeQuery|executeUpdate|prepareStatement|mysqli_query|mysql_query|pg_query|pg_exec|find_by_sql";
+// + the framework query APIs the expert panel probed (P1-5, 2026-11-01) : Spring JdbcTemplate / JPA, Django RawSQL,
+// Laravel raw builders, Rails connection, GORM Raw, Prisma unsafe raw. Every rule still needs a SQL literal or a
+// sql-tagged value built from untrusted input, so a name alone never fires.
+const SINK = "execute|executemany|executescript|query|raw|exec|executeQuery|executeUpdate|prepareStatement|mysqli_query|mysql_query|pg_query|pg_exec|find_by_sql|queryForList|queryForObject|queryForMap|queryForRowSet|queryForStream|batchUpdate|createQuery|createNativeQuery|RawSQL|whereRaw|selectRaw|orderByRaw|havingRaw|groupByRaw|unprepared|exec_query|select_all|Raw|queryRawUnsafe|executeRawUnsafe";
 
 const SQL_KW = "SELECT|INSERT|UPDATE|DELETE|WHERE|FROM|VALUES|ORDER\\s+BY|UNION|--";
 // A SQL string literal in EITHER quote style, matched per quote so the OTHER quote may appear inside it. Release audit
@@ -55,12 +58,13 @@ const DIRECT_PATTERNS = [
 
 import { isDecompiledSource, isPackedSource, kindAppliesToFile } from "./lang-scope.mjs";
 import { runTaintPass, mentions } from "./taint-core.mjs";
+import { FRAMEWORK_SOURCE, paramSources } from "./sources.mjs";
 import { findSinkWrappers, interprocHit } from "./taint-interproc.mjs";
 
 const isComment = (l) => /^\s*(\/\/|\*|#|--|;|<!--)/.test(l);
 
 // ── Taint-pass vocabulary (fed to the shared runTaintPass engine) ────────────────────────────────────────────────
-const REQ_RE = new RegExp(REQ);
+const REQ_RE = new RegExp(`${REQ}|${FRAMEWORK_SOURCE}`);   // + framework / LLM sources (sources.mjs)
 // A string literal that contains a SQL keyword — evidence the RHS is building a query, not an arbitrary string.
 const SQL_STRING = /["'`][^"'`]*\b(?:SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM|DELETE|WHERE|FROM|VALUES|ORDER\s+BY|GROUP\s+BY|UNION|DROP\s+TABLE|--)\b/i;
 // An escaping / parameterizing call — assume it makes the value safe → clear taint (don't cry wolf).
@@ -103,6 +107,7 @@ function taintPass(lines, text, importedWrappers) {
   const imported = importedWrappers instanceof Map ? importedWrappers : new Map();
   const dangerous = (taint) => (a) => (SQL_STRING.test(a) && REQ_RE.test(a)) || [...taint].some(([v, t]) => t === "sql" && mentions(v, a));
   return runTaintPass(lines, {
+    paramSources, paramTag: "user",
     sanitizer: SQL_SANITIZE,
     checkSinks(l, taint, emit) {
       for (const [v, tag] of taint) if (tag === "sql" && sink(v).test(l)) { emit("taint-sql"); return; }

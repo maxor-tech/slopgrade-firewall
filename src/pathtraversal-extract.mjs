@@ -7,6 +7,7 @@
 
 import { isDecompiledSource, isPackedSource, kindAppliesToFile } from "./lang-scope.mjs";
 import { runTaintPass, mentions } from "./taint-core.mjs";
+import { FRAMEWORK_SOURCE, paramSources } from "./sources.mjs";
 import { findSinkWrappers, interprocHit } from "./taint-interproc.mjs";
 
 // STRICT source-access form (a request SUB-FIELD, never the bare word) — safe to match nested in a sink's args
@@ -41,7 +42,7 @@ const PHP_URL_FETCH = /\b(?:fopen|readfile|file_get_contents)\s*\(\s*['"]https?:
 
 // ── Taint-pass vocabulary (Python + Node ; fed to the shared runTaintPass engine) ───────────────────────────────
 // Source = a request-derived value on the RHS (property access only; bare `params` excluded per the direct pack).
-const SOURCE = /\brequest\s*\.\s*(?:args|form|values|GET|POST|json|data)\b|\breq(?:uest)?\s*\.\s*(?:query|body|params)\b/;
+const SOURCE = new RegExp(`\\brequest\\s*\\.\\s*(?:args|form|values|GET|POST|json|data)\\b|\\breq(?:uest)?\\s*\\.\\s*(?:query|body|params)\\b|${FRAMEWORK_SOURCE}`);   // + framework / LLM sources (sources.mjs)
 // A path-sanitizing marker OR a conditional guard on the value — assume the path is made safe → clear taint.
 // basename/secure_filename strip the directory; realpath/resolve/abspath+check + safe_join canonicalize; a
 // .replace/.strip/.sub is treated as manual `..`-stripping (precision-first — recall cost accepted).
@@ -60,12 +61,17 @@ const sink = (v) => {
     `|\\bio\\.open\\s*\\(${CONST_FIRST}[^)]*\\b${V}\\b` +
     `|\\bos\\.(?:remove|unlink|rename)\\s*\\(${CONST_FIRST}[^)]*\\b${V}\\b` +
     `|\\bfs\\s*\\.\\s*(?:readFile|readFileSync|createReadStream|open|openSync|writeFile|writeFileSync|unlink|createWriteStream|readdir|readdirSync)\\s*\\(${CONST_FIRST}[^)]*\\b${V}\\b` +
-    `|\\.\\s*sendFile\\s*\\(${CONST_FIRST}[^)]*\\b${V}\\b`
+    `|\\.\\s*sendFile\\s*\\(${CONST_FIRST}[^)]*\\b${V}\\b` +
+    // PHP and Java file APIs (expert panel P1-5 : a Laravel `$request->input` or a Spring `@RequestParam` value had no
+    // taint sink to reach). A PHP variable starts with `$`, so its boundaries are `$`-aware, not `\b`.
+    `|\\b(?:readfile|file_get_contents|fopen|file_put_contents|unlink|include|include_once|require|require_once|highlight_file|show_source)\\s*\\(${CONST_FIRST}[^)]*(?<![\\w$])${V}(?![\\w$])` +
+    `|\\bnew\\s+File(?:InputStream|OutputStream|Reader|Writer)?\\s*\\(${CONST_FIRST}[^)]*\\b${V}\\b` +
+    `|\\b(?:Paths\\s*\\.\\s*get|Path\\s*\\.\\s*of)\\s*\\(${CONST_FIRST}[^)]*\\b${V}\\b`
   );
 };
 
 // A cheap file-level gate: no file-sink token ⇒ skip the inter-procedural pass.
-const HAS_SINK = /\b(?:open|send_file|sendFile)\s*\(|\bfs\s*\.\s*(?:readFile|readFileSync|createReadStream|open|openSync|writeFile|writeFileSync|unlink|createWriteStream|readdir|readdirSync)|\bos\.(?:remove|unlink|rename)/;
+const HAS_SINK = /\b(?:open|send_file|sendFile|readfile|file_get_contents|fopen|file_put_contents|include|require)\s*\(|\bnew\s+File\w*\s*\(|\b(?:Paths\s*\.\s*get|Path\s*\.\s*of)\s*\(|\bfs\s*\.\s*(?:readFile|readFileSync|createReadStream|open|openSync|writeFile|writeFileSync|unlink|createWriteStream|readdir|readdirSync)|\bos\.(?:remove|unlink|rename)/;
 // For pass 1, a wrapper param reaches the sink only if the same line is NOT itself sanitized (mirrors checkSinks).
 const ptSinkTest = (l, v) => !PATH_SANITIZE.test(l) && sink(v).test(l);
 /** The path-traversal wrapper config — shared by the walker's cross-file registry build and the calibration harness. */
@@ -79,6 +85,7 @@ function taintPass(lines, text, importedWrappers) {
   const imported = importedWrappers instanceof Map ? importedWrappers : new Map();
   const dangerous = (taint) => (a) => SOURCE.test(a) || [...taint.keys()].some((v) => mentions(v, a));
   return runTaintPass(lines, {
+    paramSources, paramTag: "t",
     sanitizer: PATH_SANITIZE,
     checkSinks(l, taint, emit) {
       if (PATH_SANITIZE.test(l)) return;   // an inline basename/secure_filename/… on the sink line → treat as safe
