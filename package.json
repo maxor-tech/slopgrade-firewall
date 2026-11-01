@@ -6,10 +6,40 @@
   "license": "MIT",
   "author": "Maxor Global LLC",
   "homepage": "https://www.slopgrade.ai",
-  "repository": { "type": "git", "url": "https://github.com/maxor-tech/slopgrade-firewall.git" },
-  "bin": { "slopgrade-firewall": "./isolation-gate.mjs" },
-  "engines": { "node": ">=22" },
-  "scripts": { "test": "node --test src/__tests__/*.test.mjs" },
-  "files": ["isolation-gate.mjs", "src/", "!src/__tests__", "action.yml", "LICENSE", "README.md", "SECURITY.md", "CHANGELOG.md"],
-  "keywords": ["ci", "github-actions", "security", "sast", "sqli", "xss", "ssrf", "secrets", "deterministic", "oidc"]
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/maxor-tech/slopgrade-firewall.git"
+  },
+  "bin": {
+    "slopgrade-firewall": "./isolation-gate.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test src/__tests__/*.test.mjs"
+  },
+  "files": [
+    "isolation-gate.mjs",
+    "src/",
+    "vendor/",
+    "!src/__tests__",
+    "action.yml",
+    "LICENSE",
+    "README.md",
+    "SECURITY.md",
+    "CHANGELOG.md"
+  ],
+  "keywords": [
+    "ci",
+    "github-actions",
+    "security",
+    "sast",
+    "sqli",
+    "xss",
+    "ssrf",
+    "secrets",
+    "deterministic",
+    "oidc"
+  ]
 }

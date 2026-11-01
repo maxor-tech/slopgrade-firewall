@@ -46,11 +46,14 @@ export function paramSources(lines, i) {
   const def = PY_DEF.exec(l);
   if (def) {
     let decorated = false;
-    for (let j = i - 1; j >= 0 && j >= i - 4; j--) {
+    // Walk up over the decorators, including the continuation lines of one split over several lines
+    // (`@router.get(\n    "/x/{table}",\n    dependencies=[…],\n)` — DB-GPT, 2026-11-01 real-code sweep).
+    for (let j = i - 1; j >= 0 && j >= i - 10; j--) {
       const p = String(lines[j]);
       if (!p.trim()) continue;
-      if (!/^\s*@/.test(p)) break;
-      if (PY_ROUTE_DECORATOR.test(p)) { decorated = true; break; }
+      if (/^\s*@/.test(p)) { if (PY_ROUTE_DECORATOR.test(p)) { decorated = true; break; } continue; }
+      if (/^\s*(?:\)|\]|["'].*[,)]?\s*$|\w+\s*=.*,?\s*$)/.test(p)) continue;   // inside a decorator's arguments
+      break;
     }
     if (decorated) {
       for (const raw of def[1].split(",")) {
