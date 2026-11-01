@@ -5,6 +5,17 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+### Added
+- **SQL injection on the syntax tree** for Python, JavaScript and TypeScript (`src/ts-ir.mjs`, `src/sqli-ir.mjs`,
+  `src/sqli-best.mjs`). The tree reads expressions, not lines : only a sink's first argument is the statement (a bound
+  parameter is safe), values flow through assignments / destructuring / tuples, placeholder lists
+  (`','.join('?' for _ in xs)`) are constant text. The line reader's inter-procedural and cross-file hits are kept.
+  Measured on 5,300 public repos : every shared hit kept, the product-code false flags of the line reader removed, no
+  new product-code hit. Other languages keep the line reader.
+- `vendor/tree-sitter/` : the tree-sitter runtime and four grammars, copied unchanged from
+  `@vscode/tree-sitter-wasm@0.3.1` (MIT, WebAssembly — no native code, no install, no network ; hashes in its
+  `NOTICE.md`). If it cannot load, every file keeps the line reader.
+
 ### Fixed
 - Found by an independent test set (178 findings on 600 repos never used for tuning, labelled blind) :
   - path traversal : `Image.open(BytesIO(data))`, `pdfplumber.open(BytesIO(...))`, `Image.open(upload.file)` decode an
