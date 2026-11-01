@@ -253,9 +253,15 @@ export async function main(argv = [], env = process.env) {
   const isIgnored = ignoreMatcher(ignore.patterns);
   // `.slopgrade-exceptions` — one finding accepted until a date by a named owner (src/exceptions.mjs) ; read like the
   // ignore file (the BASE branch on a pull request). Expired and refused entries are named in the log.
-  const exceptions = parseExceptions(readExceptionsText(env,
+  const excSrc = readExceptionsText(env,
     (args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15_000, maxBuffer: 1024 * 1024 }),
-    (p) => readFileSync(join(root, p), "utf8")).text);
+    (p) => readFileSync(join(root, p), "utf8"));
+  const exceptions = parseExceptions(excSrc.text);
+  // A PR run reads the BASE branch copy : when it is unreadable but the checkout has one, say why it does not apply
+  // (not merged yet, or a shallow checkout) instead of a silent block (judge review, Werner Vogels).
+  if (excSrc.source === "base" && excSrc.text === null) {
+    try { readFileSync(join(root, EXCEPTIONS_FILE), "utf8"); line(`slopGrade Firewall: ${EXCEPTIONS_FILE} is not read from this PR — it applies once merged into the base branch (and needs actions/checkout fetch-depth: 0).`); } catch { /* no file at all */ }
+  }
   for (const e of exceptions.expired) ghWarn(`${EXCEPTIONS_FILE}: the exception for ${e.target} ${e.path}${e.line ? `:${e.line}` : ""} expired on ${e.until} (owner ${e.owner}) — the finding blocks again.`);
   for (const r of exceptions.refused) ghWarn(`${EXCEPTIONS_FILE}: refused « ${r.line} » — ${r.why}.`);
   let exceptedBlocking = 0;
