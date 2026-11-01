@@ -46,7 +46,7 @@ import { extractCorsFingerprint } from "./src/cors-extract.mjs";
 import { extractGoCorsFingerprint } from "./src/gocors-extract.mjs";
 import { extractDotnetCorsFingerprint } from "./src/dotnetcors-extract.mjs";
 import { extractXxeFingerprint } from "./src/xxe-extract.mjs";
-import { extractDeserFingerprint } from "./src/deser-extract.mjs";
+import { extractDeserFingerprint, snakeyamlMajorOf } from "./src/deser-extract.mjs";
 import { extractSecretFingerprint } from "./src/secret-extract.mjs";
 import { extractCryptoFingerprint } from "./src/crypto-extract.mjs";
 // OSS shim: the interprocedural pass is stubbed (returns empty) → the taint detectors run INTRA-function only.
@@ -69,6 +69,7 @@ import { decidePurpose, purposeAdvisoryLine } from "./src/repo-purpose.mjs";
 import { readRepoAggregates, applyBlockConfidence } from "./src/block-confidence.mjs";
 
 const CODE_EXTS = /\.(py|ts|tsx|js|jsx|mjs|cjs|sql|rb|go|php|prisma|java|cs|rs|c|cc|cpp|h|hpp|kt|scala|ex|exs)$/;
+const BUILD_FILES = /(?:^|\/)(?:pom\.xml|build\.gradle(?:\.kts)?|libs\.versions\.toml)$/;
 const TIMEOUT_MS = 20_000;
 
 const ghWarn = (msg) => console.log(`::warning title=slopGrade Firewall::${sanitizeLogLine(msg)}`);
@@ -284,6 +285,9 @@ export async function main(argv = [], env = process.env) {
     const walked = walk(root, CODE_EXTS);
     files = walked.filter((f) => !isIgnored(rel(f)));
     ignoredCount = walked.length - files.length;
+    // The repo's SnakeYAML major, from its build files (2.x rejects global tags by default — src/deser-extract.mjs).
+    const deserCtx = { snakeyamlMajor: snakeyamlMajorOf(walk(root, BUILD_FILES).filter((f) => !isIgnored(rel(f)))
+      .flatMap((f) => { try { return [{ path: rel(f), text: readFileSync(f, "utf8") }]; } catch { return []; } })) };
     fingerprint = sanitizeFingerprint(buildFingerprint(files, root));
     sqliFingerprint = { files: [] }; goSqliFingerprint = { files: [] }; dotnetSqliFingerprint = { files: [] };
     cmdiFingerprint = { files: [] }; goCmdiFingerprint = { files: [] }; dotnetCmdiFingerprint = { files: [] };
@@ -319,7 +323,7 @@ export async function main(argv = [], env = process.env) {
       const gcof = extractGoCorsFingerprint(t, r); if (gcof.hits.length) goCorsFingerprint.files.push(gcof);
       const dcof = extractDotnetCorsFingerprint(t, r); if (dcof.hits.length) dotnetCorsFingerprint.files.push(dcof);
       const xf = extractXxeFingerprint(t, r); if (xf.hits.length) xxeFingerprint.files.push(xf);
-      const df = extractDeserFingerprint(t, r); if (df.hits.length) deserFingerprint.files.push(df);
+      const df = extractDeserFingerprint(t, r, deserCtx); if (df.hits.length) deserFingerprint.files.push(df);
       const sf = extractSecretFingerprint(t, r); if (sf.hits.length) secretFingerprint.files.push(sf);
       const cf = extractCryptoFingerprint(t, r); if (cf.hits.length) cryptoFingerprint.files.push(cf);
     }

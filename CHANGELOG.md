@@ -5,6 +5,13 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+### Changed
+- `insecureDeser` : **SnakeYAML version awareness**. The client reads the repo's SnakeYAML major from `pom.xml`,
+  `build.gradle[.kts]` or `gradle/libs.versions.toml` (a Spring Boot 3.1+ parent counts as 2.x ; the lowest major
+  wins). SnakeYAML 2.x rejects global tags, so a load is gated : it fires only with a request source on the line. An
+  unknown version, 1.x, or a `setTagInspector(…)` in the file stays HIGH. A Java `yaml.load` now carries the SnakeYAML
+  label (it used to get the PyYAML one), and a `Yaml(new SafeConstructor(…))` load is not reported.
+
 ## [0.13.0] — 2026-11-01
 
 Depth release (expert-panel roadmap) : statements instead of physical lines, sanitizers by their effect, framework /
