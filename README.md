@@ -278,6 +278,23 @@ origin/<base>:.slopgradeignore`, needs `fetch-depth: 0`), never from the PR — 
 Patterns that would exclude everything (`*`, `**`, `/`), negations (`!`) and over-long lines are refused with a warning.
 The log says how many patterns applied and how many files were skipped.
 
+## Accepting one finding for a time — `.slopgrade-exceptions`
+
+`.slopgradeignore` hides whole paths for good. To accept **one** finding you have reviewed — a protocol that mandates a
+cipher, a query you have proven safe — add an entry to `.slopgrade-exceptions` with an owner, a reason and an end date:
+
+```text
+# <pack-or-rule> <path>[:<line>] until=YYYY-MM-DD owner=<who> reason=<why>
+weakCrypto src/legacy/ntlm.ts:88 until=2026-12-31 owner=@sec-team reason=NTLM interop, removed with the v2 auth
+taint-sql db/report.py until=2026-11-30 owner=dana reason="read-only reporting replica"
+```
+
+The finding is still reported — annotation, PR review and SARIF say `excepted until … by …` — but it no longer blocks.
+On its `until` date the entry stops applying: the finding blocks again and the log names the expired entry. `until`
+(at most 180 days ahead), `owner` and a reason of at least 10 characters are required; a glob path and a cross-tenant
+leak are refused. Like `.slopgradeignore`, the file is read from the **base branch** on a pull request, so a PR cannot
+accept its own finding.
+
 ## Courses, labs and offensive tools — repository purpose
 
 In a course, a tutorial, a deliberately vulnerable lab, a CTF or an offensive tool, the vulnerable code *is* the content. With `--gate`, a repo that **reads as one of those** gets its pack and Deep Scan blocks as **advisory warnings** (same findings, no failed check), and the log says why:
