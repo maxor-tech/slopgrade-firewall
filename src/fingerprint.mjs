@@ -9,6 +9,7 @@ import {
   classifyDml, normKey, lineOf, ADMIN_CTX, supabaseChains,
 } from "./extract.mjs";
 import { paramSources } from "./sources.mjs";
+import { extractOrmModels, extractOrmQueries } from "./orm-access.mjs";
 
 // Capture *_id AND ownership columns (owner / owned_by). Without this, a query scoped by `owner` — e.g. a local
 // store whose PK is (owner, …) — has EMPTY whereIdCols → gets read as "LIST/BULK with NO scope at all" = a false
@@ -49,7 +50,7 @@ const MAX_FILE_BYTES = 4 * 1024 * 1024; // skip files over 4MB — a multi-GB ge
 const ACCESS_WINDOW = 15;
 // `where: { id }` / `where: { id, … }` / `where: { …, id }` — the ES shorthand of `id: id` inside the where object.
 const PRISMA_WHERE_SHORTHAND_ID = /\bwhere\s*:\s*\{[^{}]*?(?:\{|,)?\s*(?<![\w$.])(?:id|uid|slug|token)\s*(?:,|\})/;
-const REQ_ID = /\breq(?:uest)?\s*\.\s*(?:params|query|body)\b|\brequest\s*\.\s*(?:args|GET|POST|json|form|match_info|path_params|query_params)\b|(?<![\w.$])params\s*(?:\[|\.\s*(?:id|\w+Id)\b)|\$_(?:GET|POST|REQUEST)\b|searchParams\s*\.\s*get\s*\(|\bctx\s*\.\s*params\b|\$request\s*->\s*(?:input|route|query)\s*\(/;
+const REQ_ID = /\breq(?:uest)?\s*\.\s*(?:params|query|body)\b|\brequest\s*\.\s*(?:args|GET|POST|json|form|match_info|path_params|query_params)\b|(?<![\w.$])params\s*(?:\[|\.\s*(?:id|\w+Id)\b)|\$_(?:GET|POST|REQUEST)\b|searchParams\s*\.\s*get\s*\(|\bctx\s*\.\s*params\b|\$request\s*->\s*(?:input|route|query)\s*\(|\bc\s*\.\s*(?:Param|Query|DefaultQuery|PostForm|FormValue|QueryParam)\s*\(|\.URL\s*\.\s*Query\s*\(\s*\)\s*\.\s*Get\s*\(|\bmux\s*\.\s*Vars\s*\(/;
 const OWNER_CMP = /\b\w*(?:user|owner|org|organization|tenant|account|team|workspace|customer|creator|author)_?(?:id|Id|ID)\b\s*(?:!==?|===?)|(?:!==?|===?)\s*[\w.]*\b\w*(?:user|owner|org|organization|tenant|account|team|workspace|customer|creator|author)_?(?:id|Id|ID)\b/;
 const AUTHZ_CALL = /\b(?:authori[sz]e\w*|can|cannot|ability\w*|polic(?:y|ies)\w*|assert\w*(?:Owner|Access|Member)\w*|check\w*(?:Owner|Access|Permission|Member)\w*|ensure\w*(?:Owner|Access|Member|Permission)\w*|require\w*(?:Owner|Access|Member|Permission)\w*|verify\w*(?:Owner|Access)\w*|isOwner|hasAccess|hasPermission|permission_required|load_and_authorize_resource|authorize_resource)\s*[(!:]|@PreAuthorize|@Secured|\[Authorize\b|before_action\s+:authorize/;
 function accessFacts(lines, i, queryText) {
@@ -85,6 +86,9 @@ export function buildFingerprint(files, root = "") {
   const CLIENT_ROLE = /\b(?:anon|authenticated|public)\b/i;      // the roles a PostgREST client assumes
   const NON_TABLE_OBJ = /^(?:function|sequence|schema|procedure|routine|database|table|tables|foreign|large|type|domain)$/i;
   const queries = [];
+  // ORM by-id accesses (Django / Rails / Spring Data / GORM) and the ORM's own model columns (src/orm-access.mjs). Kept
+  // APART from tableCols / queries : they feed only the server's advisory IDOR check, never the classification.
+  const ormModels = {}, ormQueries = [];
   for (const f of files) {
     try { if (statSync(f).size > MAX_FILE_BYTES) continue; } catch { continue; }
     let t; try { t = readFileSync(f, "utf8"); } catch { continue; }
@@ -149,6 +153,12 @@ export function buildFingerprint(files, root = "") {
       const ln = lineOf(t, index);
       queries.push({ kind: "prisma", table: model, method, whereIdCols: idColsOf(body), hasIdConstraint: /\b(?:id|uid|slug|token)\b\s*:/i.test(body) || PRISMA_WHERE_SHORTHAND_ID.test(body), isBulk: /findMany|updateMany|deleteMany/i.test(method), isAdmin, file: relOf(f, root), line: ln, ...access(ln - 1, body) });
     }
+    // (d) ORM by-id accesses + ORM model columns.
+    for (const { model, cols } of extractOrmModels(t, f)) ormModels[model] = cols;
+    for (const { orm, model, whereIdCols, index } of extractOrmQueries(t, f)) {
+      const ln = lineOf(t, index);
+      ormQueries.push({ orm, table: model, whereIdCols, isAdmin, file: relOf(f, root), line: ln, ...access(ln - 1, lines[ln - 1] ?? "") });
+    }
   }
-  return { signals, tableCols, rls: { on: [...rlsOn], policy: [...policy], granted: [...granted], revoked: [...revoked], loc: Object.fromEntries(Object.entries(tableLoc).filter(([t]) => !(rlsOn.has(t) && policy.has(t))).slice(0, 200)) }, queries };
+  return { signals, tableCols, rls: { on: [...rlsOn], policy: [...policy], granted: [...granted], revoked: [...revoked], loc: Object.fromEntries(Object.entries(tableLoc).filter(([t]) => !(rlsOn.has(t) && policy.has(t))).slice(0, 200)) }, queries, ormModels, ormQueries };
 }

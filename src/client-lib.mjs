@@ -197,7 +197,26 @@ export function sanitizeFingerprint(fp) {
       idFromRequest: x.idFromRequest === true, ownerCheckNear: x.ownerCheckNear === true,
       spState: x.spState, file: x.file, line: x.line,
     })),
+    // ORM by-id accesses + ORM model columns (src/orm-access.mjs) : identifiers, column names and booleans only.
+    ormModels: sanitizeOrmModels(fp?.ormModels),
+    ormQueries: (Array.isArray(fp?.ormQueries) ? fp.ormQueries : []).slice(0, ORM_MAX).map((x) => ({
+      orm: ident(x.orm), table: ident(x.table),
+      whereIdCols: (Array.isArray(x.whereIdCols) ? x.whereIdCols : []).slice(0, 20).map(ident),
+      isAdmin: !!x.isAdmin, idFromRequest: x.idFromRequest === true, ownerCheckNear: x.ownerCheckNear === true,
+      file: typeof x.file === "string" ? x.file.slice(0, LOC_STR_MAX) : "", line: Number.isInteger(x.line) ? x.line : 0,
+    })),
   };
+}
+
+const ORM_MAX = 5000;
+function sanitizeOrmModels(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [k, v] of Object.entries(raw).slice(0, ORM_MAX)) {
+    if (k === "__proto__") continue;
+    out[ident(k)] = (Array.isArray(v) ? v : []).slice(0, 200).map(ident);
+  }
+  return out;
 }
 
 /**

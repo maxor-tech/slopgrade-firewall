@@ -5,6 +5,14 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+### Added
+- **ORM by-id access** (`src/orm-access.mjs`) for the cross-tenant check : Django ORM (`Model.objects.get(pk=…)`,
+  `get_object_or_404`), ActiveRecord (`Model.find`, `find_by`), Spring Data (`xRepository.findById`,
+  `findByIdAndOrgId`) and GORM (`db.First(&m, "id = ?", …)`), with each ORM's model columns (models.py, db/schema.rb,
+  JPA `@Entity`, GORM structs). They feed only the server's **advisory** IDOR check and never the tenant
+  classification, so no blocking verdict changes. Go request accessors (`c.Param`, `URL.Query().Get`, `mux.Vars`)
+  count as request ids.
+
 ### Fixed
 - Cross-tenant : a Prisma `where: { id }` **shorthand** is an id constraint. `update({ where: { id }, data })` was
   read as an unscoped update, a false hard leak that blocked the build. Found by the new BOLA benchmark.
