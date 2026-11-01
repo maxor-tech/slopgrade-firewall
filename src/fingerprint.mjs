@@ -47,6 +47,8 @@ const MAX_FILE_BYTES = 4 * 1024 * 1024; // skip files over 4MB — a multi-GB ge
 //   · ownerCheckNear — an ownership comparison (`record.orgId !== session.orgId`) or an authorization call
 //     (authorize / can / policy / @PreAuthorize / load_and_authorize_resource …) within ACCESS_WINDOW lines.
 const ACCESS_WINDOW = 15;
+// `where: { id }` / `where: { id, … }` / `where: { …, id }` — the ES shorthand of `id: id` inside the where object.
+const PRISMA_WHERE_SHORTHAND_ID = /\bwhere\s*:\s*\{[^{}]*?(?:\{|,)?\s*(?<![\w$.])(?:id|uid|slug|token)\s*(?:,|\})/;
 const REQ_ID = /\breq(?:uest)?\s*\.\s*(?:params|query|body)\b|\brequest\s*\.\s*(?:args|GET|POST|json|form|match_info|path_params|query_params)\b|(?<![\w.$])params\s*(?:\[|\.\s*(?:id|\w+Id)\b)|\$_(?:GET|POST|REQUEST)\b|searchParams\s*\.\s*get\s*\(|\bctx\s*\.\s*params\b|\$request\s*->\s*(?:input|route|query)\s*\(/;
 const OWNER_CMP = /\b\w*(?:user|owner|org|organization|tenant|account|team|workspace|customer|creator|author)_?(?:id|Id|ID)\b\s*(?:!==?|===?)|(?:!==?|===?)\s*[\w.]*\b\w*(?:user|owner|org|organization|tenant|account|team|workspace|customer|creator|author)_?(?:id|Id|ID)\b/;
 const AUTHZ_CALL = /\b(?:authori[sz]e\w*|can|cannot|ability\w*|polic(?:y|ies)\w*|assert\w*(?:Owner|Access|Member)\w*|check\w*(?:Owner|Access|Permission|Member)\w*|ensure\w*(?:Owner|Access|Member|Permission)\w*|require\w*(?:Owner|Access|Member|Permission)\w*|verify\w*(?:Owner|Access)\w*|isOwner|hasAccess|hasPermission|permission_required|load_and_authorize_resource|authorize_resource)\s*[(!:]|@PreAuthorize|@Secured|\[Authorize\b|before_action\s+:authorize/;
@@ -141,10 +143,11 @@ export function buildFingerprint(files, root = "") {
       const ln = lineOf(t, index);
       queries.push({ kind: "sql", table: d.table, verb: d.verb, whereIdCols: idColsOf(text), spState: "unknown", isAdmin, file: relOf(f, root), line: ln, ...access(ln - 1, text) });
     }
-    // (c) Prisma queries (the dominant ORM case).
+    // (c) Prisma queries (the dominant ORM case). The id constraint also reads the shorthand `where: { id }` (BOLA
+    // benchmark 2026-11-01 : `update({ where: { id }, data })` was read as an unscoped update → a false hard leak).
     for (const { model, method, body, index } of extractPrismaQueries(t)) {
       const ln = lineOf(t, index);
-      queries.push({ kind: "prisma", table: model, method, whereIdCols: idColsOf(body), hasIdConstraint: /\bid\b\s*:|\buid\b\s*:|\bslug\b\s*:|\btoken\b\s*:/i.test(body), isBulk: /findMany|updateMany|deleteMany/i.test(method), isAdmin, file: relOf(f, root), line: ln, ...access(ln - 1, body) });
+      queries.push({ kind: "prisma", table: model, method, whereIdCols: idColsOf(body), hasIdConstraint: /\b(?:id|uid|slug|token)\b\s*:/i.test(body) || PRISMA_WHERE_SHORTHAND_ID.test(body), isBulk: /findMany|updateMany|deleteMany/i.test(method), isAdmin, file: relOf(f, root), line: ln, ...access(ln - 1, body) });
     }
   }
   return { signals, tableCols, rls: { on: [...rlsOn], policy: [...policy], granted: [...granted], revoked: [...revoked], loc: Object.fromEntries(Object.entries(tableLoc).filter(([t]) => !(rlsOn.has(t) && policy.has(t))).slice(0, 200)) }, queries };

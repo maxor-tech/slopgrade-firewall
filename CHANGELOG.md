@@ -5,6 +5,10 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+### Fixed
+- Cross-tenant : a Prisma `where: { id }` **shorthand** is an id constraint. `update({ where: { id }, data })` was
+  read as an unscoped update, a false hard leak that blocked the build. Found by the new BOLA benchmark.
+
 ### Changed
 - `insecureDeser` : **SnakeYAML version awareness**. The client reads the repo's SnakeYAML major from `pom.xml`,
   `build.gradle[.kts]` or `gradle/libs.versions.toml` (a Spring Boot 3.1+ parent counts as 2.x ; the lowest major
