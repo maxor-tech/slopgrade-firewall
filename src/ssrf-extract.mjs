@@ -66,6 +66,22 @@ import { findSinkWrappers, interprocHit } from "./taint-interproc.mjs";
 
 const isComment = (l) => /^\s*(\/\/|\*|#|--|;|<!--)/.test(l);
 
+// An SSRF needs the attacker to choose the HOST. At the sink, the URL argument's text BEFORE the first user value is
+// read : when it already holds a literal path / query / fragment separator (`/`, `?`, `#` — a scheme's `://` does not
+// count), the origin is fixed and the user value only picks a path or a query parameter. `${BASE}/jobs/${id}`,
+// f"{url}/{pipeline_id}", `${SUB_URL}wp-json/wp/v2/posts?per_page=${limit}` (independent sets v2 + v3, 2026-11-01 :
+// 5 blocking FP rows). Still an SSRF : `${proto}://${host}`, `"https://" + u`, `base + u`, `u + "/x"` (the user value
+// comes before any separator). Same rule as hostControllingVar, applied at the sink.
+// `m` = the sink match (it starts at the client name), `user` = a RegExp for the user value(s) on this line.
+function heisenFixedOrigin(m, user) {
+  const text = m[0], open = text.indexOf("(");
+  if (open < 0) return false;
+  const arg = text.slice(open + 1).replace(new RegExp(`^\\s*${METH}`), "");
+  const u = new RegExp(user.source, user.flags.replace("g", "")).exec(arg);
+  if (!u) return false;
+  return /[/?#]/.test(arg.slice(0, u.index).replace(/:\/\//g, ""));   // any `://` (a literal scheme or `${proto}://`)
+}
+
 // A cheap file-level gate: no HTTP-client token anywhere ⇒ no possible SSRF sink ⇒ skip the inter-procedural pass.
 const HAS_SINK = /\b(?:requests|httpx|session|urlopen|fetch|axios|got|superagent|needle)\b|\bhttps?\s*\.\s*(?:get|request)/;
 
@@ -118,7 +134,11 @@ function taintPass(lines, text, importedWrappers) {
     sanitizer: SSRF_SANITIZE,
     checkSinks(l, taint, emit) {
       for (const [v, lang] of taint) {
-        if ((lang === "py" ? pySinkFile(v) : nodeSink(v)).test(l)) { emit(lang === "py" ? "py-taint" : "node-taint"); return; }
+        const m = (lang === "py" ? pySinkFile(v) : nodeSink(v)).exec(l);
+        if (!m) continue;
+        const user = new RegExp(`\\b(?:${[...taint.keys()].map(escapeVar).join("|")})\\b|${SSRF_SOURCE.source}`);
+        if (heisenFixedOrigin(m, user)) continue;   // a fixed origin : the user value picks a path / query only
+        emit(lang === "py" ? "py-taint" : "node-taint"); return;
       }
       // Inter-procedural: a tainted var OR an inline user source at a flowing arg position of a LOCAL sink-wrapper.
       if (wrappers.size && interprocHit(l, wrappers, dangerous(taint))) { emit("taint-interproc"); return; }
@@ -179,7 +199,10 @@ export function extractSsrf(text, importedWrappers, heisenFile) {
     for (const [kind, re] of patterns) {
       // Python open(params[...]) is local file I/O, not Rails input (independent set v2, 2026-11-01).
       if (kind === "ruby-http" && !heisenKindAppliesToFile(kind, heisenFile)) continue;
-      if (re.test(l)) out.push({ line: i + 1, kind });
+      const m = re.exec(l);
+      if (!m) continue;
+      if (kind === "http-concat" && heisenFixedOrigin(m, SSRF_SOURCE)) continue;   // a fixed origin (see heisenFixedOrigin)
+      out.push({ line: i + 1, kind });
     }
   }
   for (const h of taintPass(lines, text, importedWrappers)) out.push(h);
