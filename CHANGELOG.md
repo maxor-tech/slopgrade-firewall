@@ -5,6 +5,12 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-11-01
+
+Depth release (expert-panel roadmap) : statements instead of physical lines, sanitizers by their effect, framework /
+MCP / LLM sources, a verdict receipt and scoped exceptions. Mutation invariance : a call split across lines 3/9 → 9/9,
+several statements on one line 0/13 → 13/13.
+
 ### Added
 - **`.slopgrade-exceptions`** — accept one finding (pack or rule · file · optional line) until a date, with an owner and
   a reason. It is still reported, as excepted, and no longer blocks ; past its date it blocks again. Read from the base
