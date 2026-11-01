@@ -5,6 +5,23 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+### Added
+- **`.slopgrade-exceptions`** — accept one finding (pack or rule · file · optional line) until a date, with an owner and
+  a reason. It is still reported, as excepted, and no longer blocks ; past its date it blocks again. Read from the base
+  branch on a pull request. Cross-tenant leaks, globs and open-ended entries are refused.
+- **Verdict receipt** in the CI log (app commit · pro bundle · pack ledger · blocking-policy hash), shape-checked.
+- **Framework, MCP and LLM sources** (`src/sources.mjs`) : Spring / .NET / Flask / FastAPI handler parameters, Next.js
+  `searchParams`, Laravel `$request->input`, `req.cookies` / `req.headers`, MCP tool arguments and LLM output are
+  untrusted ; the SQL and path sinks gain the JdbcTemplate / JPA / RawSQL / Laravel / Rails / GORM / Prisma raw and the
+  PHP / Java file APIs.
+- **Access facts** of a by-id query (`idFromRequest`, `ownerCheckNear`) for the server's advisory IDOR check.
+
+### Changed
+- The extractors read **statements, not physical lines** : a call broken across lines is read whole, and several `;`
+  statements on one line in order.
+- A **sanitizer acts by its effect** : an escaping call cleans only the value it returns ; an ignored result, a safe
+  sink or a bare `if (x)` no longer clears a request value. SSRF taint follows a new variable when it controls the host.
+
 ### Security
 - **Comment evasion closed** (expert-panel red team). A trailing comment no longer decides a taint sink or sanitizer :
   `el.innerHTML = h; // sanitize` and `console.log(c); // validate` used to clear the taint of a request value, so the

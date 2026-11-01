@@ -64,6 +64,7 @@ import { sinkFiles, prChangedPaths, prChangedRanges, selectDeepUnits, requestDee
 import { prHunks, validChangeReview, C_HUNK, C_REVIEW_NOTE, CPP_HUNK, CPP_REVIEW_NOTE, RUST_HUNK, RUST_REVIEW_NOTE, noticeHint, unreviewedNote } from "./src/change-review.mjs";
 import { fixableHitIndex, attachFixes } from "./src/autofix.mjs";
 import { IGNORE_FILE, parseIgnore, ignoreMatcher, readIgnoreText } from "./src/ignore.mjs";
+import { EXCEPTIONS_FILE, parseExceptions, exceptionFor, readExceptionsText } from "./src/exceptions.mjs";
 import { decidePurpose, purposeAdvisoryLine } from "./src/repo-purpose.mjs";
 import { readRepoAggregates, applyBlockConfidence } from "./src/block-confidence.mjs";
 
@@ -250,6 +251,14 @@ export async function main(argv = [], env = process.env) {
     (p) => readFileSync(join(root, p), "utf8"));
   const ignore = parseIgnore(ignoreSrc.text);
   const isIgnored = ignoreMatcher(ignore.patterns);
+  // `.slopgrade-exceptions` — one finding accepted until a date by a named owner (src/exceptions.mjs) ; read like the
+  // ignore file (the BASE branch on a pull request). Expired and refused entries are named in the log.
+  const exceptions = parseExceptions(readExceptionsText(env,
+    (args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15_000, maxBuffer: 1024 * 1024 }),
+    (p) => readFileSync(join(root, p), "utf8")).text);
+  for (const e of exceptions.expired) ghWarn(`${EXCEPTIONS_FILE}: the exception for ${e.target} ${e.path}${e.line ? `:${e.line}` : ""} expired on ${e.until} (owner ${e.owner}) — the finding blocks again.`);
+  for (const r of exceptions.refused) ghWarn(`${EXCEPTIONS_FILE}: refused « ${r.line} » — ${r.why}.`);
+  let exceptedBlocking = 0;
   let ignoredCount = 0;
   // Repository purpose (src/repo-purpose.mjs) — a course / lab / CTF / offensive-tool repo gets ADVISORY pack + Deep Scan
   // blocks. Gate mode only (nothing blocks otherwise). On a pull request everything is read from the BASE branch, so a PR
@@ -489,11 +498,17 @@ export async function main(argv = [], env = process.env) {
         ? String(f.detail)
         : `${label} finding here — the exact rule and the remaining findings are unlocked with the gate: ${origin}/ci`;
       if (loc.file) {
-        console.log(`::${advisory ? "warning" : "error"} file=${wfFile(loc.file)},line=${loc.line},title=slopGrade Firewall::[${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(detail)}`);
+        // An active `.slopgrade-exceptions` entry accepts this one finding : reported as excepted, never blocking. It
+        // carries no origSeverity, so the PR-scoped count below does not see it either.
+        const exc = advisory ? null : exceptionFor(exceptions.active, { pack: key, rule: f.rule, file: loc.file, line: loc.line });
+        if (exc && (f.severity === "high" || f.severity === "critical")) exceptedBlocking++;
+        const warnOnly = advisory || Boolean(exc);
+        console.log(`::${warnOnly ? "warning" : "error"} file=${wfFile(loc.file)},line=${loc.line},title=slopGrade Firewall::[${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(detail)}`);
         // origSeverity lets the exit decision below count what WOULD have blocked, to print the purpose line only then.
         // The reason rides in the feed row too (review + SARIF), not only in the pack header line (e2e 2026-10-27).
-        const note = calibrating ? "(advisory — calibration window)" : demoted ? `(advisory — ${purpose.purpose} repository)` : "";
-        feed.push({ file: loc.file, line: loc.line, pack: key, rule: f.rule, detail: note ? `${detail} ${note}` : detail, severity: advisory ? "medium" : f.severity,
+        const note = calibrating ? "(advisory — calibration window)" : demoted ? `(advisory — ${purpose.purpose} repository)`
+          : exc ? `(excepted until ${exc.until} by ${exc.owner} — ${exc.reason})` : "";
+        feed.push({ file: loc.file, line: loc.line, pack: key, rule: f.rule, detail: note ? `${detail} ${note}` : detail, severity: warnOnly ? "medium" : f.severity,
           ...(note ? { advisoryNote: note } : {}), ...(demoted ? { origSeverity: f.severity } : {}) });
       }
     }
@@ -641,7 +656,9 @@ export async function main(argv = [], env = process.env) {
   const restored = classified ? classified.map((f) => (f.origSeverity ? { ...f, severity: f.origSeverity } : f)) : null;
   const scoped = restored && !scopeOverride ? scopedBlocking(v, restored, { deepBlocking, diff: prDiff }) : null;
   const gateHard = scoped ? scoped.hardLeaks : Number(v.hardLeaks) || 0;
-  let gatePack = scoped ? scoped.packBlocking : Number(v.packBlocking) || 0;
+  // Whole-repo path : the server's count minus the findings an active exception accepts (the scoped path already reads
+  // the excepted rows at their demoted severity).
+  let gatePack = scoped ? scoped.packBlocking : Math.max(0, (Number(v.packBlocking) || 0) - exceptedBlocking);
   let gateDeep = scoped ? scoped.deepBlocking : deepBlocking;
   // Non-product repo : pack + Deep Scan blocks become advisory (cross-tenant hard leaks are NOT touched).
   if (purposeAdvisory && gatePack + gateDeep > 0) {
