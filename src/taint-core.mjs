@@ -18,6 +18,8 @@
 const DEFAULT_BOUNDARY = /\bdef\s|\bfunction\b|=>|\bclass\s|\bfunc\s/;
 const ASSIGN_RE = /^\s*(?:(?:const|let|var)\s+)?([A-Za-z_$][\w$]*)\s*=\s*(?!=)(.+)$/;
 const isComment = (l) => /^\s*(\/\/|\*|#|--|;|<!--)/.test(l);
+import { optInSource } from "./sources.mjs";
+
 export const escapeVar = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /** Word-boundaried test for a bare identifier occurring in a line (used by consumers + the sanitizer sweep). */
 export const mentions = (v, line) => new RegExp(`\\b${escapeVar(v)}\\b`).test(line);
@@ -88,6 +90,12 @@ export function runTaintPass(lines, cfg) {
     //    `s` is clean, `v` stays tainted, and `q = "…" + escape(id) + req.args.b` stays tainted through the raw part.
     const rhs = as ? (effect === "clean-target" ? stripSanitizerCalls(as[2], cfg.sanitizer) : as[2]) : null;
     cfg.updateTaint(as && effect === "clean-target" ? l.replace(as[2], rhs) : l, taint, as ? { name: as[1], rhs } : null);
+    // 4. Opt-in sources (sources.mjs : CLI arguments / queue payloads, only for a repo that opted in) taint the assigned
+    //    name like a request value, unless the consumer already tagged it (expert panel P1-5).
+    //    A consumer whose tag depends on more than the line (SSRF's py / node) supplies `optInTag`.
+    if (as && (cfg.optInTag || cfg.paramTag) && !taint.has(as[1]) && optInSource(rhs)) {
+      taint.set(as[1], cfg.optInTag ? cfg.optInTag(l) : typeof cfg.paramTag === "function" ? cfg.paramTag(l) : cfg.paramTag);
+    }
     }
   }
   return out;

@@ -32,6 +32,8 @@ const isComment = (l) => /^\s*(\/\/|\*|#|--|;|<!--)/.test(l);
 //     defaults to an XmlUrlResolver).
 const RESOLVER_WINDOW = 12;
 const PHP_NOENT_TESTED = /(?<!&)&(?!&)\s*~?\s*\\?LIBXML_NOENT\b|~\s*\\?LIBXML_NOENT\b/g;
+// PHP constant declarations (independent set v2, 2026-11-01): remove only the declared name, preserving later uses.
+const heisenPhpNoentDeclaration = /\bconst\s+LIBXML_NOENT\s*=/g;
 const stripLiterals = (l) => l.replace(/(["'])(?:\\.|(?!\1)[^\\])*\1/g, '""');
 // Java — `setExpandEntityReferences(true)` is the JAXP DEFAULT : on its own it expands only the entities the parser may
 // load. On a factory that also turns the DOCTYPE off, or turns BOTH external general and parameter entities off,
@@ -55,7 +57,7 @@ export function extractXxe(text) {
     if (isComment(l)) continue;      // an XXE switch named in a comment is documentation, not live code
     for (const [kind, re] of PATTERNS) {
       if (kind === "php-libxml") {
-        if (!re.test(stripLiterals(l).replace(PHP_NOENT_TESTED, ""))) continue;   // tested/cleared/quoted ≠ enabled
+        if (!re.test(stripLiterals(l).replace(heisenPhpNoentDeclaration, "").replace(PHP_NOENT_TESTED, ""))) continue;   // tested/cleared/quoted ≠ enabled
       } else if (!re.test(l)) continue;
       if (kind === "dotnet-dtd" && !/XmlUrlResolver/.test(l)) {
         const win = lines.slice(Math.max(0, i - RESOLVER_WINDOW), Math.min(lines.length, i + RESOLVER_WINDOW + 1)).join("\n");

@@ -15,6 +15,10 @@ inputs:
     description: "upload findings to GitHub Code Scanning (Security tab + inline PR annotations, tracked across commits + dismissible) using YOUR GITHUB_TOKEN — no extra step, no SHA to pin. Needs `permissions: security-events: write` (free on public repos; a private repo also needs GitHub Advanced Security). Fail-soft: without the permission it quietly no-ops, never breaking the build. Default true; set false to disable."
     required: false
     default: "true"
+  untrusted-inputs:
+    description: "OPT-IN extra untrusted sources for the injection checks, a comma list : `cli` (sys.argv, process.argv, os.Args, ARGV, argparse values) and / or `queue` (SQS / Lambda records, Kafka / RabbitMQ / Pub-Sub message payloads). Off by default : a CLI tool runs with its own user's privileges, so its arguments are not attacker input unless you say so."
+    required: false
+    default: ""
   sarif-file:
     description: "if set, ALSO write the SARIF report to this path (for a build artifact or a manual github/codeql-action/upload-sarif step). The Code Scanning upload above already runs without it. Default empty (no file written)."
     required: false
@@ -89,6 +93,7 @@ runs:
         FW_STRICT: ${{ inputs.strict }}
         FW_SARIF: ${{ inputs.sarif-file }}
         FW_UPLOAD_SARIF: ${{ inputs.upload-sarif }}
+        FW_UNTRUSTED_INPUTS: ${{ inputs.untrusted-inputs }}
         FW_DEEP_SCAN: ${{ inputs.deep-scan }}
         FW_DEEP_SCAN_BLOCK: ${{ inputs.deep-scan-block }}
         FW_BLOCK_CONFIDENCE: ${{ inputs.block-confidence }}

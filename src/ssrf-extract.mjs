@@ -14,7 +14,7 @@
 // job). The direct patterns are unchanged; the taint pass is additive.
 
 // ── Sink vocabulary (parametrised by the file's client group so `import requests as r` is tracked) ───────────────
-import { logicalLines } from "./lang-scope.mjs";
+import { logicalLines, kindAppliesToFile as heisenKindAppliesToFile } from "./lang-scope.mjs";
 const PY_BASE = "requests|httpx|session";                 // base Python HTTP clients (aliases appended per file)
 const NODE_C = "fetch|axios|got|superagent|needle";       // Node HTTP clients
 const VERBS = "get|post|put|delete|patch|head|request";   // HTTP verbs
@@ -55,7 +55,8 @@ function directPatterns(pyClients) {
     // `open` must be a BARE call (or URI./Kernel.) and the arg `params[…]` / `params.require…` — real-code corpus FP:
     // `fs.open(params.filePath)`, `root.open(params.relativePath)`, a TS method `open(params: T)` (a function-param
     // object named params, not Rails user input, and a file open, not an HTTP fetch).
-    ["ruby-http", /\b(?:Net::HTTP\s*\.\s*(?:get|post|get_response)|HTTParty\s*\.\s*(?:get|post)|Faraday\s*\.\s*(?:get|post))\s*\(\s*params\b|(?:(?<![\w.:$])open|\b(?:URI|Kernel)\s*\.\s*open)\s*\(\s*params\s*[[.]/],
+    // Ruby URI(params[:url]) still supplies the HTTP URL (independent set v2, 2026-11-01).
+    ["ruby-http", /\b(?:Net::HTTP\s*\.\s*(?:get|post|get_response)|HTTParty\s*\.\s*(?:get|post)|Faraday\s*\.\s*(?:get|post))\s*\(\s*(?:URI\s*\(\s*)?params\b|(?:(?<![\w.:$])open|\b(?:URI|Kernel)\s*\.\s*open)\s*\(\s*params\s*[[.]/],
   ];
 }
 
@@ -110,8 +111,10 @@ function taintPass(lines, text, importedWrappers) {
     : new Map();
   const imported = importedWrappers instanceof Map ? importedWrappers : new Map();
   const dangerous = (taint) => (a) => SSRF_SOURCE.test(a) || [...taint.keys()].some((v) => mentions(v, a));
+  // an opted-in source (CLI argv / queue payload, sources.mjs) carries the file's language, not the line's
+  const fileTag = /^\s*(?:async\s+)?def\s/m.test(text) ? "py" : "node";
   return runTaintPass(lines, {
-    paramSources, paramTag: (l) => (/^\s*(?:async\s+)?def\s/.test(l) ? "py" : "node"),
+    paramSources, paramTag: (l) => (/^\s*(?:async\s+)?def\s/.test(l) ? "py" : "node"), optInTag: () => fileTag,
     sanitizer: SSRF_SANITIZE,
     checkSinks(l, taint, emit) {
       for (const [v, lang] of taint) {
@@ -165,7 +168,7 @@ function hostControllingVar(rhs, taint) {
  * `importedWrappers` (optional) — a Map<localName, Set<flowingIdx>> resolved by the walker from the repo registry;
  * enables the cross-file layer. Omit it for a single-file scan (intra + local inter-procedural only).
  */
-export function extractSsrf(text, importedWrappers) {
+export function extractSsrf(text, importedWrappers, heisenFile) {
   const out = [];
   const lines = logicalLines(String(text).split(/\r?\n/));   // statements broken across lines read whole (lang-scope.mjs)
   const patterns = directPatterns(pyClientGroup(text));   // per-file: client group includes `import requests as r`
@@ -174,6 +177,8 @@ export function extractSsrf(text, importedWrappers) {
     if (l.length > 4000) continue;   // minified blob — noise
     if (isComment(l)) continue;      // a sink named in a comment is documentation, not live code
     for (const [kind, re] of patterns) {
+      // Python open(params[...]) is local file I/O, not Rails input (independent set v2, 2026-11-01).
+      if (kind === "ruby-http" && !heisenKindAppliesToFile(kind, heisenFile)) continue;
       if (re.test(l)) out.push({ line: i + 1, kind });
     }
   }
@@ -183,5 +188,5 @@ export function extractSsrf(text, importedWrappers) {
 
 /** The SSRF fingerprint for one file — locations + kinds, no source. `importedWrappers` enables the cross-file layer. */
 export function extractSsrfFingerprint(text, file, importedWrappers) {
-  return { file, hits: extractSsrf(text, importedWrappers) };
+  return { file, hits: extractSsrf(text, importedWrappers, file) };
 }
