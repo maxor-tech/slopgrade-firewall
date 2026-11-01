@@ -5,6 +5,13 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-11-01
+
+Depth release (expert-panel roadmap) : statements instead of physical lines, sanitizers by their effect, framework /
+MCP / LLM sources, ORM by-id access, SnakeYAML version awareness, a verdict receipt and scoped exceptions. Mutation
+invariance : a call split across lines 3/9 → 9/9, several statements on one line 0/13 → 13/13. Cross-tenant (BOLA)
+benchmark : 12/12 vulnerable cases flagged, 1/13 false flag (advisory).
+
 ### Added
 - **ORM by-id access** (`src/orm-access.mjs`) for the cross-tenant check : Django ORM (`Model.objects.get(pk=…)`,
   `get_object_or_404`), ActiveRecord (`Model.find`, `find_by`), Spring Data (`xRepository.findById`,
@@ -12,25 +19,6 @@ All notable changes to the open-source slopGrade Firewall client are documented 
   JPA `@Entity`, GORM structs). They feed only the server's **advisory** IDOR check and never the tenant
   classification, so no blocking verdict changes. Go request accessors (`c.Param`, `URL.Query().Get`, `mux.Vars`)
   count as request ids.
-
-### Fixed
-- Cross-tenant : a Prisma `where: { id }` **shorthand** is an id constraint. `update({ where: { id }, data })` was
-  read as an unscoped update, a false hard leak that blocked the build. Found by the new BOLA benchmark.
-
-### Changed
-- `insecureDeser` : **SnakeYAML version awareness**. The client reads the repo's SnakeYAML major from `pom.xml`,
-  `build.gradle[.kts]` or `gradle/libs.versions.toml` (a Spring Boot 3.1+ parent counts as 2.x ; the lowest major
-  wins). SnakeYAML 2.x rejects global tags, so a load is gated : it fires only with a request source on the line. An
-  unknown version, 1.x, or a `setTagInspector(…)` in the file stays HIGH. A Java `yaml.load` now carries the SnakeYAML
-  label (it used to get the PyYAML one), and a `Yaml(new SafeConstructor(…))` load is not reported.
-
-## [0.13.0] — 2026-11-01
-
-Depth release (expert-panel roadmap) : statements instead of physical lines, sanitizers by their effect, framework /
-MCP / LLM sources, a verdict receipt and scoped exceptions. Mutation invariance : a call split across lines 3/9 → 9/9,
-several statements on one line 0/13 → 13/13.
-
-### Added
 - **`.slopgrade-exceptions`** — accept one finding (pack or rule · file · optional line) until a date, with an owner and
   a reason. It is still reported, as excepted, and no longer blocks ; past its date it blocks again. Read from the base
   branch on a pull request. Cross-tenant leaks, globs and open-ended entries are refused.
@@ -42,6 +30,11 @@ several statements on one line 0/13 → 13/13.
 - **Access facts** of a by-id query (`idFromRequest`, `ownerCheckNear`) for the server's advisory IDOR check.
 
 ### Changed
+- `insecureDeser` : **SnakeYAML version awareness**. The client reads the repo's SnakeYAML major from `pom.xml`,
+  `build.gradle[.kts]` or `gradle/libs.versions.toml` (a Spring Boot 3.1+ parent counts as 2.x ; the lowest major
+  wins). SnakeYAML 2.x rejects global tags, so a load is gated : it fires only with a request source on the line. An
+  unknown version, 1.x, or a `setTagInspector(…)` in the file stays HIGH. A Java `yaml.load` now carries the SnakeYAML
+  label (it used to get the PyYAML one), and a `Yaml(new SafeConstructor(…))` load is not reported.
 - The extractors read **statements, not physical lines** : a call broken across lines is read whole, and several `;`
   statements on one line in order.
 - A **sanitizer acts by its effect** : an escaping call cleans only the value it returns ; an ignored result, a safe
@@ -55,6 +48,8 @@ several statements on one line 0/13 → 13/13.
   in a JS / Python file used to switch the injection extractors off for the whole file. No labelled row changes.
 
 ### Fixed
+- Cross-tenant : a Prisma `where: { id }` **shorthand** is an id constraint. `update({ where: { id }, data })` was
+  read as an unscoped update, a false hard leak that blocked the build. Found by the new BOLA benchmark.
 - `insecureDeser` : an in-memory **deep clone** (an object written to a `ByteArrayOutputStream` through an
   `ObjectOutputStream`, then read back from that buffer's own bytes) is self-produced data, not attacker input. It is
   now gated like a local-file stream. Labelled wrong blocks 16 → 13 ; every labelled true finding still fires (3/3).
