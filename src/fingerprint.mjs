@@ -48,6 +48,8 @@ const MAX_FILE_BYTES = 4 * 1024 * 1024; // skip files over 4MB — a multi-GB ge
 //   · ownerCheckNear — an ownership comparison (`record.orgId !== session.orgId`) or an authorization call
 //     (authorize / can / policy / @PreAuthorize / load_and_authorize_resource …) within ACCESS_WINDOW lines.
 const ACCESS_WINDOW = 15;
+// A framework authorization layer used anywhere in the file (ORM accesses only — see buildFingerprint (d)).
+const FRAMEWORK_AUTHZ = /\bauthorize!?\s*\(?\s*@|\bverify_authorized\b|\bpolicy_scope\s*\(|\b(?:load_and_)?authorize_resource\b|before_action\s+:authorize\w*|\bhas_object_permission\b|\bPermissionRequiredMixin\b|\bget_objects_for_user\b|@permission_required\b|@(?:PreAuthorize|PostAuthorize|Secured|RolesAllowed)\b/;
 // `where: { id }` / `where: { id, … }` / `where: { …, id }` — the ES shorthand of `id: id` inside the where object.
 const PRISMA_WHERE_SHORTHAND_ID = /\bwhere\s*:\s*\{[^{}]*?(?:\{|,)?\s*(?<![\w$.])(?:id|uid|slug|token)\s*(?:,|\})/;
 const REQ_ID = /\breq(?:uest)?\s*\.\s*(?:params|query|body)\b|\brequest\s*\.\s*(?:args|GET|POST|json|form|match_info|path_params|query_params)\b|(?<![\w.$])params\s*(?:\[|\.\s*(?:id|\w+Id)\b)|\$_(?:GET|POST|REQUEST)\b|searchParams\s*\.\s*get\s*\(|\bctx\s*\.\s*params\b|\$request\s*->\s*(?:input|route|query)\s*\(|\bc\s*\.\s*(?:Param|Query|DefaultQuery|PostForm|FormValue|QueryParam)\s*\(|\.URL\s*\.\s*Query\s*\(\s*\)\s*\.\s*Get\s*\(|\bmux\s*\.\s*Vars\s*\(/;
@@ -155,9 +157,14 @@ export function buildFingerprint(files, root = "") {
     }
     // (d) ORM by-id accesses + ORM model columns.
     for (const { model, cols } of extractOrmModels(t, f)) ormModels[model] = cols;
+    // A controller that uses its framework's authorization layer anywhere in the file (Pundit / CanCan, Django object
+    // permissions, Spring method security) checks access outside the 15-line window : the by-id load sits in a
+    // `before_action :set_x` helper while `authorize @x` runs in the action (2026-11-01 real-repo sweep, Rails).
+    const fileAuthz = FRAMEWORK_AUTHZ.test(t);
     for (const { orm, model, whereIdCols, index } of extractOrmQueries(t, f)) {
       const ln = lineOf(t, index);
-      ormQueries.push({ orm, table: model, whereIdCols, isAdmin, file: relOf(f, root), line: ln, ...access(ln - 1, lines[ln - 1] ?? "") });
+      const a = access(ln - 1, lines[ln - 1] ?? "");
+      ormQueries.push({ orm, table: model, whereIdCols, isAdmin, file: relOf(f, root), line: ln, ...a, ownerCheckNear: a.ownerCheckNear || fileAuthz });
     }
   }
   return { signals, tableCols, rls: { on: [...rlsOn], policy: [...policy], granted: [...granted], revoked: [...revoked], loc: Object.fromEntries(Object.entries(tableLoc).filter(([t]) => !(rlsOn.has(t) && policy.has(t))).slice(0, 200)) }, queries, ormModels, ormQueries };

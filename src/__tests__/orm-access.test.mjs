@@ -57,3 +57,26 @@ test("egress : the sanitizer passes ORM models and queries as identifiers and bo
   assert.deepEqual(s.ormModels, { invoice: ["id", "org_id"] });
   assert.deepEqual(s.ormQueries, [{ orm: "django", table: "invoice", whereIdCols: ["id"], isAdmin: false, idFromRequest: true, ownerCheckNear: false, file: "v.py", line: 3 }]);
 });
+
+test("real-repo sweep 2026-11-01 : existsById is a probe, not an access", () => {
+  assert.deepEqual(q(`return userRepository.existsById(id) ? null : "missing";`, "C.java"), []);
+});
+
+test("real-repo sweep 2026-11-01 : a controller using Pundit / CanCan / Spring method security counts as checked", async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { buildFingerprint } = await import("../fingerprint.mjs");
+  const ws = mkdtempSync(join(tmpdir(), "sg-orm-")).replace(/\\/g, "/");
+  try {
+    mkdirSync(`${ws}/app`, { recursive: true });
+    const set = `  private\n\n  def set_import\n    @import = Import.find(params[:id])\n  end\n`;
+    writeFileSync(`${ws}/app/a_controller.rb`, `class AController < ApplicationController\n  before_action :set_import\n  def show\n    authorize @import\n  end\n${"\n".repeat(20)}${set}end\n`);
+    writeFileSync(`${ws}/app/b_controller.rb`, `class BController < ApplicationController\n  before_action :set_import\n  def show\n    render json: @import\n  end\n${"\n".repeat(20)}${set}end\n`);
+    const fp = buildFingerprint([`${ws}/app/a_controller.rb`, `${ws}/app/b_controller.rb`], ws);
+    const of = (f) => fp.ormQueries.find((x) => x.file.endsWith(f));
+    assert.equal(of("a_controller.rb").ownerCheckNear, true, "authorize @import elsewhere in the controller");
+    assert.equal(of("b_controller.rb").ownerCheckNear, false, "CONTROL : no authorization anywhere");
+    assert.equal(of("b_controller.rb").idFromRequest, true);
+  } finally { rmSync(ws, { recursive: true, force: true }); }
+});

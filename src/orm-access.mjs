@@ -103,7 +103,8 @@ export function extractOrmQueries(text, file) {
       push("rails", m[1], [...where, ...(m[3] === "find" ? ["id"] : hashCols(m[4]))], m.index);
     }
   } else if (/\.(?:java|kt)$/i.test(f)) {
-    for (const m of t.matchAll(/\b(\w+?)(?:Repository|Repo|Dao)\s*\.\s*(?:(?:find|get|delete|exists)ById|getReferenceById|(?:find|get|delete|exists)By(\w+?))\s*\(/g)) {
+    // `existsById` / `existsBy…` only probe for a row (no data read or changed) : not an access.
+    for (const m of t.matchAll(/\b(\w+?)(?:Repository|Repo|Dao)\s*\.\s*(?:(?:find|get|delete)ById|getReferenceById|(?:find|get|delete)By(\w+?))\s*\(/g)) {
       const cols = m[2] ? m[2].split(/And(?=[A-Z])/).map((p) => SNAKE(p)) : ["id"];
       push("spring", m[1], cols, m.index);
     }
