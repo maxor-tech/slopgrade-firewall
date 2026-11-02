@@ -41,3 +41,18 @@ test("striptags : Markup(request...).striptags() is plain text ; Markup(request.
   assert.deepEqual(py('Markup(request.args["n"]).striptags()'), []);
   assert.deepEqual(py('Markup(request.args["n"])'), [3]);
 });
+
+// Value-flow exemptions (2026-11-02, mirror of maxor-tech/slopgrade#1599) : a constant ternary, a constant table entry,
+// a non-HTML response, an inline character strip. Each has a CONTROL that still fires.
+test("value flow : constant ternary, constant table, non-HTML response, inline strip are not HTML sinks", () => {
+  const L = (c, f) => extractXss(c, new Map(), f).map((h) => h.line);
+  assert.deepEqual(L(`<input <?php echo $_COOKIE ["split"] ? ' checked' : ''; ?> />\n`, "boxes.php"), []);
+  assert.deepEqual(L(`<p><?php echo $_COOKIE["split"]; ?></p>\n`, "boxes.php"), [1]);
+  assert.deepEqual(L("function b(el) {\n  const v = location.hash.slice(1);\n  el.innerHTML = ICONS[v];\n}\n", "c.js"), []);
+  assert.deepEqual(L("function b(el) {\n  const v = location.hash.slice(1);\n  el.innerHTML = v;\n}\n", "c.js"), [3]);
+  assert.deepEqual(L("app.get('/pl', (req, res) => {\n  res.setHeader('Content-Disposition', 'attachment; filename=a.xspf');\n  res.send('<track>' + req.query.name);\n});\n", "p.js"), []);
+  assert.deepEqual(L("app.get('/p', (req, res) => {\n  res.send('<h1>' + req.query.name);\n});\n", "p.js"), [2]);
+  const strip = (s) => "function px(div, Xt_i) {\n  var Xt_r = document.referrer;\n  div.innerHTML = Xt_i + '&ref=' + Xt_r" + s + " + '\" title=\"x\">';\n}\n";
+  assert.deepEqual(L(strip(".replace(/[<>\"]/g, '')"), "s.js"), []);
+  assert.deepEqual(L(strip(""), "s.js"), [3]);
+});
