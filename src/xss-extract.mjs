@@ -65,7 +65,9 @@ const HAS_SINK = /innerHTML|outerHTML|document\s*\.\s*write|insertAdjacentHTML|d
 // Any escaping / sanitizing / text-only assignment makes the value safe → clear taint (don't cry wolf). Guarded at the
 // sink too (the sink check runs before the per-line sanitizer sweep, so an inline `innerHTML = DOMPurify.sanitize(h)`
 // must not fire).
-const XSS_SANITIZE = /\b(?:DOMPurify|sanitize\w*|escapeHtml|escapeHTML|escape\w*|encodeURI\w*|textContent|innerText|createTextNode)\b/;
+// `striptags` / `strip_tags` (Jinja `Markup(...).striptags()`, PHP strip_tags) return plain text with every tag removed
+// (evidence harvest v7, 2026-11-02 : 2 blind-labelled FP rows, saythanks).
+const XSS_SANITIZE = /\b(?:DOMPurify|sanitize\w*|escapeHtml|escapeHTML|escape\w*|encodeURI\w*|textContent|innerText|createTextNode|striptags|strip_tags)\b/;
 const xssSinkTest = (l, v) => sink(v).test(l);
 /** The XSS wrapper config — shared by the walker's cross-file registry build. */
 export const xssWrapperCfg = { sinkTest: xssSinkTest, sanitizer: XSS_SANITIZE, sourceTest: SRC_RE, hasSink: HAS_SINK };
@@ -112,6 +114,8 @@ export function extractXss(text, importedWrappers, file) {
     for (const [kind, re] of PATTERNS) {
       if (!kindAppliesToFile(kind, file)) continue;   // a language rule fires only on its own files (lang-scope.mjs)
       if (kind === "php-echo" && PHP_ECHO_CONST_TERNARY.test(l)) continue;   // compared, not echoed
+      // `Markup(request…).striptags()` returns plain text with the tags removed (evidence harvest v7 : saythanks x2)
+      if (kind === "py-marksafe" && /\)\s*\.\s*striptags\s*\(/.test(l)) continue;
       if (re.test(l)) out.push({ line: i + 1, kind });
     }
   }

@@ -33,3 +33,11 @@ test("CONTROL : a reassignment, a rejecting guard or a validator statement still
   assert.equal(sql("  id = escape(id)\n  cursor.execute('SELECT * FROM t WHERE id=' + id)"), 0);
   assert.equal(xss("  el.innerHTML = DOMPurify.sanitize(h);"), 0);
 });
+
+// Evidence harvest v7 (2026-11-02, blind labels) : Jinja `Markup(...).striptags()` returns plain text with every tag
+// removed — not an HTML sink value. Mirrors the server round 5 (maxor-tech/slopgrade#1595).
+test("striptags : Markup(request...).striptags() is plain text ; Markup(request...) alone still fires", () => {
+  const py = (line) => extractXss(`@app.route("/n")\ndef n():\n    name = ${line}\n    return "<p>" + name + "</p>"\n`, new Map(), "app.py").map((h) => h.line);
+  assert.deepEqual(py('Markup(request.args["n"]).striptags()'), []);
+  assert.deepEqual(py('Markup(request.args["n"])'), [3]);
+});
