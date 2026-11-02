@@ -16,6 +16,8 @@ All notable changes to the open-source slopGrade Firewall client are documented 
   pre-pass that throws, runs every pack as before.
 
 ### Fixed
+- **XSS** : Jinja `Markup(...).striptags()` and PHP `strip_tags` return plain text with every tag removed, so they no
+  longer count as an HTML sink value (found by the targeted evidence harvest v7, 2026-11-02, labelled blind).
 - Found by the second independent test set (v2, 600 other unseen repos, labelled blind) :
   - SSRF : the Ruby `open(params[…])` / `Net::HTTP` rule applies to Ruby files only — a Python
     `open(params["path"], "w")` is a dict lookup and a file write. `Net::HTTP.get(URI(params[:url]))` now fires.
