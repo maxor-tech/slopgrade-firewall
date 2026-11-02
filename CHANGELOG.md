@@ -5,6 +5,13 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+### Changed
+- **Repo-purpose classifier on by default** : in a course, lab, CTF, webshell or offensive-tool repo, pack and Deep
+  Scan blocks become advisory annotations (the reason is printed in the log; cross-tenant leaks still block).
+  Measured on the blind-labelled blocking rows : xss 52/87 → 51/73, 13 of the 14 removed rows were not true positives.
+  Keep blocking on with `purpose: product` in `.slopgrade.yml`, or turn the classifier off with
+  `SLOPGRADE_PURPOSE_CLASSIFIER=off`.
+
 ### Added
 - **Opt-in untrusted sources** : the Action input `untrusted-inputs: "cli,queue"` makes CLI arguments (`sys.argv`,
   argparse values, `process.argv`, `os.Args`, `ARGV`) and / or queue payloads (SQS / Lambda records, Kafka / RabbitMQ /
