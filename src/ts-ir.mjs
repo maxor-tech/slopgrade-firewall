@@ -7,7 +7,7 @@ import { createRequire } from "node:module";
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-const GRAMMAR = { python: "python", javascript: "javascript", typescript: "typescript", tsx: "tsx" };
+const GRAMMAR = { python: "python", javascript: "javascript", typescript: "typescript", tsx: "tsx", php: "php", go: "go" };
 /** The grammar for a file path, or null. */
 export function langOf(file) {
   const f = String(file ?? "").toLowerCase();
@@ -15,6 +15,8 @@ export function langOf(file) {
   if (/\.(?:js|mjs|cjs|jsx)$/.test(f)) return "javascript";
   if (/\.tsx$/.test(f)) return "tsx";
   if (/\.(?:ts|mts|cts)$/.test(f)) return "typescript";
+  if (/\.php$/.test(f)) return "php";
+  if (/\.go$/.test(f)) return "go";
   return null;
 }
 
@@ -54,7 +56,12 @@ export async function initIr(grammars = Object.keys(GRAMMAR), runtime = null) {
   }
   for (const g of grammars) {
     if (langs.has(g)) continue;
-    const lang = await rt.Language.load(readFileSync(join(rt.dir, `tree-sitter-${GRAMMAR[g]}.wasm`)));
+    // A runtime without this grammar's wasm (the OSS client vendors python / javascript / typescript / tsx only) skips
+    // it : that language keeps the line reader (irReady false), the others keep the tree. Throwing here would turn
+    // the tree off for EVERY language through the caller's catch.
+    const wasm = join(rt.dir, `tree-sitter-${GRAMMAR[g]}.wasm`);
+    if (!existsSync(wasm)) continue;
+    const lang = await rt.Language.load(readFileSync(wasm));
     langs.set(g, lang);
     const p = new rt.Parser(); p.setLanguage(lang); parsers.set(g, p);
   }
