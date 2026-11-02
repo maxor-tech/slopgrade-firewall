@@ -68,7 +68,8 @@ const REQ_RE = new RegExp(`${REQ}|${FRAMEWORK_SOURCE}`);   // + framework / LLM 
 // A string literal that contains a SQL keyword — evidence the RHS is building a query, not an arbitrary string.
 const SQL_STRING = /["'`][^"'`]*\b(?:SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM|DELETE|WHERE|FROM|VALUES|ORDER\s+BY|GROUP\s+BY|UNION|DROP\s+TABLE|--)\b/i;
 // An escaping / parameterizing call — assume it makes the value safe → clear taint (don't cry wolf).
-export const SQL_SANITIZE = /\b(?:parameteriz\w*|escape\w*|quote\w*|sanitiz\w*|bind_?param\w*|prepared?|mogrify|sql\.Identifier|quote_ident|placeholder)\b/i;
+// `_safe_identifier(name)` / `safe_ident(…)` validate an identifier before interpolation (DocsGPT, 5,300-repo sweep).
+export const SQL_SANITIZE = /\b(?:parameteriz\w*|escape\w*|quote\w*|sanitiz\w*|bind_?param\w*|prepared?|mogrify|sql\.Identifier|quote_ident|placeholder|_?safe_?ident\w*)\b/i;
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const sink = (v) => new RegExp(`\\b(?:${SINK})\\s*\\(\\s*${esc(v)}\\s*[),]`);
 // A sink CALL on the line (any argument shape) — used with `interpolated` below for the one-step user-var build.
