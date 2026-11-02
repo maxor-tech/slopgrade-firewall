@@ -23,6 +23,9 @@ All notable changes to the open-source slopGrade Firewall client are documented 
   pre-pass that throws, runs every pack as before.
 
 ### Fixed
+- **XSS value flow** : a superglobal that only selects one of two literals, `innerHTML` from a constant table entry, a
+  response that is not HTML (attachment, XML, JSON, plain text) and an inline `<>"` strip no longer count as an HTML sink
+  (blind-labelled evidence harvests v7 / v8, 2026-11-02 ; mirror of maxor-tech/slopgrade#1599).
 - **XSS** : Jinja `Markup(...).striptags()` and PHP `strip_tags` return plain text with every tag removed, so they no
   longer count as an HTML sink value (found by the targeted evidence harvest v7, 2026-11-02, labelled blind).
 - Found by the second independent test set (v2, 600 other unseen repos, labelled blind) :

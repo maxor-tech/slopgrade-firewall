@@ -43,7 +43,9 @@ import { findSinkWrappers, interprocHit } from "./taint-interproc.mjs";
 
 // A superglobal that is only COMPARED in a ternary whose two outputs are literals echoes one of two constants
 // (`echo $_GET["t"] == "d" ? "folder" : "file";` — benchmark 2026-10-24 re-checked 2026-10-31 : 4 wrong blocks).
-const PHP_ECHO_CONST_TERNARY = /\b(?:echo|print)\s+\$_(?:GET|POST|REQUEST|COOKIE)\s*\[[^\]]*\]\s*(?:[=!]==?|[<>]=?)\s*(?:"[^"\n]*"|'[^'\n]*'|-?\d+)\s*\?\s*(?:"[^"\n]*"|'[^'\n]*'|-?\d+)\s*:\s*(?:"[^"\n]*"|'[^'\n]*'|-?\d+)\s*;/;
+// The comparison is optional : a bare truthiness test selects one of two literals too (`echo $_COOKIE["split"] ? '' :
+// ' style="display: none;"';` — evidence harvest v8, 2026-11-02 : 2 blind-labelled FP rows, Rapidleech).
+const PHP_ECHO_CONST_TERNARY = /\b(?:echo|print)\s+\$_(?:GET|POST|REQUEST|COOKIE)\s*\[[^\]]*\]\s*(?:(?:[=!]==?|[<>]=?)\s*(?:"[^"\n]*"|'[^'\n]*'|-?\d+)\s*)?\?\s*(?:"[^"\n]*"|'[^'\n]*'|-?\d+)\s*:\s*(?:"[^"\n]*"|'[^'\n]*'|-?\d+)\s*;/;
 const isComment = (l) => /^\s*(\/\/|\*|#|--|;|<!--)/.test(l);
 
 // ── Taint-pass vocabulary (fed to the shared runTaintPass engine) ────────────────────────────────────────────────
@@ -120,7 +122,25 @@ export function extractXss(text, importedWrappers, file) {
     }
   }
   for (const h of taintPass(lines, text, importedWrappers)) out.push(h);
-  return out;
+  return out.filter((h) => !heisenXssValueSafe(lines, h.line - 1));
+}
+
+// Value-flow exemptions (evidence harvests v7 / v8, 2026-11-02 — blind-labelled non-TP rows ; each keeps every TP) :
+// · the response is not HTML — a download attachment or a non-HTML Content-Type set within +-25 lines (an XSPF
+//   playlist served as an attachment, a test-fixture generator's download : 3 rows) ;
+// · the sink takes a CONSTANT table entry — `el.innerHTML = ICONS[verdict]` (the key selects static markup : 2 rows) ;
+// · a character-stripping sanitizer runs within +-25 lines — `.replace(/[<>"]/g, '')` (1 row).
+const HEISEN_NON_HTML_RESPONSE = /Content-Disposition['"]?\s*[,:]\s*['"]?\s*attachment|Content-Type['"]?\s*[,:]\s*['"]?\s*(?:text\/(?:xml|plain|csv)|application\/(?:xml|json|octet-stream|xspf))/i;
+const HEISEN_CONST_TABLE_SINK = /(?:innerHTML|outerHTML)\s*=\s*[A-Z][A-Z0-9_]{2,}\s*\[[^\]\n]*\]\s*;?\s*$/;
+const HEISEN_STRIP_CHARS = /\.replace\(\s*\/\[[^\]\n]*[<>][^\]\n]*\]\/g\s*,\s*['"]{2}\s*\)/;
+function heisenXssValueSafe(lines, i) {
+  if (HEISEN_CONST_TABLE_SINK.test(lines[i] ?? "")) return true;
+  for (let j = Math.max(0, i - 25); j <= Math.min(lines.length - 1, i + 25); j++) {
+    const l = lines[j] ?? "";
+    if (l.length > 4000) continue;
+    if (HEISEN_NON_HTML_RESPONSE.test(l) || HEISEN_STRIP_CHARS.test(l)) return true;
+  }
+  return false;
 }
 
 /** The XSS fingerprint for one file — locations + kinds, no source. `importedWrappers` enables cross-file. */
