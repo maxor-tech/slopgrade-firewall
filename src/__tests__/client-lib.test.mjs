@@ -62,6 +62,23 @@ test("runProPacks : file mode keeps only results that carry a list, manifest mod
   assert.equal(ran, 2 + 2 + 1);                                                                          // file(a,b) + manifest(2) + sql(1)
 });
 
+test("runProPacks : PRO_PREPARE runs once over the walked files and its ctx reaches every run ; a throw degrades to no ctx", () => {
+  const texts = { "/r/api/hook.php": "<?php verify($_GET['s']);", "/r/lib/sig.php": "<?php function verify($s) {}", "/r/yarn.lock": "x" };
+  const seen = [];
+  const pack = { fpField: "fileFingerprint", mode: "file", match: /\.php$/i, run: (t, f, ctx) => ({ file: f, hits: [{ line: 1, kind: ctx ? `ctx:${ctx.n}` : "none" }] }) };
+  const prepare = (iterate) => { let n = 0; for (const [r] of iterate()) { seen.push(r); n++; } return { n }; };
+  const read = (f) => texts[f], rel = (f) => f.slice(3);
+  const { wire, errors } = runProPacks([pack], Object.keys(texts), { read, rel, prepare });
+  assert.deepEqual(seen, ["api/hook.php", "lib/sig.php"]);   // lockfile skipped, read once per prepare
+  assert.equal(errors, 0);
+  assert.deepEqual(wire.fileFingerprint.files.map((f) => f.hits[0].kind), ["ctx:2", "ctx:2"]);
+  const boom = runProPacks([pack], Object.keys(texts), { read, rel, prepare: () => { throw new Error("x"); } });
+  assert.equal(boom.errors, 1);
+  assert.deepEqual(boom.wire.fileFingerprint.files.map((f) => f.hits[0].kind), ["none", "none"]);
+  const none = runProPacks([pack], Object.keys(texts), { read, rel });   // an older bundle : no PRO_PREPARE
+  assert.deepEqual(none.wire.fileFingerprint.files.map((f) => f.hits[0].kind), ["none", "none"]);
+});
+
 test("validProBundleResponse : accepts a bounded, hashed, well-formed response and refuses everything else", () => {
   const sha = (s) => (s === "bundle" ? "f".repeat(64) : "0".repeat(64));
   const good = { ok: true, version: "v1", sha256: "f".repeat(64), packs: ["dotnetSqliFingerprint"], bundle: "bundle" };
