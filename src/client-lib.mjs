@@ -304,12 +304,27 @@ export function verifyBundleSig(bundle, sigB64, pubkeyPem, verifyImpl = edVerify
  * @returns {{ wire: Record<string, object>, errors: number, ran: number }}
  */
 const PRO_SKIP_FILE = /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|poetry\.lock|Pipfile\.lock|composer\.lock|Gemfile\.lock|go\.sum|flake\.lock)$/i;
-export function runProPacks(packs, files, { read, rel }) {
+export function runProPacks(packs, files, { read, rel, prepare }) {
   const wire = {};
   let errors = 0, ran = 0, sqlAll = "";
   const list = Array.isArray(packs) ? packs.filter((p) => p && typeof p.fpField === "string" && typeof p.run === "function") : [];
   const sqlPacks = list.filter((p) => p.mode === "sql");
   const filePacks = list.filter((p) => p.mode !== "sql" && p.match instanceof RegExp);
+  // PRO_PREPARE (optional) : a per-repo pre-pass over the same files, run once before the per-file packs. Its result is
+  // the `ctx` each pack's run(text, file, ctx) receives (e.g. which functions a request handler calls). It stays in the
+  // runner ; only the packs' fingerprints leave. A bundle without it, or a throwing one, runs every pack with no ctx.
+  let ctx;
+  if (typeof prepare === "function") {
+    const entries = function* () {
+      for (const f of files) {
+        const r = rel(f);
+        if (PRO_SKIP_FILE.test(r)) continue;
+        let t; try { t = read(f); } catch { continue; }
+        if (typeof t === "string" && t.length <= MAX_PRO_FILE_CHARS) yield [r, t];
+      }
+    };
+    try { ctx = prepare(() => entries()); } catch { errors++; ctx = undefined; }
+  }
   for (const f of files) {
     const r = rel(f);
     if (PRO_SKIP_FILE.test(r)) continue; // lockfiles / generated manifests : never product code, often huge
@@ -318,7 +333,7 @@ export function runProPacks(packs, files, { read, rel }) {
     if (sqlPacks.length && /\.sql$/i.test(r)) sqlAll += t + "\n";
     for (const p of filePacks) {
       if (!p.match.test(r)) continue;
-      let o; try { o = p.run(t, r); ran++; } catch { errors++; continue; }
+      let o; try { o = p.run(t, r, ctx); ran++; } catch { errors++; continue; }
       if (!o || typeof o !== "object") continue;
       if (p.mode === "manifest") {
         const deps = Array.isArray(o.deps) ? o.deps : [];

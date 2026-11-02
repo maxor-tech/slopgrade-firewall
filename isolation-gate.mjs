@@ -181,7 +181,8 @@ async function loadProPacks(origin, oidcToken, root, rel, isIgnored = () => fals
   const packs = Array.isArray(mod?.PRO_PACKS) ? mod.PRO_PACKS : [];
   // The pro walk set adds the infra formats (yaml/tf/json/Dockerfile…) the free CODE_EXTS walk never reads.
   const proFiles = (mod?.PRO_WALK_EXTS instanceof RegExp ? walk(root, mod.PRO_WALK_EXTS) : walk(root, CODE_EXTS)).filter((f) => !isIgnored(rel(f)));
-  const { wire, errors } = runProPacks(packs, proFiles, { read: (f) => readFileSync(f, "utf8"), rel });
+  const prepare = typeof mod?.PRO_PREPARE === "function" ? mod.PRO_PREPARE : undefined;   // per-repo pre-pass (optional)
+  const { wire, errors } = runProPacks(packs, proFiles, { read: (f) => readFileSync(f, "utf8"), rel, prepare });
   if (errors > 0) ghWarn(`${errors} pro extractor call(s) threw and were skipped.`);
   return { wire: sanitizeProFingerprints(wire), packCount: packs.length, version: String(j.version), note: ` (paid · pro extractors ${sanitizeLogLine(String(j.version), 40)})` };
 }

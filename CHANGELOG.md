@@ -10,6 +10,10 @@ All notable changes to the open-source slopGrade Firewall client are documented 
   argparse values, `process.argv`, `os.Args`, `ARGV`) and / or queue payloads (SQS / Lambda records, Kafka / RabbitMQ /
   Pub-Sub message bodies) untrusted for the injection checks of THIS repo. Off by default : a CLI tool runs with its own
   user's privileges. The run log names what was turned on.
+- **Per-repo pre-pass for the paid packs** : when the paid bundle exports `PRO_PREPARE`, the client runs it once over
+  the walked files and passes its result to each paid pack. It runs in your CI and nothing new leaves the runner. The
+  timing-comparison pack uses it to check whether a request handler calls the function. A bundle without it, or a
+  pre-pass that throws, runs every pack as before.
 
 ### Fixed
 - Found by the second independent test set (v2, 600 other unseen repos, labelled blind) :
