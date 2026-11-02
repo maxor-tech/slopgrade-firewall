@@ -99,11 +99,11 @@ test("badges, images, HTML and code fences do not make the title", () => {
 });
 
 // ── flag, override, base branch ─────────────────────────────────────────────────────────────────────────────────────
-test("SLOPGRADE_PURPOSE_CLASSIFIER : default off, on / 1 / true / yes enable", () => {
-  assert.equal(purposeEnabled({}), false);
-  assert.equal(purposeEnabled(undefined), false);
-  for (const v of ["on", "ON", "1", "true", "yes"]) assert.equal(purposeEnabled({ SLOPGRADE_PURPOSE_CLASSIFIER: v }), true, v);
-  for (const v of ["off", "0", "false", "no", "maybe"]) assert.equal(purposeEnabled({ SLOPGRADE_PURPOSE_CLASSIFIER: v }), false, v);
+test("SLOPGRADE_PURPOSE_CLASSIFIER : default ON (2026-11-02), off / 0 / false / no disable", () => {
+  assert.equal(purposeEnabled({}), true);
+  assert.equal(purposeEnabled(undefined), true);
+  for (const v of ["on", "ON", "1", "true", "yes", "maybe"]) assert.equal(purposeEnabled({ SLOPGRADE_PURPOSE_CLASSIFIER: v }), true, v);
+  for (const v of ["off", "OFF", "0", "false", "no"]) assert.equal(purposeEnabled({ SLOPGRADE_PURPOSE_CLASSIFIER: v }), false, v);
 });
 
 test("flag off → decidePurpose never reads a file and answers product", () => {
@@ -240,12 +240,13 @@ test("e2e : SLOPGRADE_PURPOSE_CLASSIFIER=off keeps blocking on", async () => {
 });
 
 // Default OFF (2026-10-24 held-out benchmark below the DoD) : with no env, a course repo still blocks, silently.
-test("e2e : no SLOPGRADE_PURPOSE_CLASSIFIER → classifier off, a course repo keeps blocking", async () => {
+test("e2e : no SLOPGRADE_PURPOSE_CLASSIFIER → classifier ON by default (2026-11-02), a course repo's pack block is advisory", async () => {
   const ws = workspace(COURSE);
   const r = await run(ws, CI(ws));
-  assert.equal(r.code, 1);
-  assert.match(r.text, /::error file=api\.ts,line=3/);
-  assert.doesNotMatch(r.text, /findings are advisory/);
+  assert.equal(r.code, 0);
+  assert.match(r.text, /::warning file=api\.ts,line=3,title=slopGrade Firewall::\[concat-sql\]/);
+  assert.doesNotMatch(r.text, /::error file=/);
+  assert.match(r.text, /findings are advisory/);
 });
 
 test("e2e : cross-tenant hard leaks still block in a course repo", async () => {

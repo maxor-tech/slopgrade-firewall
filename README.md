@@ -307,7 +307,7 @@ slopGrade Firewall: this repo reads as a teaching repository (README title "Node
 The decision is local and deterministic (no network): README title and first paragraph, `package.json` / `pyproject.toml` / `composer.json` description and keywords, top-level directory names (`week-1`, `lesson_01`, `exercises/`, `payloads/`…) and the repository name. One strong signal (title, first paragraph) or two weaker ones are needed; a library that only links a tutorial stays a product. Cross-tenant hard leaks are **never** affected.
 
 - **Override** — put `purpose: product` in `.slopgrade.yml` at the repo root to keep blocking on.
-- **Opt-in** — `SLOPGRADE_PURPOSE_CLASSIFIER=on` in the step `env:` enables the classifier (default `off` while it is calibrated).
+- **On by default** — `SLOPGRADE_PURPOSE_CLASSIFIER=off` in the step `env:` turns the classifier off (then every repo is a product).
 - **A pull request cannot reclassify its own repo:** on a `pull_request` run the README, manifests, directory list and `.slopgrade.yml` are read from the **base branch** (`origin/<base>`, needs `fetch-depth: 0`), like `.slopgradeignore`. An unreadable base means `product` (blocking unchanged).
 - **Threat note** — a product can still dodge the gate by merging a course-like README to its default branch. That change is a visible commit on the base branch, and every demoted run prints the classification and the override line. The classifier only lowers pack and Deep Scan *blocks*; findings stay in the log, the PR review and the Security tab.
 

@@ -15,8 +15,10 @@
 // rewrites its own README cannot make its own findings advisory ; the change applies once it is merged.
 //
 // OVERRIDE: `purpose: product` in `.slopgrade.yml` (base-branch read) turns blocking back on for a repo that reads as
-// non-product. FLAG: env SLOPGRADE_PURPOSE_CLASSIFIER=on enables it — default OFF until the held-out benchmark passes
-// (2026-10-24 held-out : static PR precision 16.1 % → 15.4 %, Deep Scan 19.1 % → 20.5 % ; the DoD asks +3 points).
+// non-product. FLAG: env SLOPGRADE_PURPOSE_CLASSIFIER — default ON since 2026-11-02 (owner decision) ; `off` / `0` /
+// `false` / `no` disables it. Measured on the blind-labelled blocking rows (bench/independent v1-v12) : it lifts xss
+// 52/87 → 51/73 (13 of the 14 rows it removes were not true positives) ; on timingUnsafeCompare it removes 10 rows,
+// 3 of them true positives. (2026-10-24 held-out on the pre-evidence-gate verdict : 16.1 % → 15.4 %.)
 
 export const PURPOSE_FILE = ".slopgrade.yml";
 export const PURPOSE_THRESHOLD = 2;
@@ -236,10 +238,10 @@ function describe(used) {
   return parts.slice(0, 3).map((p) => (bySrc.has(p) ? `${p} mentions ${bySrc.get(p).join(", ")}` : p)).join("; ");
 }
 
-/** Flag : default off ; `on` / `1` / `true` / `yes` enables the classifier (otherwise every repo stays a product). */
+/** Flag : default ON ; `off` / `0` / `false` / `no` disables the classifier (then every repo stays a product). */
 export function purposeEnabled(env) {
-  const v = String((env && env.SLOPGRADE_PURPOSE_CLASSIFIER) ?? "off").trim().toLowerCase();
-  return v === "on" || v === "1" || v === "true" || v === "yes";
+  const v = String((env && env.SLOPGRADE_PURPOSE_CLASSIFIER) ?? "on").trim().toLowerCase();
+  return !(v === "off" || v === "0" || v === "false" || v === "no");
 }
 
 /** `purpose: product` in .slopgrade.yml (a comment or any other value is ignored). Pure. */
@@ -269,7 +271,7 @@ export function readPurposeInputs(env, git, readFile, listDirs) {
 
 /** The decision for one run : { purpose, why, source, override, enabled }. Pure over the injected readers. */
 export function decidePurpose(env, git, readFile, listDirs) {
-  if (!purposeEnabled(env)) return { purpose: "product", why: "classifier off (set SLOPGRADE_PURPOSE_CLASSIFIER=on to enable)", source: "off", override: false, enabled: false };
+  if (!purposeEnabled(env)) return { purpose: "product", why: "classifier off (SLOPGRADE_PURPOSE_CLASSIFIER=off)", source: "off", override: false, enabled: false };
   const { read, dirs, source } = readPurposeInputs(env, git, readFile, listDirs);
   const detected = repoPurpose(read, dirs, { name: env.GITHUB_REPOSITORY || "" });
   if (detected.purpose !== "product" && parsePurposeOverride(read(PURPOSE_FILE))) {
