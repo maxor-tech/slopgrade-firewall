@@ -113,11 +113,17 @@ function taintPass(lines, text, importedWrappers) {
   });
 }
 
+// The path an upload middleware STORED the file at (multer `req.file.path`, `req.files[0].path`, `.destination`) is
+// chosen by the server, not the client — reading it back is not traversal (independent set v4, 2026-11-01 : 2 blocking
+// FP rows, LibreChat avatar + assistants uploads). `req.file.originalname` stays a source. Path traversal only : the
+// shared FRAMEWORK_SOURCE keeps `req.file` for the packs where the client-chosen fields matter.
+const HEISEN_STORED_UPLOAD = /\breq\s*\.\s*files?\b(?:\s*\[[^\]]*\]|\s*\.\s*[A-Za-z_$][\w$]*)?(?:\s*\[[^\]]*\])?\s*\.\s*(?:path|destination)\b/g;
+
 /** Scan one file → [{line, kind}]. Direct regex + path-traversal taint. Source line NEVER leaves this function. */
 export function extractPathTraversal(text, importedWrappers, file) {
   const out = [];
   if (isPackedSource(text) || isDecompiledSource(text, file)) return out;   // a vendored / packed build, or decompiler output (lang-scope.mjs)
-  const lines = logicalLines(String(text).split(/\r?\n/));   // statements broken across lines read whole (lang-scope.mjs)
+  const lines = logicalLines(String(text).split(/\r?\n/)).map((l) => l.replace(HEISEN_STORED_UPLOAD, "heisenStoredUpload"));   // statements read whole ; stored upload paths neutral
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (l.length > 4000) continue;   // minified blob — noise
