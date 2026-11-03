@@ -5,6 +5,16 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.13.3] — 2026-11-03
+
+### Fixed
+- **`library-mode: auto` no longer explains itself on application repos** : since 0.13.1 the default turned library mode on
+  for every paid run, so every application repo read « library mode requested, but this repo looks like an application »
+  (seen live on slopgrade#1612). Under the `"auto"` default (`--library-mode-auto`) an application now hears nothing ;
+  an explicit `library-mode: "true"` still prints the explanation. Same for `change-review: auto` on a push run : no more
+  « change review: not a pull request run — nothing reviewed » on every push (`--change-review-auto`) ; a pull request
+  whose base git cannot diff still says so.
+
 ## [0.13.2] — 2026-11-03
 
 ### Added
