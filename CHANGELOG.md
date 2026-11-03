@@ -23,6 +23,9 @@ All notable changes to the open-source slopGrade Firewall client are documented 
   pre-pass that throws, runs every pack as before.
 
 ### Fixed
+- **Path traversal** : a value returned by a helper in the same file whose body sanitizes or contains the path
+  (basename / realpath + startswith / commonpath / a `..` check) is no longer a traversal source ; a helper that only
+  joins keeps the taint (mirror of maxor-tech/slopgrade#1604).
 - **XSS value flow** : a superglobal that only selects one of two literals, `innerHTML` from a constant table entry, a
   response that is not HTML (attachment, XML, JSON, plain text) and an inline `<>"` strip no longer count as an HTML sink
   (blind-labelled evidence harvests v7 / v8, 2026-11-02 ; mirror of maxor-tech/slopgrade#1599).
