@@ -187,6 +187,12 @@ async function loadProPacks(origin, oidcToken, root, rel, isIgnored = () => fals
   return { wire: sanitizeProFingerprints(wire), packCount: packs.length, version: String(j.version), note: ` (paid · pro extractors ${sanitizeLogLine(String(j.version), 40)})` };
 }
 
+/** The one line a PAID repo reads when the deep scan runs by default (deep-scan: "auto"): what leaves, and the opt-out. */
+export const DEEP_AUTO_NOTICE = (files, hunks) =>
+  `deep scan is on by default for this paid repo: the source of ${files} sink-bearing file(s)`
+  + `${hunks ? ` and ${hunks} PR hunk(s)` : ""} is sent to slopGrade's hosted engine (never stored). `
+  + `To keep all source in the runner, set deep-scan: "false".`;
+
 const HELP = `slopGrade Firewall — CI leak detection (free tier: 10 flagship classes · paid repos: the full catalogue, extracted in your runner)
 Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <path>] [--deep-scan [--deep-scan-block] [--block-confidence] [--library-mode] [--change-review]] [--help]
   --gate           block (exit 1) on a reliable hard leak in an entitled repo (default: advisory, never blocks) ;
@@ -196,6 +202,8 @@ Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <p
   --sarif <path>   also write a SARIF report of the leaks (upload with github/codeql-action/upload-sarif)
   --deep-scan      OPT-IN, paid repos: ALSO send the SOURCE of the sink-bearing files (≤ 80) to the hosted taint engine
                    (heisen). The only mode where code leaves the runner; --print-payload lists the files. Advisory.
+  --deep-scan-auto  with --deep-scan: the Action default (deep-scan: "auto"). Source is sent only when the server's
+                   verdict says the repo is PAID (as with --deep-scan) ; a free or public repo prints nothing about it.
   --deep-scan-block  OPT-IN, with --deep-scan and --gate: a NEW deep-scan finding (one no pack reported) BLOCKS the build.
   --block-confidence  OPT-IN, default OFF: send three repository aggregates with --deep-scan; valid advisory scores
                    below the engine threshold stay warnings. Missing or malformed metadata keeps existing blocking.
@@ -209,7 +217,7 @@ Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <p
                    per hunk; on real CVE-introducing commits, 19% of commits flagged vs 2.1% of ordinary commits.
   --help           show this help
 Exit codes: 1 only on a gate-blocked verdict (or --strict with no verdict); 0 otherwise (fail open).`;
-const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-block", "--block-confidence", "--library-mode", "--change-review", "--no-fix"]);
+const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-auto", "--deep-scan-block", "--block-confidence", "--library-mode", "--change-review", "--no-fix"]);
 
 export async function main(argv = [], env = process.env) {
   if (argv.includes("--help")) { console.log(HELP); return 0; }
@@ -220,6 +228,9 @@ export async function main(argv = [], env = process.env) {
   const strict = argv.includes("--strict");
   const printPayload = argv.includes("--print-payload");
   const deepScan = argv.includes("--deep-scan");
+  // The Action default (deep-scan: "auto", 0.13.1): on for a PAID repo, silent for every other one — a free repo would
+  // otherwise read « deep scan is a paid feature » on every run of a default it never chose.
+  const deepAuto = deepScan && argv.includes("--deep-scan-auto");
   const deepBlock = deepScan && argv.includes("--deep-scan-block");
   const blockConfidence = deepScan && argv.includes("--block-confidence");
   const libraryMode = deepScan && argv.includes("--library-mode");
@@ -380,9 +391,9 @@ export async function main(argv = [], env = process.env) {
     () => { try { return readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith(".")).map((e) => e.name); } catch { return []; } }) : null;
   // Change review (0.10.13): the PR's own diff hunks, read locally like the ranges — listed by --print-payload too.
   const change = changeReview ? prHunks(env, prEvent, git) : null;
-  const deepAudit = deep ? { deepScan: { note: "SOURCE of these files is sent (opt-in --deep-scan) — only when the server confirms this repo is paid", files: deep.units.map((u) => u.path), chars: deep.chars, skipped: deep.skipped, fromPr: deep.fromPr, scopedToPrLines: deep.scoped, ...(libKind ? { libraryMode: libKind.kind === "library", repoKind: libKind.why } : {}),
+  const deepAudit = deep ? { deepScan: { note: "SOURCE of these files is sent (--deep-scan ; the Action default \"auto\") — only when the server confirms this repo is paid", files: deep.units.map((u) => u.path), chars: deep.chars, skipped: deep.skipped, fromPr: deep.fromPr, scopedToPrLines: deep.scoped, ...(libKind ? { libraryMode: libKind.kind === "library", repoKind: libKind.why } : {}),
     ...(repoAggregates ? { blockConfidence: repoAggregates } : {}),
-    ...(change ? { changeReview: { note: "these PR hunks (changed lines + 3 lines of context) are sent (opt-in --change-review)", hunks: change.hunks.map((h) => `${h.path}:${h.newStart}`), skipped: change.skipped } } : {}) } } : {};
+    ...(change ? { changeReview: { note: "these PR hunks (changed lines + 3 lines of context) are sent (--change-review ; the Action default \"auto\", paid repos only)", hunks: change.hunks.map((h) => `${h.path}:${h.newStart}`), skipped: change.skipped } } : {}) } } : {};
 
   // 2. EXFILTRATION guard — a custom origin would mint a token for an attacker audience. Run DRY unless opted in.
   const { origin, blocked } = resolveOrigin(env);
@@ -460,12 +471,14 @@ export async function main(argv = [], env = process.env) {
   //     only ever comes from it. Fail-open on every path: a deep-scan hiccup never touches the verdict above.
   let deepRows = [], deepLine = null, deepBlocking = 0, libRows = [], libOutcomes = null, libRanked = false, changeBlock = null;
   if (deep) {
-    if (origin !== DEFAULT_ORIGIN) ghWarn("deep scan skipped — source is only ever sent to the canonical slopGrade origin.");
+    if (origin !== DEFAULT_ORIGIN) { if (!deepAuto) ghWarn("deep scan skipped — source is only ever sent to the canonical slopGrade origin."); }
     // Source leaves the runner ONLY for a paid repo. Before 0.10.12 a free or public repo with the option on uploaded its
     // files and got 402 after the fact; the verdict above already says the plan, so nothing is sent unless it is paid.
-    else if (!paid) ghWarn(`deep scan is a paid feature — no source was sent. Enable it: ${origin}/ci`);
+    // Under the "auto" default a non-paid repo never chose the option, so it hears nothing (no warning on every run).
+    else if (!paid) { if (!deepAuto) ghWarn(`deep scan is a paid feature — no source was sent. Enable it: ${origin}/ci`); }
     else if (!deep.units.length) deepLine = "no sink-bearing file in an engine-modelled language — nothing sent.";
     else {
+      if (deepAuto) console.log(`::notice title=slopGrade Firewall::${sanitizeLogLine(DEEP_AUTO_NOTICE(deep.units.length, change?.hunks.length ?? 0))}`);
       const post = (url, body) => timedFetch(url, { method: "POST", headers: { "content-type": "application/json" }, body });
       const r = await requestDeepScan(post, origin, oidcToken, sha, deep.units, libKind?.kind === "library", change?.hunks ?? [], repoAggregates);
       if (r.state === "plan-required") ghWarn(`deep scan is a paid feature — no source was analysed. Enable it: ${origin}/ci`);

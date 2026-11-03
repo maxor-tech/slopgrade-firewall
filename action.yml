@@ -24,17 +24,17 @@ inputs:
     required: false
     default: ""
   deep-scan:
-    description: "OPT-IN, paid repos (default false). ALSO sends the SOURCE of the files where a security sink was found (at most 80 files / 2M chars) to slopGrade's hosted taint engine (heisen), which reports proven request→sink flows (injection, SSRF, path traversal, XSS…). The only mode in which code leaves the runner — the default run never sends source. Forwarded then dropped server-side (never logged, never stored). Advisory: findings annotate as warnings, never fail the check. Run with --print-payload to list the files first."
+    description: "DEFAULT \"auto\" (0.13.1): on for PAID repos, off and silent for free and public repos. \"true\" = on and warn when the repo is not paid ; \"false\" = never send source. ALSO sends the SOURCE of the files where a security sink was found (at most 80 files / 2M chars) to slopGrade's hosted taint engine (heisen), which reports proven request→sink flows (injection, SSRF, path traversal, XSS…). The only mode in which code leaves the runner — a free or public repo never sends source. Forwarded then dropped server-side (never logged, never stored). Advisory: findings annotate as warnings, never fail the check. Run with --print-payload to list the files first."
     required: false
-    default: "false"
+    default: "auto"
   library-mode:
-    description: "OPT-IN (default false; needs deep-scan: \"true\"). For a repo that is a PUBLISHED PACKAGE (detected from package.json / pyproject / setup.py — applications are never affected), also list the taint engine's library-tier candidates — a public function's parameter reaching a sink — as notices to triage. Not proven findings, never blocking: on real CVEs it lifts paired recall from ~1% to ~6-9%, but about 2 in 3 candidates remain after the fix."
+    description: "DEFAULT \"auto\" (0.13.1: on whenever the deep scan runs; \"false\" turns it off). For a repo that is a PUBLISHED PACKAGE (detected from package.json / pyproject / setup.py — applications are never affected), also list the taint engine's library-tier candidates — a public function's parameter reaching a sink — as notices to triage. Not proven findings, never blocking: on real CVEs it lifts paired recall from ~1% to ~6-9%, but about 2 in 3 candidates remain after the fix."
     required: false
-    default: "false"
+    default: "auto"
   change-review:
-    description: "OPT-IN (default false; needs deep-scan: \"true\", pull requests only). ALSO sends the PR's diff hunks (the changed lines + 3 lines of context, at most 64; a new file or a hunk over 40 lines is cut into 40-line windows) to heisen-slop's diff-reading 55M, which lists the changes likely to WEAKEN security — most often a validation check removed, which no taint engine sees. Notices to triage, never blocking. Measured once on held-out real CVEs: 36% of security fixes undone (a check removed) caught at 0.23% false alarms per hunk, and on the commits that really introduced 5,468 CVEs, 19% of commits flagged vs 2.1% of ordinary commits (two detectors served together: removed checks + new vulnerable code). C files (.c/.h; .h is read as C) are read too, scored by a C-only detector: on held-out real C CVE advisories at this 64-hunk cut, the commit that introduced the bug got a notice in 17.3% (on the buggy hunk in 3.3%), vs 2.2% (180 of 8,196) of ordinary C commits. C++ files (.cpp/.cc/.cxx/.hpp/.hh) are read too, scored by a C++-only detector: on unseen C++ CVE advisories, 11.3% (18 of 159) got a notice, vs 1.8% (48 of 2,652) of ordinary C++ commits. Rust files (.rs) are read too, also scored by a Rust-only detector: on unseen Rust CVE advisories, 10% (22 of 214) got a notice, vs 1.8% (108 of 6,107) of ordinary Rust commits. Same rules as deep-scan: paid repos only, canonical origin only, listed by --print-payload."
+    description: "DEFAULT \"auto\" (0.13.1: on whenever the deep scan runs, pull requests only; \"false\" turns it off). ALSO sends the PR's diff hunks (the changed lines + 3 lines of context, at most 64; a new file or a hunk over 40 lines is cut into 40-line windows) to heisen-slop's diff-reading 55M, which lists the changes likely to WEAKEN security — most often a validation check removed, which no taint engine sees. Notices to triage, never blocking. Measured once on held-out real CVEs: 36% of security fixes undone (a check removed) caught at 0.23% false alarms per hunk, and on the commits that really introduced 5,468 CVEs, 19% of commits flagged vs 2.1% of ordinary commits (two detectors served together: removed checks + new vulnerable code). C files (.c/.h; .h is read as C) are read too, scored by a C-only detector: on held-out real C CVE advisories at this 64-hunk cut, the commit that introduced the bug got a notice in 17.3% (on the buggy hunk in 3.3%), vs 2.2% (180 of 8,196) of ordinary C commits. C++ files (.cpp/.cc/.cxx/.hpp/.hh) are read too, scored by a C++-only detector: on unseen C++ CVE advisories, 11.3% (18 of 159) got a notice, vs 1.8% (48 of 2,652) of ordinary C++ commits. Rust files (.rs) are read too, also scored by a Rust-only detector: on unseen Rust CVE advisories, 10% (22 of 214) got a notice, vs 1.8% (108 of 6,107) of ordinary Rust commits. Same rules as deep-scan: paid repos only, canonical origin only, listed by --print-payload."
     required: false
-    default: "false"
+    default: "auto"
   deep-scan-block:
     description: "OPT-IN (default false; needs deep-scan: \"true\" and firewall-mode: gate). A NEW deep-scan finding — one no detector pack reported — BLOCKS the check instead of annotating a warning. Measured block precision of the taint engine: ~94% on labeled benchmark code, but at least 78% (25 of 32) on real-world CVE code (about 1 false block in 4-5, mostly project-specific validators it does not recognise); on 52,089 ordinary open-source pull requests it blocked 245, 46 of them for a real flaw — so it stays off unless you choose it."
     required: false
@@ -120,9 +120,15 @@ runs:
         [ "${FW_STRICT}" = "true" ] && ARGS+=(--strict)
         [ -n "${FW_SARIF}" ] && ARGS+=(--sarif "${FW_SARIF}")
         [ "${FW_DEEP_SCAN}" = "true" ] && ARGS+=(--deep-scan)
+        # "auto" (the default since 0.13.1) = on for a PAID repo, silent elsewhere ; the CLI sends source only on a paid
+        # verdict either way. library-mode / change-review "auto" follow the deep scan, so "deep-scan: false" never
+        # prints a « has no effect » warning for a default the user never set.
+        [ "${FW_DEEP_SCAN}" = "auto" ] && ARGS+=(--deep-scan --deep-scan-auto)
         [ "${FW_DEEP_SCAN_BLOCK}" = "true" ] && ARGS+=(--deep-scan-block)
         [ "${FW_BLOCK_CONFIDENCE}" = "true" ] && ARGS+=(--block-confidence)
         [ "${FW_LIBRARY_MODE}" = "true" ] && ARGS+=(--library-mode)
+        [ "${FW_LIBRARY_MODE}" = "auto" ] && [ "${FW_DEEP_SCAN}" != "false" ] && ARGS+=(--library-mode)
         [ "${FW_CHANGE_REVIEW}" = "true" ] && ARGS+=(--change-review)
+        [ "${FW_CHANGE_REVIEW}" = "auto" ] && [ "${FW_DEEP_SCAN}" != "false" ] && ARGS+=(--change-review)
         [ "${FW_FIX}" = "off" ] && ARGS+=(--no-fix)
         node "$FW_CLI" "${ARGS[@]}"
