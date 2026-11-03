@@ -6,6 +6,13 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 ## [Unreleased]
 
 ### Changed
+- **Deep scan on by default for paid repos** : `deep-scan`, `change-review` and `library-mode` default to `"auto"`.
+  On a **paid** repo the Action now sends the source of the sink-bearing files and the PR's diff hunks to the hosted
+  engine (taint engine + the diff-reading 55M), and says so in the log on every run (`--deep-scan-auto`). A free or
+  public repo sends nothing and prints nothing about it, exactly as before. Why : the static packs catch almost no real
+  CVE code (0 paired blocks on the 8,277 of 8,669 OSV real-CVE pairs that are not PHP superglobal reads) ; the diff reviewer flags
+  19 % of real CVE-introducing commits vs 2.1 % of ordinary commits. All three stay notices, never blocking
+  (`deep-scan-block` is still opt-in). Opt out with `deep-scan: "false"` ; `"true"` keeps the old explicit mode.
 - **Repo-purpose classifier on by default** : in a course, lab, CTF, webshell or offensive-tool repo, pack and Deep
   Scan blocks become advisory annotations (the reason is printed in the log; cross-tenant leaks still block).
   Measured on the blind-labelled blocking rows : xss 52/87 → 51/73, 13 of the 14 removed rows were not true positives.
