@@ -112,6 +112,48 @@ function heisenLoadedThroughCall(rhs, text = "", taintedNames = []) {
   return MEMBER_TAIL.test(rhs.slice(k + 1));
 }
 
+// ── Sanitizer summaries (P1, docs/FIREWALL-DATAFLOW-PATH-SSRF-PLAN.md) ─────────────────────────────────────────────
+// A same-file helper keeps the taint (definedHere above) because helpers usually BUILD the path. A helper whose BODY
+// sanitizes or contains the path is the opposite : its result is safe. Body = a sanitizer call (PATH_SANITIZE) or a
+// containment guard — `startswith` / `startsWith` / `commonpath` / `is_relative_to` / `relative_to` / a `..` test.
+const HEISEN_CONTAINMENT = /\.\s*(?:startswith|startsWith)\s*\(|\bcommonpath\s*\(|\.\s*(?:is_relative_to|relative_to)\s*\(|['"]\.\.['"]\s*(?:in|===?|!==?)|(?:includes|indexOf|contains)\s*\(\s*['"]\.\.['"]/;
+/** The body of the function `name` defined in this file (Python indent block / JS braces), or null. */
+function heisenFunctionBody(name, text) {
+  const n = name.replace(/[$]/g, "\\$");
+  const lines = String(text).split(/\r?\n/);
+  const py = new RegExp(`^(\\s*)(?:async\\s+)?def\\s+${n}\\s*\\(`);
+  const js = new RegExp(`(?:\\bfunction\\s*\\*?\\s*${n}\\s*\\(|\\b(?:const|let|var)\\s+${n}\\s*=\\s*(?:async\\s*)?(?:function\\b|\\([^)]*\\)\\s*=>|[A-Za-z_$][\\w$]*\\s*=>)|^\\s*(?:(?:public|private|protected|static|async)\\s+)*${n}\\s*\\([^)]*\\)\\s*\\{)`);
+  for (let i = 0; i < lines.length; i++) {
+    const p = py.exec(lines[i]);
+    if (p) {
+      const indent = p[1].length, body = [];
+      for (let j = i + 1; j < lines.length && j < i + 200; j++) {
+        if (lines[j].trim() && lines[j].match(/^(\s*)/)[1].length <= indent) break;
+        body.push(lines[j]);
+      }
+      return body.join("\n");
+    }
+    if (js.test(lines[i])) {
+      let depth = 0, started = false; const body = [];
+      for (let j = i; j < lines.length && j < i + 200; j++) {
+        body.push(lines[j]);
+        for (const ch of lines[j]) { if (ch === "{") { depth++; started = true; } else if (ch === "}") depth--; }
+        if (started && depth <= 0) break;
+        if (!started && j > i && /=>\s*[^{\s]/.test(lines[i])) break;   // expression-bodied arrow : one line
+      }
+      return body.join("\n");
+    }
+  }
+  return null;
+}
+/** The RHS is one call to a same-file helper whose body sanitizes / contains the path. */
+function heisenLocalSanitizer(rhs, text) {
+  const m = /^\s*(?:await\s+)?(?:(?:self|this|cls)\.)?([A-Za-z_$][\w$]*)\s*\(/.exec(rhs);
+  if (!m || !definedHere(m[1], text)) return false;
+  const body = heisenFunctionBody(m[1], text);
+  return body !== null && (PATH_SANITIZE.test(body) || HEISEN_CONTAINMENT.test(body));
+}
+
 /** Path-traversal taint pass — intra-function + inter-procedural + cross-file (a file-sink wrapper imported from another module). */
 function taintPass(lines, text, importedWrappers) {
   const wrappers = HAS_SINK.test(text)
@@ -143,6 +185,8 @@ function taintPass(lines, text, importedWrappers) {
       // carries the taint (independent sets v4 + v5, 2026-11-02 : frigate, chatchat, omlx x2, stf ; the main false class of
       // the 5,300-repo tree sweep too). An inline request source on the RHS still taints.
       if (!hasSource && hasTaintVar && heisenLoadedThroughCall(rhs, text, [...taint.keys()])) { taint.delete(name); return; }
+      // a same-file helper whose body sanitizes / contains the path returns a safe value (sanitizer summary, P1)
+      if ((hasSource || hasTaintVar) && heisenLocalSanitizer(rhs, text)) { taint.delete(name); return; }
       if ((hasSource || hasTaintVar) && !HASHED.test(rhs)) taint.set(name, "t");
       else taint.delete(name);
     },

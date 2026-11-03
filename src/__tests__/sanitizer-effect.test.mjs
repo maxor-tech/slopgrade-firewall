@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { extractXss } from "../xss-extract.mjs";
 import { extractSqli } from "../sqli-extract.mjs";
 import { extractSsrf } from "../ssrf-extract.mjs";
+import { extractPathTraversal } from "../pathtraversal-extract.mjs";
 
 const n = (hits) => hits.length;
 const xss = (body) => n(extractXss(`app.get('/x', (req, res) => {\n  const h = req.query.h;\n${body}\n});`, new Map(), "x.js"));
@@ -55,4 +56,14 @@ test("value flow : constant ternary, constant table, non-HTML response, inline s
   const strip = (s) => "function px(div, Xt_i) {\n  var Xt_r = document.referrer;\n  div.innerHTML = Xt_i + '&ref=' + Xt_r" + s + " + '\" title=\"x\">';\n}\n";
   assert.deepEqual(L(strip(".replace(/[<>\"]/g, '')"), "s.js"), []);
   assert.deepEqual(L(strip(""), "s.js"), [3]);
+});
+
+// Path-traversal sanitizer summaries (2026-11-02, mirror of maxor-tech/slopgrade#1604) : a same-file helper whose BODY
+// contains the path cleans its result ; a helper that only joins keeps the taint.
+test("path : a containing helper cleans its result ; a plain joiner keeps the taint", () => {
+  const L = (c, f) => extractPathTraversal(c, new Map(), f).map((h) => h.line);
+  const safe = ["function getFilename(name) {", "  if (name.includes('..')) throw new Error('bad');", "  return path.join(DIR, name);", "}",
+    "app.get('/s', (req, res) => {", "  const filename = getFilename(req.query.name);", "  fs.unlink(path.join(DIR, filename), () => res.end());", "});", ""].join("\n");
+  assert.deepEqual(L(safe, "service.js"), []);
+  assert.deepEqual(L(safe.replace("  if (name.includes('..')) throw new Error('bad');\n", ""), "service.js"), [6]);
 });
