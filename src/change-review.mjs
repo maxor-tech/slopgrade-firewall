@@ -149,11 +149,12 @@ export const LANGUAGE_LABEL = Object.freeze({
 /** At most this many review-suggested notes per run (the server caps at the same number). */
 export const REVIEW_BAND_MAX = 5;
 /** The run-log line of the review-suggested band : what it is and its measured operating point (server 2026-11-03,
- *  heisen-slop ledger R29-JS-FRONTIER on 304 real JS CVE-introducing commits vs 13,597 ordinary commits). */
-export const REVIEW_BAND_NOTE = "  Measured on JS: with these, 39% of real CVE-introducing commits get a notice vs 10% of ordinary "
-  + "commits (triage notices alone: 13% vs 2%). Never blocking.";
+ *  heisen-slop ledger R29-JS-FRONTIER : 304 real JS CVE-introducing commits vs 13,597 ordinary ; R30-PY-FRONTIER : 731
+ *  real Python ones vs 11,109 ordinary). */
+export const REVIEW_BAND_NOTE = "  Measured: with these, 39% (JS/TS) and 47% (Python) of real CVE-introducing commits get a notice vs 10% "
+  + "of ordinary commits (triage notices alone: 13% and 21% vs 2-3%). Never blocking.";
 /** The band's heading line (each log line is cut at 240 characters by sanitizeLogLine, so heading and note are apart). */
-export const reviewBandHeading = (n) => `  review suggested: ${n} more hunk(s) just under the triage threshold (lower confidence, JavaScript / TypeScript only)`;
+export const reviewBandHeading = (n) => `  review suggested: ${n} more hunk(s) just under the triage threshold (lower confidence, JavaScript / TypeScript and Python)`;
 
 export function validChangeReview(x) {
   if (!x || typeof x !== "object") return null;
