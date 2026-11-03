@@ -8,9 +8,10 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 ## [0.13.3] — 2026-11-03
 
 ### Changed
-- **The « review suggested » band names Python too** (server 2026-11-03 adds Python at its own cut). Measured on the
-  live served model : with the band, 47 % of 731 real Python CVE-introducing commits get a notice vs 10 % of 11,109
-  ordinary commits (triage notices alone : 21 % vs 2.8 %). The run-log heading and note now name both languages.
+- **The « review suggested » band covers Python, Go, Java, PHP and Ruby** (server 2026-11-03, each language at its own
+  cut = 10 % of its ordinary commits flagged). Real CVE-introducing commits that get a notice with the band : Python 47 %
+  (731 commits, live served model), Go 46 % (970), Java 42 % (1,027), PHP 48 % (993), Ruby 34 % (233 — small pool) on
+  the SZZ held-out ; JS/TS 39 % as in 0.13.2. The run-log heading and note name every language with its rate.
 
 ### Fixed
 - **`library-mode: auto` no longer explains itself on application repos** : since 0.13.1 the default turned library mode on
