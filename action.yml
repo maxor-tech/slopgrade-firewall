@@ -127,7 +127,7 @@ runs:
         [ "${FW_DEEP_SCAN_BLOCK}" = "true" ] && ARGS+=(--deep-scan-block)
         [ "${FW_BLOCK_CONFIDENCE}" = "true" ] && ARGS+=(--block-confidence)
         [ "${FW_LIBRARY_MODE}" = "true" ] && ARGS+=(--library-mode)
-        [ "${FW_LIBRARY_MODE}" = "auto" ] && [ "${FW_DEEP_SCAN}" != "false" ] && ARGS+=(--library-mode)
+        [ "${FW_LIBRARY_MODE}" = "auto" ] && [ "${FW_DEEP_SCAN}" != "false" ] && ARGS+=(--library-mode --library-mode-auto)
         [ "${FW_CHANGE_REVIEW}" = "true" ] && ARGS+=(--change-review)
         [ "${FW_CHANGE_REVIEW}" = "auto" ] && [ "${FW_DEEP_SCAN}" != "false" ] && ARGS+=(--change-review)
         [ "${FW_FIX}" = "off" ] && ARGS+=(--no-fix)

@@ -217,7 +217,7 @@ Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <p
                    per hunk; on real CVE-introducing commits, 19% of commits flagged vs 2.1% of ordinary commits.
   --help           show this help
 Exit codes: 1 only on a gate-blocked verdict (or --strict with no verdict); 0 otherwise (fail open).`;
-const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-auto", "--deep-scan-block", "--block-confidence", "--library-mode", "--change-review", "--no-fix"]);
+const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-auto", "--deep-scan-block", "--block-confidence", "--library-mode", "--library-mode-auto", "--change-review", "--no-fix"]);
 
 export async function main(argv = [], env = process.env) {
   if (argv.includes("--help")) { console.log(HELP); return 0; }
@@ -234,6 +234,7 @@ export async function main(argv = [], env = process.env) {
   const deepBlock = deepScan && argv.includes("--deep-scan-block");
   const blockConfidence = deepScan && argv.includes("--block-confidence");
   const libraryMode = deepScan && argv.includes("--library-mode");
+  const libraryAuto = libraryMode && argv.includes("--library-mode-auto");
   const changeReview = deepScan && argv.includes("--change-review");
   const noFix = argv.includes("--no-fix"); // one-click fix suggestions are ON by default (input `fix: off` opts out)
   if (argv.includes("--deep-scan-block") && !deepScan) console.log("::warning title=slopGrade Firewall::--deep-scan-block has no effect without --deep-scan (deep-scan: \"true\").");
@@ -583,7 +584,8 @@ export async function main(argv = [], env = process.env) {
   }
   // Library mode: candidates are a SEPARATE triage list — notices, never in `feed` (so never in the gate, the PR review
   // blocking count or SARIF). The measured caveat is printed with them, so nobody reads them as proven findings.
-  if (libKind && libKind.kind !== "library") line(`\nslopGrade Firewall — library mode requested, but this repo looks like an application (${libKind.why}) — library candidates are only listed for published packages.`);
+  // Under the "auto" default (--library-mode-auto) an application never asked for library mode : say nothing.
+  if (libKind && libKind.kind !== "library" && !libraryAuto) line(`\nslopGrade Firewall — library mode requested, but this repo looks like an application (${libKind.why}) — library candidates are only listed for published packages.`);
   if (libKind?.kind === "library" && deepLine !== null) {
     line(`\nslopGrade Firewall — library mode: ${libRows.length} candidate(s) to triage — a public function's parameter reaches a sink. NOT proven: on real CVEs about 2 in 3 such hits remain after the fix.`);
     const outcomes = candidateOutcomesLine(libOutcomes);
