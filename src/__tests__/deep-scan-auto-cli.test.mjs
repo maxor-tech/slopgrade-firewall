@@ -79,13 +79,18 @@ test("an explicit --deep-scan on a FREE repo still sends nothing and still warns
 
 // Live run slopgrade#1612 (v0.13.2) printed « library mode requested, but this repo looks like an application » on an
 // app repo that never asked : the auto default must stay silent there ; an explicit library-mode: "true" still informs.
-test("library-mode auto on an APPLICATION repo prints nothing ; an explicit --library-mode still explains", async () => {
-  const auto = await run(["--gate", "--deep-scan", "--deep-scan-auto", "--library-mode", "--library-mode-auto"], PAID);
+// The same class on change review (judge Ohno, 2026-11-03) : under auto, a PUSH run has no PR by design and must not
+// print « not a pull request run — nothing reviewed » on every run.
+const FULL_AUTO = ["--gate", "--deep-scan", "--deep-scan-auto", "--library-mode", "--library-mode-auto", "--change-review", "--change-review-auto"];
+test("full auto on a PAID application repo, push run : no « requested » / « not a pull request » line ; explicit flags still explain", async () => {
+  const auto = await run(FULL_AUTO, PAID);
   assert.equal(auto.heisen.length, 1);
   assert.equal(auto.heisen[0].library, undefined, "an application is never sent as a library (the field is only sent when true)");
   assert.doesNotMatch(auto.text, /library mode requested/);
-  const explicit = await run(["--gate", "--deep-scan", "--library-mode"], PAID);
+  assert.doesNotMatch(auto.text, /change review: not a pull request run/);
+  const explicit = await run(["--gate", "--deep-scan", "--library-mode", "--change-review"], PAID);
   assert.match(explicit.text, /library mode requested, but this repo looks like an application/);
+  assert.match(explicit.text, /change review: not a pull request run \(or git could not diff the base\) — nothing reviewed/);
 });
 
 test("action.yml : deep-scan / library-mode / change-review default to auto, and auto maps to the flags", () => {
@@ -96,7 +101,7 @@ test("action.yml : deep-scan / library-mode / change-review default to auto, and
     assert.equal(block[1], "auto", `${input} default`);
   }
   assert.match(yml, /\[ "\$\{FW_DEEP_SCAN\}" = "auto" \] && ARGS\+=\(--deep-scan --deep-scan-auto\)/);
-  assert.match(yml, /\[ "\$\{FW_CHANGE_REVIEW\}" = "auto" \] && \[ "\$\{FW_DEEP_SCAN\}" != "false" \] && ARGS\+=\(--change-review\)/);
+  assert.match(yml, /\[ "\$\{FW_CHANGE_REVIEW\}" = "auto" \] && \[ "\$\{FW_DEEP_SCAN\}" != "false" \] && ARGS\+=\(--change-review --change-review-auto\)/);
   assert.match(yml, /\[ "\$\{FW_LIBRARY_MODE\}" = "auto" \] && \[ "\$\{FW_DEEP_SCAN\}" != "false" \] && ARGS\+=\(--library-mode --library-mode-auto\)/);
   // deep-scan-block stays an explicit opt-in : the default never blocks on a learned or hosted verdict
   assert.match(yml, /\n  deep-scan-block:\n(?:    .*\n)*?    default: "false"/);
