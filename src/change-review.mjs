@@ -146,16 +146,30 @@ export const LANGUAGE_LABEL = Object.freeze({
 
 /** The server's `changeReview`, kept only when well-formed (a malformed block is ignored, never half-printed).
  *  `unreviewedByLanguage` (slopgrade, when hunks went unreviewed) is kept for the known languages with a positive count. */
+/** At most this many review-suggested notes per run (the server caps at the same number). */
+export const REVIEW_BAND_MAX = 5;
+/** The run-log line of the review-suggested band : what it is and its measured operating point (server 2026-11-03,
+ *  heisen-slop ledger R29-JS-FRONTIER on 304 real JS CVE-introducing commits vs 13,597 ordinary commits). */
+export const REVIEW_BAND_NOTE = "  Measured on JS: with these, 39% of real CVE-introducing commits get a notice vs 10% of ordinary "
+  + "commits (triage notices alone: 13% vs 2%). Never blocking.";
+/** The band's heading line (each log line is cut at 240 characters by sanitizeLogLine, so heading and note are apart). */
+export const reviewBandHeading = (n) => `  review suggested: ${n} more hunk(s) just under the triage threshold (lower confidence, JavaScript / TypeScript only)`;
+
 export function validChangeReview(x) {
   if (!x || typeof x !== "object") return null;
   const { reviewed, unreviewed, threshold, flagged } = x;
   if (!Number.isInteger(reviewed) || !Number.isInteger(unreviewed) || typeof threshold !== "number" || !Array.isArray(flagged)) return null;
-  const rows = flagged.filter((f) => f && typeof f.path === "string" && Number.isInteger(f.newStart) && f.newStart >= 1 && typeof f.p === "number");
+  const okRow = (f) => f && typeof f.path === "string" && Number.isInteger(f.newStart) && f.newStart >= 1 && typeof f.p === "number";
+  const rows = flagged.filter(okRow);
   const by = x.unreviewedByLanguage;
   const langs = by && typeof by === "object" && !Array.isArray(by)
     ? Object.entries(by).filter(([k, n]) => Object.hasOwn(LANGUAGE_LABEL, k) && Number.isInteger(n) && n > 0)
     : [];
-  return { reviewed, unreviewed, threshold, flagged: rows, ...(langs.length ? { unreviewedByLanguage: Object.fromEntries(langs) } : {}) };
+  // The review-suggested band (server 2026-11-03) : optional, lower confidence, at most REVIEW_BAND_MAX rows. A band row
+  // must sit BELOW the threshold — a server bug that put a flagged hunk here would otherwise be shown twice.
+  const band = Array.isArray(x.review) ? x.review.filter((f) => okRow(f) && f.p < threshold).slice(0, REVIEW_BAND_MAX) : [];
+  return { reviewed, unreviewed, threshold, flagged: rows, ...(langs.length ? { unreviewedByLanguage: Object.fromEntries(langs) } : {}),
+    ...(band.length ? { review: band } : {}) };
 }
 
 /** " · 12 not reviewed (partial: C++ 12)" — the part of the summary that says what went unreviewed, by language. */

@@ -16,6 +16,6 @@ test("parseWorkflowCommand reads a well-formed command and flags the space-separ
 test("every file+line annotation in isolation-gate.mjs separates its properties with commas", () => {
   const src = readFileSync(new URL("../../isolation-gate.mjs", import.meta.url), "utf8");
   const sites = src.match(/::\$\{[^}]+\}[^`]*?file=\$\{[^}]+\},line=\$\{[^}]+\}[ ,]title=|::(?:error|warning|notice) file=\$\{[^}]+\},line=\$\{[^}]+\}[ ,]title=/g) ?? [];
-  assert.equal(sites.length, 5, "the five file+line annotation sites (cross-tenant, pack, deep scan, library, change review)");
+  assert.equal(sites.length, 6, "the six file+line annotation sites (cross-tenant, pack, deep scan, library, change review, review suggested)");
   for (const s of sites) assert.ok(s.endsWith(",title="), `space-separated title in: ${s}`);
 });
