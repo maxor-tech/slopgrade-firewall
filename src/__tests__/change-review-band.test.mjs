@@ -67,6 +67,9 @@ test("a band row prints as « review suggested », apart from the triage flags, 
     assert.ok(out.includes(reviewBandHeading(1)), text);
     assert.ok(out.includes(REVIEW_BAND_NOTE), text);
     assert.ok(reviewBandHeading(64).length <= 240 && REVIEW_BAND_NOTE.length <= 240);
+    // the band covers exactly the measured languages (server REVIEW_BAND_CUTS : javascript, python), each with its rate
+    assert.match(reviewBandHeading(1), /JavaScript \/ TypeScript and Python\)$/);
+    assert.match(REVIEW_BAND_NOTE, /39% \(JS\/TS\) and 47% \(Python\) of real CVE-introducing commits get a notice vs 10% of ordinary commits/);
     // the triage claim arrives whole too (it used to be appended to the summary and cut at 240 characters mid-word)
     assert.ok(out.some((l) => /^ {2}Held-out: 36% .* 19% of commits flagged vs 2\.1% of ordinary commits\.$/.test(l)), text);
     assert.match(text, /::notice file=run\.js,line=\d+,title=slopGrade change review \(review suggested\)::lower confidence \(p=0\.3000\)/);
