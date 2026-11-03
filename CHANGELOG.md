@@ -5,6 +5,19 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.13.2] — 2026-11-03
+
+### Added
+- **Change review : a « review suggested » band** (JavaScript / TypeScript, paid repos, needs the server of 2026-11-03).
+  Up to 5 hunks that score just under the triage threshold print as notices titled `slopGrade change review (review
+  suggested)`, apart from the triage notices, never blocking. Measured on the served model : with them, 39 % of 304 real
+  JS CVE-introducing commits get a notice vs 10 % of 13,597 ordinary commits ; the triage notices alone give 13 % vs 2 %.
+  Other languages get no band until their own curve is measured.
+
+### Fixed
+- **The change-review claim was cut mid-word in the run log** : it was appended to the summary line, and every log line
+  is cut at 240 characters. It now prints on its own line, whole.
+
 ## [0.13.1] — 2026-11-03
 
 ### Changed
