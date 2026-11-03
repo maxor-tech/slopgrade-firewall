@@ -5,6 +5,8 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.13.1] — 2026-11-03
+
 ### Changed
 - **Deep scan on by default for paid repos** : `deep-scan`, `change-review` and `library-mode` default to `"auto"`.
   On a **paid** repo the Action now sends the source of the sink-bearing files and the PR's diff hunks to the hosted
