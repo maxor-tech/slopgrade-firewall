@@ -120,7 +120,7 @@ runs:
         [ "${FW_STRICT}" = "true" ] && ARGS+=(--strict)
         [ -n "${FW_SARIF}" ] && ARGS+=(--sarif "${FW_SARIF}")
         [ "${FW_DEEP_SCAN}" = "true" ] && ARGS+=(--deep-scan)
-        # "auto" (since 0.13.6) = on for a PUBLIC repo, opt-in on a private one ; the CLI sends source only on a public
+        # "auto" (since 0.13.6) = on for a PUBLIC repo, opt-in on a private one ; the CLI sends source only on a paid or public
         # verdict either way. library-mode / change-review "auto" follow the deep scan, so "deep-scan: false" never
         # prints a « has no effect » warning for a default the user never set.
         [ "${FW_DEEP_SCAN}" = "auto" ] && ARGS+=(--deep-scan --deep-scan-auto)
