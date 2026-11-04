@@ -5,6 +5,17 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.13.5] — 2026-11-04
+
+### Changed
+- **The deep scan runs on public repos, free, by default.** On 8,669 real CVE pairs (vulnerable file flagged, fixed file
+  not, right class) the blocking static gate catches 7, Semgrep's public rules at high severity 108, the deep scan's proven
+  flows 132. A public repo's source is already public, so nothing private leaves. Taint scan only : change review stays
+  paid. Findings are notices ; `deep-scan-block` stays opt-in. `deep-scan: "false"` opts out.
+- **Measured claims state where the note lands.** CVE-introducing commits are large (median 8-25 hunks vs 2-5), so a
+  commit-level rate is mostly size : a no-model rule scores 35-43 % at the same alarm. The band now states 11-16 % on the
+  buggy change (7-9 % at random) ; the triage line adds 3.9 % on the buggy hunk.
+
 ## [0.13.4] — 2026-11-04
 
 ### Changed

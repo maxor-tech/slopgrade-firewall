@@ -71,9 +71,9 @@ test("a band row prints as « review suggested », apart from the triage flags, 
     // server slopgrade#1616 (READ-R32) : JS/TS and Python have no band ; the log must not name them
     assert.match(reviewBandHeading(1), /\(lower confidence; Go, Java, PHP, Ruby\)$/);
     assert.doesNotMatch(reviewBandHeading(1) + REVIEW_BAND_NOTE, /JS|TypeScript|Python/);
-    assert.match(REVIEW_BAND_NOTE, /Go 46%, Java 42%, PHP 48%, Ruby 34%, at 8-12% of fresh ordinary commits flagged \(Ruby unconfirmed\)\. Never blocking\.$/);
+    assert.match(REVIEW_BAND_NOTE, /lands on the buggy change in 11-16% of real CVE-introducing commits \(the same notes at random: 7-9%\), at 8-12% of fresh ordinary commits flagged \(Ruby unconfirmed\)\. Never blocking\.$/);
     // the triage claim arrives whole too (it used to be appended to the summary and cut at 240 characters mid-word)
-    assert.ok(out.some((l) => /^ {2}Held-out: 36% .* 19% of commits flagged vs 2\.1% of ordinary commits\.$/.test(l)), text);
+    assert.ok(out.some((l) => /^ {2}Held-out: 36% .* 19% of commits flagged vs 2\.1% of ordinary commits, the note on the buggy hunk in 3\.9%\.$/.test(l)), text);
     assert.match(text, /::notice file=run\.js,line=\d+,title=slopGrade change review \(review suggested\)::lower confidence \(p=0\.3000\)/);
     assert.doesNotMatch(text, /title=slopGrade change review \(triage\)/, "no triage-titled notice for a band row");
   } finally {

@@ -152,9 +152,10 @@ export const REVIEW_BAND_MAX = 5;
  *  R31-LANG-FRONTIER on the SZZ held-out : Go 970 CVE-introducing vs 690 ordinary, Java 1,027 vs 694, PHP 993 vs 383,
  *  Ruby 233 vs 252 ; cut at 10 % of ordinary commits flagged). READ-R32 (fresh never-used repos, once) confirmed the alarm
  *  for Go (12.4 %), Java (8.4 %) and PHP (11.1 %) ; Ruby is unconfirmed (136 commits) ; JS/TS (15.2 %) and Python
- *  (15.9 %) failed and the server removed their band (slopgrade#1616). */
-export const REVIEW_BAND_NOTE = "  Measured with these: real CVE-introducing commits that get a notice - Go 46%, Java 42%, PHP 48%, Ruby 34%, "
-  + "at 8-12% of fresh ordinary commits flagged (Ruby unconfirmed). Never blocking.";
+ *  (15.9 %) failed and the server removed their band (slopgrade#1616). Rates are ON THE BUG (R33) : a commit-level rate is
+ *  mostly commit size — a no-model rule (hunks >= k) scores 35-43 % at the same alarm. */
+export const REVIEW_BAND_NOTE = "  Measured: with these, a note lands on the buggy change in 11-16% of real CVE-introducing commits (the same "
+  + "notes at random: 7-9%), at 8-12% of fresh ordinary commits flagged (Ruby unconfirmed). Never blocking.";
 /** The band's heading line (each log line is cut at 240 characters by sanitizeLogLine, so heading and note are apart). */
 export const reviewBandHeading = (n) => `  review suggested: ${n} more hunk(s) just under the triage threshold (lower confidence; Go, Java, PHP, Ruby)`;
 

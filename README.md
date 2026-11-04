@@ -1,11 +1,11 @@
 # slopGrade Firewall — CI security-leak detection
 
 The **open-source client** of the [slopGrade Firewall](https://www.slopgrade.ai/firewall?utm_source=github-marketplace&utm_medium=listing&utm_campaign=launch-v3). It runs in your CI,
-detects high-severity security leaks in the diff. **On a free or public repo, your source code and file contents never
+detects high-severity security leaks in the diff. **On a free private repo, your source code and file contents never
 leave your runner** — only a structural fingerprint (table/column names + `{file, line, kind}` locations, no code) is
 posted for classification. The one exception is [`deep-scan`](#deep-scan--on-by-default-for-paid-repos-the-one-mode-that-sends-code):
-since 0.13.1 it is **on by default for paid repos only** (`deep-scan: "auto"`); set `deep-scan: "false"` to keep all
-source in the runner. This repository is the exact code that runs in your runner: **audit every line before you pin it.**
+it is **on by default for paid and public repos** (`deep-scan: "auto"`; public code is already public); set
+`deep-scan: "false"` to keep all source in the runner. This repository is the exact code that runs in your runner: **audit every line before you pin it.**
 
 **What it catches in a pull request, before it merges:** cross-tenant data access (a query that forgets the tenant
 filter), SQL and command injection, SSRF, XSS, path traversal and secrets in code — the 10 open-source classes
@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
-      - uses: maxor-tech/slopgrade-firewall@v0.13.4
+      - uses: maxor-tech/slopgrade-firewall@v0.13.5
 ```
 
 `id-token: write` is required (it is how the repo proves itself). `pull-requests: write` posts the findings on the PR.
@@ -63,8 +63,8 @@ jobs:
           # upload-sarif: "false"          # opt out of the Code Scanning upload (default: true — needs security-events: write)
           # untrusted-inputs: "cli,queue"  # opt in : CLI arguments and / or queue payloads count as untrusted (default: off)
           # sarif-file: "firewall.sarif"   # ALSO write the SARIF to a file (for a build artifact); upload runs regardless
-          # deep-scan: "false"             # default "auto" = on for PAID repos only: the source of sink-bearing files and the
-          #                                  PR hunks go to the hosted engine. "false" keeps all source in the runner
+          # deep-scan: "false"             # default "auto" = on for PAID and PUBLIC repos: the source of sink-bearing files (and, paid
+          #                                  only, the PR hunks) go to the hosted engine. "false" keeps all source in the runner
           # deep-scan-block: "true"        # with deep-scan + gate: a NEW deep-scan finding fails the check (default false)
           # block-confidence: "false"      # opt out of advisory demotion below the engine threshold (ON by default)
           # fix: "off"                     # one-click « Commit suggestion » fixes on the PR (default: suggest)
@@ -170,8 +170,8 @@ clean run is never mistaken for a run that scanned nothing.
 
 ### Deep scan — on by default for paid repos, the one mode that sends code
 
-`deep-scan` (client ≥ 0.8.0; default **`"auto"`** since 0.13.1 — on for a **paid** repo, off and silent for a free or
-public repo; `"false"` turns it off everywhere) adds slopGrade's hosted **taint engine** (heisen): it follows a
+`deep-scan` (client ≥ 0.8.0; default **`"auto"`** — on for a **paid** repo and, since 0.13.5, a **public** repo (taint scan only, no change
+review), off and silent for a free private repo; `"false"` turns it off everywhere) adds slopGrade's hosted **taint engine** (heisen): it follows a
 request value from the line it is read to the line it reaches a sink, **across functions** — the flows the
 intra-function packs above cannot see (e.g. a request parameter passed to a helper that runs `check_output(…,
 shell=True)`). It is the **only** mode in which file contents leave your runner. Under the `"auto"` default the run log
@@ -323,9 +323,9 @@ would rather the control not silently self-disable, `strict: "true"` fails **clo
 
 ## What leaves your runner (and what does not)
 
-- **File contents never leave a free or public repo.** The client reads files locally and emits only source-derived
-  **metadata**: file paths and `{file, line, kind}` — never the code, never a secret value. On a **paid** repo the
-  default `deep-scan: "auto"` (0.13.1) — or an explicit `deep-scan: "true"` — sends the source of the bounded, listed set of sink-bearing files is sent (see *Deep scan* above). Audit it: `node isolation-gate.mjs
+- **File contents never leave a free private repo.** The client reads files locally and emits only source-derived
+  **metadata**: file paths and `{file, line, kind}` — never the code, never a secret value. On a **paid** or **public** repo the
+  default `deep-scan: "auto"` — or an explicit `deep-scan: "true"` — sends the source of the bounded, listed set of sink-bearing files is sent (see *Deep scan* above). Audit it: `node isolation-gate.mjs
   --print-payload` prints the exact payload that would be posted, then exits without contacting the server.
 - **No stored secret.** Identity is a short-lived, GitHub-signed OIDC token, audience-bound to the server origin.
 - **Endpoint is fixed.** A custom `SLOPGRADE_ORIGIN` is refused (the run goes dry) unless you explicitly set

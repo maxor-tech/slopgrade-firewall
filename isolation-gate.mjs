@@ -64,7 +64,7 @@ import {
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs, refusalLine,
   advisoryOfferOf, offerLogLine,
 } from "./src/client-lib.mjs";
-import { sinkFiles, prChangedPaths, prChangedRanges, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, CANDIDATES_RANKED_NOTE, heisenFeed, splitAgainstFeed, isPaidVerdict, deepScanNudge } from "./src/deep-scan.mjs";
+import { sinkFiles, prChangedPaths, prChangedRanges, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, CANDIDATES_RANKED_NOTE, heisenFeed, splitAgainstFeed, isPaidVerdict, isPublicVerdict, deepScanNudge } from "./src/deep-scan.mjs";
 import { prHunks, validChangeReview, C_HUNK, C_REVIEW_NOTE, CPP_HUNK, CPP_REVIEW_NOTE, RUST_HUNK, RUST_REVIEW_NOTE, noticeHint, unreviewedNote, REVIEW_BAND_NOTE, reviewBandHeading } from "./src/change-review.mjs";
 import { fixableHitIndex, attachFixes } from "./src/autofix.mjs";
 import { IGNORE_FILE, parseIgnore, ignoreMatcher, readIgnoreText } from "./src/ignore.mjs";
@@ -188,8 +188,8 @@ async function loadProPacks(origin, oidcToken, root, rel, isIgnored = () => fals
 }
 
 /** The one line a PAID repo reads when the deep scan runs by default (deep-scan: "auto"): what leaves, and the opt-out. */
-export const DEEP_AUTO_NOTICE = (files, hunks) =>
-  `deep scan is on by default for this paid repo: the source of ${files} sink-bearing file(s)`
+export const DEEP_AUTO_NOTICE = (files, hunks, level = "paid") =>
+  `deep scan is on by default for this ${level} repo: the source of ${files} sink-bearing file(s)`
   + `${hunks ? ` and ${hunks} PR hunk(s)` : ""} is sent to slopGrade's hosted engine (never stored). `
   + `To keep all source in the runner, set deep-scan: "false".`;
 
@@ -214,7 +214,8 @@ Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <p
   --change-review  OPT-IN, with --deep-scan, pull requests only: ALSO send the PR's diff hunks (changed lines + 3 lines of
                    context, ≤ 64) to the diff-reading 55M, which lists the changes likely to WEAKEN security (a removed
                    check). Notices to triage, never blocking. Held-out: 36% of security fixes undone caught at 0.23% false alarms
-                   per hunk; on real CVE-introducing commits, 19% of commits flagged vs 2.1% of ordinary commits.
+                   per hunk; on real CVE-introducing commits, 19% of commits flagged vs 2.1% of ordinary commits, the note on the
+                   buggy hunk in 3.9% (CVE commits are large, so a commit-level rate is mostly size).
   --help           show this help
 Exit codes: 1 only on a gate-blocked verdict (or --strict with no verdict); 0 otherwise (fail open).`;
 const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-auto", "--deep-scan-block", "--block-confidence", "--library-mode", "--library-mode-auto", "--change-review", "--change-review-auto", "--no-fix"]);
@@ -393,7 +394,7 @@ export async function main(argv = [], env = process.env) {
     () => { try { return readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith(".")).map((e) => e.name); } catch { return []; } }) : null;
   // Change review (0.10.13): the PR's own diff hunks, read locally like the ranges — listed by --print-payload too.
   const change = changeReview ? prHunks(env, prEvent, git) : null;
-  const deepAudit = deep ? { deepScan: { note: "SOURCE of these files is sent (--deep-scan ; the Action default \"auto\") — only when the server confirms this repo is paid", files: deep.units.map((u) => u.path), chars: deep.chars, skipped: deep.skipped, fromPr: deep.fromPr, scopedToPrLines: deep.scoped, ...(libKind ? { libraryMode: libKind.kind === "library", repoKind: libKind.why } : {}),
+  const deepAudit = deep ? { deepScan: { note: "SOURCE of these files is sent (--deep-scan ; the Action default \"auto\") — only when the server confirms this repo is paid or public", files: deep.units.map((u) => u.path), chars: deep.chars, skipped: deep.skipped, fromPr: deep.fromPr, scopedToPrLines: deep.scoped, ...(libKind ? { libraryMode: libKind.kind === "library", repoKind: libKind.why } : {}),
     ...(repoAggregates ? { blockConfidence: repoAggregates } : {}),
     ...(change ? { changeReview: { note: "these PR hunks (changed lines + 3 lines of context) are sent (--change-review ; the Action default \"auto\", paid repos only)", hunks: change.hunks.map((h) => `${h.path}:${h.newStart}`), skipped: change.skipped } } : {}) } } : {};
 
@@ -477,13 +478,13 @@ export async function main(argv = [], env = process.env) {
     // Source leaves the runner ONLY for a paid repo. Before 0.10.12 a free or public repo with the option on uploaded its
     // files and got 402 after the fact; the verdict above already says the plan, so nothing is sent unless it is paid.
     // Under the "auto" default a non-paid repo never chose the option, so it hears nothing (no warning on every run).
-    else if (!paid) { if (!deepAuto) ghWarn(`deep scan is a paid feature — no source was sent. Enable it: ${origin}/ci`); }
+    else if (!paid && !isPublicVerdict(v)) { if (!deepAuto) ghWarn(`deep scan is a paid feature — no source was sent. Enable it: ${origin}/ci`); }
     else if (!deep.units.length) deepLine = "no sink-bearing file in an engine-modelled language — nothing sent.";
     else {
-      if (deepAuto) console.log(`::notice title=slopGrade Firewall::${sanitizeLogLine(DEEP_AUTO_NOTICE(deep.units.length, change?.hunks.length ?? 0))}`);
+      if (deepAuto) console.log(`::notice title=slopGrade Firewall::${sanitizeLogLine(DEEP_AUTO_NOTICE(deep.units.length, paid ? change?.hunks.length ?? 0 : 0, paid ? "paid" : "public"))}`);
       const post = (url, body) => timedFetch(url, { method: "POST", headers: { "content-type": "application/json" }, body });
-      const r = await requestDeepScan(post, origin, oidcToken, sha, deep.units, libKind?.kind === "library", change?.hunks ?? [], repoAggregates);
-      if (r.state === "plan-required") ghWarn(`deep scan is a paid feature — no source was analysed. Enable it: ${origin}/ci`);
+      const r = await requestDeepScan(post, origin, oidcToken, sha, deep.units, libKind?.kind === "library", paid ? change?.hunks ?? [] : [], repoAggregates);
+      if (r.state === "plan-required") { if (!deepAuto) ghWarn(`deep scan is a paid feature — no source was analysed. Enable it: ${origin}/ci`); }
       else if (r.state === "unavailable") ghWarn(`deep scan unavailable (${r.status}) — verdict unaffected.`);
       else {
         deepRows = heisenFeed(r.response.findings, deep.units.map((u) => u.path));
@@ -600,7 +601,9 @@ export async function main(argv = [], env = process.env) {
   }
   // Change review: PR hunks the diff-reading 55M scores as likely to WEAKEN security — notices, never in `feed` (so
   // never in the gate, the blocking count or SARIF). An unanswered batch is said, never read as « nothing flagged ».
-  if (changeReview && deepLine !== null) {
+  // Change review is paid only : a public repo gets the taint scan, never the diff reviewer.
+  if (changeReview && !changeAuto && deepLine !== null && !paid) line(`\nslopGrade Firewall — change review is a paid feature — no PR hunk was sent.`);
+  if (changeReview && deepLine !== null && paid) {
     // Under the "auto" default a push run has no PR to review by design : say nothing. A PR whose base git could not
     // diff is still said, auto or not — that is a real gap.
     const isPr = env.GITHUB_EVENT_NAME === "pull_request" || env.GITHUB_EVENT_NAME === "pull_request_target";
@@ -610,7 +613,7 @@ export async function main(argv = [], env = process.env) {
     else {
       line(`\nslopGrade Firewall — change review (heisen-slop-55m, triage): ${changeBlock.flagged.length} of ${changeBlock.reviewed} PR hunk(s) look like they weaken a security check${unreviewedNote(changeBlock)}${change.skipped ? ` · ${change.skipped} over the cap, not sent` : ""}.`);
       // Its own line : sanitizeLogLine cuts at 240 characters, and appended to the summary the claim was cut mid-word.
-      line(`  Held-out: 36% of security fixes undone caught at 0.23% false alarms per hunk; on real CVE-introducing commits, 19% of commits flagged vs 2.1% of ordinary commits.`);
+      line(`  Held-out: 36% of security fixes undone caught at 0.23% false alarms per hunk; on real CVE-introducing commits, 19% of commits flagged vs 2.1% of ordinary commits, the note on the buggy hunk in 3.9%.`);
       if (change.hunks.some((h) => C_HUNK.test(h.path))) line(C_REVIEW_NOTE);
       if (change.hunks.some((h) => CPP_HUNK.test(h.path))) line(CPP_REVIEW_NOTE);
       if (change.hunks.some((h) => RUST_HUNK.test(h.path))) line(RUST_REVIEW_NOTE);
