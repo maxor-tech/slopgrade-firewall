@@ -5,6 +5,15 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.13.4] — 2026-11-04
+
+### Changed
+- **The « review suggested » band no longer names JS/TS and Python.** A pre-registered check on never-used repos
+  (READ-R32, read once, live engine) measured the band at 15.2 % (JS/TS, 525 commits) and 15.9 % (Python, 327) of fresh
+  ordinary commits flagged, above the 12.5 % bar ; the server removed both bands (slopgrade#1616). Go (12.4 %), Java (8.4 %)
+  and PHP (11.1 %) were confirmed ; Ruby (136 commits) stays unconfirmed. The heading, note and action.yml now name only
+  the four languages. Triage notices are unchanged for every language.
+
 ## [0.13.3] — 2026-11-03
 
 ### Changed

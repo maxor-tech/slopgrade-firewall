@@ -148,14 +148,15 @@ export const LANGUAGE_LABEL = Object.freeze({
  *  `unreviewedByLanguage` (slopgrade, when hunks went unreviewed) is kept for the known languages with a positive count. */
 /** At most this many review-suggested notes per run (the server caps at the same number). */
 export const REVIEW_BAND_MAX = 5;
-/** The run-log line of the review-suggested band : what it is and its measured operating point (server 2026-11-03,
- *  heisen-slop ledger : R29-JS-FRONTIER 304 real JS CVE-introducing commits vs 13,597 ordinary ; R30-PY-FRONTIER 731
- *  Python vs 11,109 ; R31-LANG-FRONTIER on the SZZ held-out : Go 970 vs 690, Java 1,027 vs 694, PHP 993 vs 383, Ruby 233
- *  vs 252). Every language is cut at 10 % of its ordinary commits flagged. */
-export const REVIEW_BAND_NOTE = "  Measured with these, at 10% of ordinary commits flagged: real CVE-introducing commits that get a notice "
-  + "- JS/TS 39%, Python 47%, Go 46%, Java 42%, PHP 48%, Ruby 34%. Never blocking.";
+/** The run-log line of the review-suggested band : what it is and its measured operating point (heisen-slop ledger
+ *  R31-LANG-FRONTIER on the SZZ held-out : Go 970 CVE-introducing vs 690 ordinary, Java 1,027 vs 694, PHP 993 vs 383,
+ *  Ruby 233 vs 252 ; cut at 10 % of ordinary commits flagged). READ-R32 (fresh never-used repos, once) confirmed the alarm
+ *  for Go (12.4 %), Java (8.4 %) and PHP (11.1 %) ; Ruby is unconfirmed (136 commits) ; JS/TS (15.2 %) and Python
+ *  (15.9 %) failed and the server removed their band (slopgrade#1616). */
+export const REVIEW_BAND_NOTE = "  Measured with these: real CVE-introducing commits that get a notice - Go 46%, Java 42%, PHP 48%, Ruby 34%, "
+  + "at 8-12% of fresh ordinary commits flagged (Ruby unconfirmed). Never blocking.";
 /** The band's heading line (each log line is cut at 240 characters by sanitizeLogLine, so heading and note are apart). */
-export const reviewBandHeading = (n) => `  review suggested: ${n} more hunk(s) just under the triage threshold (lower confidence; JS/TS, Python, Go, Java, PHP, Ruby)`;
+export const reviewBandHeading = (n) => `  review suggested: ${n} more hunk(s) just under the triage threshold (lower confidence; Go, Java, PHP, Ruby)`;
 
 export function validChangeReview(x) {
   if (!x || typeof x !== "object") return null;

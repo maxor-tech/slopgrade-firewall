@@ -68,8 +68,10 @@ test("a band row prints as « review suggested », apart from the triage flags, 
     assert.ok(out.includes(REVIEW_BAND_NOTE), text);
     assert.ok(reviewBandHeading(64).length <= 240 && REVIEW_BAND_NOTE.length <= 240);
     // the band covers exactly the measured languages (server REVIEW_BAND_CUTS), each with its rate at 10 % alarm
-    assert.match(reviewBandHeading(1), /\(lower confidence; JS\/TS, Python, Go, Java, PHP, Ruby\)$/);
-    assert.match(REVIEW_BAND_NOTE, /at 10% of ordinary commits flagged: .*JS\/TS 39%, Python 47%, Go 46%, Java 42%, PHP 48%, Ruby 34%\. Never blocking\.$/);
+    // server slopgrade#1616 (READ-R32) : JS/TS and Python have no band ; the log must not name them
+    assert.match(reviewBandHeading(1), /\(lower confidence; Go, Java, PHP, Ruby\)$/);
+    assert.doesNotMatch(reviewBandHeading(1) + REVIEW_BAND_NOTE, /JS|TypeScript|Python/);
+    assert.match(REVIEW_BAND_NOTE, /Go 46%, Java 42%, PHP 48%, Ruby 34%, at 8-12% of fresh ordinary commits flagged \(Ruby unconfirmed\)\. Never blocking\.$/);
     // the triage claim arrives whole too (it used to be appended to the summary and cut at 240 characters mid-word)
     assert.ok(out.some((l) => /^ {2}Held-out: 36% .* 19% of commits flagged vs 2\.1% of ordinary commits\.$/.test(l)), text);
     assert.match(text, /::notice file=run\.js,line=\d+,title=slopGrade change review \(review suggested\)::lower confidence \(p=0\.3000\)/);
