@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { prSentence, loadFigures } from "../../scripts/sync-pr-figures.mjs";
 import {
-  sinkFiles, selectDeepUnits, hasSinkMarker, prChangedPaths, validHeisenResponse, evidenceLine, heisenFeed, requestDeepScan, splitAgainstFeed, deepScanNudge, isPaidVerdict,
+  oidcRepoIsPublic, sinkFiles, selectDeepUnits, hasSinkMarker, prChangedPaths, validHeisenResponse, evidenceLine, heisenFeed, requestDeepScan, splitAgainstFeed, deepScanNudge, isPaidVerdict,
   DEEP_MAX_UNITS, DEEP_MAX_UNIT_CHARS, DEEP_MAX_TOTAL_CHARS,
 } from "../deep-scan.mjs";
 
@@ -179,6 +179,13 @@ test("isPaidVerdict: gateLevel is exact — public / free-oss are entitled but N
   assert.equal(isPaidVerdict({ gateLevel: "none", gateEntitled: false }), false);
   assert.equal(isPaidVerdict({ gateEntitled: true }), true, "old server without gateLevel: previous behavior");
   assert.equal(isPaidVerdict(null), false);
+});
+
+test("oidcRepoIsPublic: true only for the exact public claim, false on anything else", () => {
+  const tok = (o) => `h.${Buffer.from(JSON.stringify(o)).toString("base64url")}.s`;
+  assert.equal(oidcRepoIsPublic(tok({ repository_visibility: "public" })), true);
+  for (const v of ["private", "internal", "PUBLIC", "", null, ["public"], true]) assert.equal(oidcRepoIsPublic(tok({ repository_visibility: v })), false, String(v));
+  for (const bad of [undefined, null, "", "x", "a.b", "a.%%%.c", 42, tok({})]) assert.equal(oidcRepoIsPublic(bad), false, String(bad));
 });
 
 test("deepScanNudge: only a PAID repo without the deep scan is invited", () => {

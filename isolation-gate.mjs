@@ -64,7 +64,7 @@ import {
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs, refusalLine,
   advisoryOfferOf, offerLogLine,
 } from "./src/client-lib.mjs";
-import { sinkFiles, prChangedPaths, prChangedRanges, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, CANDIDATES_RANKED_NOTE, heisenFeed, splitAgainstFeed, isPaidVerdict, isPublicVerdict, deepScanNudge } from "./src/deep-scan.mjs";
+import { oidcRepoIsPublic, sinkFiles, prChangedPaths, prChangedRanges, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, CANDIDATES_RANKED_NOTE, heisenFeed, splitAgainstFeed, isPaidVerdict, isPublicVerdict, deepScanNudge } from "./src/deep-scan.mjs";
 import { prHunks, validChangeReview, C_HUNK, C_REVIEW_NOTE, CPP_HUNK, CPP_REVIEW_NOTE, RUST_HUNK, RUST_REVIEW_NOTE, noticeHint, unreviewedNote, REVIEW_BAND_NOTE, reviewBandHeading } from "./src/change-review.mjs";
 import { fixableHitIndex, attachFixes } from "./src/autofix.mjs";
 import { IGNORE_FILE, parseIgnore, ignoreMatcher, readIgnoreText } from "./src/ignore.mjs";
@@ -187,9 +187,9 @@ async function loadProPacks(origin, oidcToken, root, rel, isIgnored = () => fals
   return { wire: sanitizeProFingerprints(wire), packCount: packs.length, version: String(j.version), note: ` (paid · pro extractors ${sanitizeLogLine(String(j.version), 40)})` };
 }
 
-/** The one line a PAID repo reads when the deep scan runs by default (deep-scan: "auto"): what leaves, and the opt-out. */
-export const DEEP_AUTO_NOTICE = (files, hunks, level = "paid") =>
-  `deep scan is on by default for this ${level} repo: the source of ${files} sink-bearing file(s)`
+/** The one line a PUBLIC repo reads when the deep scan runs by default (deep-scan: "auto"): what leaves, and the opt-out. */
+export const DEEP_AUTO_NOTICE = (files, hunks) =>
+  `deep scan is on by default for this public repo: the source of ${files} sink-bearing file(s)`
   + `${hunks ? ` and ${hunks} PR hunk(s)` : ""} is sent to slopGrade's hosted engine (never stored). `
   + `To keep all source in the runner, set deep-scan: "false".`;
 
@@ -200,10 +200,10 @@ Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <p
   --strict         with --gate, fail CLOSED (exit 1) when no server verdict is available (default: fail open)
   --print-payload  print the exact structural fingerprint that would be sent, then exit (audit what leaves the runner)
   --sarif <path>   also write a SARIF report of the leaks (upload with github/codeql-action/upload-sarif)
-  --deep-scan      OPT-IN, paid repos: ALSO send the SOURCE of the sink-bearing files (≤ 80) to the hosted taint engine
+  --deep-scan      OPT-IN, paid or public repos: ALSO send the SOURCE of the sink-bearing files (≤ 80) to the hosted taint engine
                    (heisen). The only mode where code leaves the runner; --print-payload lists the files. Advisory.
-  --deep-scan-auto  with --deep-scan: the Action default (deep-scan: "auto"). Source is sent only when the server's
-                   verdict says the repo is PAID (as with --deep-scan) ; a free or public repo prints nothing about it.
+  --deep-scan-auto  with --deep-scan: the Action default (deep-scan: "auto"). Source is sent only when the repo is
+                   PUBLIC (the runner's OIDC claim) ; a private repo sends nothing, and a paid one is invited to opt in.
   --deep-scan-block  OPT-IN, with --deep-scan and --gate: a NEW deep-scan finding (one no pack reported) BLOCKS the build.
   --block-confidence  OPT-IN, default OFF: send three repository aggregates with --deep-scan; valid advisory scores
                    below the engine threshold stay warnings. Missing or malformed metadata keeps existing blocking.
@@ -394,7 +394,7 @@ export async function main(argv = [], env = process.env) {
     () => { try { return readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.name.startsWith(".")).map((e) => e.name); } catch { return []; } }) : null;
   // Change review (0.10.13): the PR's own diff hunks, read locally like the ranges — listed by --print-payload too.
   const change = changeReview ? prHunks(env, prEvent, git) : null;
-  const deepAudit = deep ? { deepScan: { note: "SOURCE of these files is sent (--deep-scan ; the Action default \"auto\") — only when the server confirms this repo is paid or public", files: deep.units.map((u) => u.path), chars: deep.chars, skipped: deep.skipped, fromPr: deep.fromPr, scopedToPrLines: deep.scoped, ...(libKind ? { libraryMode: libKind.kind === "library", repoKind: libKind.why } : {}),
+  const deepAudit = deep ? { deepScan: { note: "SOURCE of these files is sent (--deep-scan ; the Action default \"auto\") — only when the server confirms this repo is paid or public ; the auto default covers public repos only", files: deep.units.map((u) => u.path), chars: deep.chars, skipped: deep.skipped, fromPr: deep.fromPr, scopedToPrLines: deep.scoped, ...(libKind ? { libraryMode: libKind.kind === "library", repoKind: libKind.why } : {}),
     ...(repoAggregates ? { blockConfidence: repoAggregates } : {}),
     ...(change ? { changeReview: { note: "these PR hunks (changed lines + 3 lines of context) are sent (--change-review ; the Action default \"auto\", paid repos only)", hunks: change.hunks.map((h) => `${h.path}:${h.newStart}`), skipped: change.skipped } } : {}) } } : {};
 
@@ -466,8 +466,10 @@ export async function main(argv = [], env = process.env) {
   if (paid && pro.packCount === 0) {
     ghWarn(`this repo is PAID (entitled) but the pro extractors did not load — you are getting only the ${FREE_PACK_COUNT} free packs, not the full catalogue. Check the repo's slot assignment + plan at ${origin}/ci (or re-run — a transient server error also lands here).`);
   }
-  // A paid repo that has not opted into the deep scan hears about it where it already looks — the CI log.
-  const nudge = deepScanNudge({ deepScan, paid });
+  // A paid private repo that has not opted into the deep scan hears about it where it already looks — the CI log.
+  // On "auto" a private repo sends nothing, paid or not (Jeff 2026-11-04) : private code leaves only on an explicit opt-in.
+  const autoHeld = deepAuto && !oidcRepoIsPublic(oidcToken);
+  const nudge = deepScanNudge({ deepScan: deepScan && !autoHeld, paid });
   if (nudge) console.log(`::notice title=slopGrade Firewall::${sanitizeLogLine(nudge)}`);
 
   // 5b. OPT-IN deep scan (heisen taint engine) — source only ever goes to the CANONICAL origin, like the pro bundle
@@ -475,13 +477,14 @@ export async function main(argv = [], env = process.env) {
   let deepRows = [], deepLine = null, deepBlocking = 0, libRows = [], libOutcomes = null, libRanked = false, changeBlock = null;
   if (deep) {
     if (origin !== DEFAULT_ORIGIN) { if (!deepAuto) ghWarn("deep scan skipped — source is only ever sent to the canonical slopGrade origin."); }
-    // Source leaves the runner ONLY for a paid repo. Before 0.10.12 a free or public repo with the option on uploaded its
+    // Source leaves the runner ONLY for a paid or public repo. Before 0.10.12 a free or public repo with the option on uploaded its
     // files and got 402 after the fact; the verdict above already says the plan, so nothing is sent unless it is paid.
     // Under the "auto" default a non-paid repo never chose the option, so it hears nothing (no warning on every run).
+    else if (autoHeld) { /* nothing sent, nothing to say : a paid repo already read the nudge */ }
     else if (!paid && !isPublicVerdict(v)) { if (!deepAuto) ghWarn(`deep scan is a paid feature — no source was sent. Enable it: ${origin}/ci`); }
     else if (!deep.units.length) deepLine = "no sink-bearing file in an engine-modelled language — nothing sent.";
     else {
-      if (deepAuto) console.log(`::notice title=slopGrade Firewall::${sanitizeLogLine(DEEP_AUTO_NOTICE(deep.units.length, paid ? change?.hunks.length ?? 0 : 0, paid ? "paid" : "public"))}`);
+      if (deepAuto) console.log(`::notice title=slopGrade Firewall::${sanitizeLogLine(DEEP_AUTO_NOTICE(deep.units.length, paid ? change?.hunks.length ?? 0 : 0))}`);
       const post = (url, body) => timedFetch(url, { method: "POST", headers: { "content-type": "application/json" }, body });
       const r = await requestDeepScan(post, origin, oidcToken, sha, deep.units, libKind?.kind === "library", paid ? change?.hunks ?? [] : [], repoAggregates);
       if (r.state === "plan-required") { if (!deepAuto) ghWarn(`deep scan is a paid feature — no source was analysed. Enable it: ${origin}/ci`); }
