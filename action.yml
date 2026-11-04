@@ -24,7 +24,7 @@ inputs:
     required: false
     default: ""
   deep-scan:
-    description: "DEFAULT \"auto\": on for PAID repos and, since 0.13.5, PUBLIC repos (taint scan only), off and silent for free private repos. \"true\" = on and warn when the repo is free and private ; \"false\" = never send source. ALSO sends the SOURCE of the files where a security sink was found (at most 80 files / 2M chars) to slopGrade's hosted taint engine (heisen), which reports proven request→sink flows (injection, SSRF, path traversal, XSS…). The only mode in which code leaves the runner — a free private repo never sends source. Forwarded then dropped server-side (never logged, never stored). Advisory: findings annotate as warnings, never fail the check. Run with --print-payload to list the files first."
+    description: "DEFAULT \"auto\": on for PUBLIC repos ; since 0.13.6 private repos stay off (a paid private repo opts in with deep-scan: true, a free one stays silent). \"true\" = on, and warn when the repo is free and private ; \"false\" = never send source. ALSO sends the SOURCE of the files where a security sink was found (at most 80 files / 2M chars) to slopGrade's hosted taint engine (heisen), which reports proven request→sink flows (injection, SSRF, path traversal, XSS…). The only mode in which code leaves the runner — a free private repo never sends source. Forwarded then dropped server-side (never logged, never stored). Advisory: findings annotate as warnings, never fail the check. Run with --print-payload to list the files first."
     required: false
     default: "auto"
   library-mode:
@@ -120,7 +120,7 @@ runs:
         [ "${FW_STRICT}" = "true" ] && ARGS+=(--strict)
         [ -n "${FW_SARIF}" ] && ARGS+=(--sarif "${FW_SARIF}")
         [ "${FW_DEEP_SCAN}" = "true" ] && ARGS+=(--deep-scan)
-        # "auto" (the default since 0.13.1) = on for a PAID repo, silent elsewhere ; the CLI sends source only on a paid
+        # "auto" (since 0.13.6) = on for a PUBLIC repo, opt-in on a private one ; the CLI sends source only on a public
         # verdict either way. library-mode / change-review "auto" follow the deep scan, so "deep-scan: false" never
         # prints a « has no effect » warning for a default the user never set.
         [ "${FW_DEEP_SCAN}" = "auto" ] && ARGS+=(--deep-scan --deep-scan-auto)

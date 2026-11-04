@@ -1,6 +1,6 @@
-// 0.13.1 — the Action's deep scan defaults to "auto" (Jeff 2026-11-03 : default-on for PAID repos). End to end, main()
-// against a stubbed server : a paid verdict sends the sink-bearing source and says so once ; a free verdict sends
-// nothing and prints nothing about it ; an explicit --deep-scan on a free repo still warns. Plus the action.yml wiring.
+// The Action's deep scan defaults to "auto" : since 0.13.6 on for PUBLIC repos only, read from the runner's own OIDC claim.
+// End to end, main() against a stubbed server : a public repo sends the sink-bearing source and says so once ; a private
+// repo sends nothing, and a paid one is invited ; an explicit --deep-scan on a free repo still warns. Plus the action.yml wiring.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
@@ -10,6 +10,8 @@ import { join } from "node:path";
 import { main, DEEP_AUTO_NOTICE } from "../../isolation-gate.mjs";
 
 const sh = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" });
+// A runner's OIDC token as GitHub mints it : the client reads only the visibility claim.
+const oidc = (visibility) => `h.${Buffer.from(JSON.stringify({ repository_visibility: visibility })).toString("base64url")}.s`;
 const BASE_VERDICT = { packBlocking: 0, pattern: "none", conformancePct: null, hardLeaks: 0, reliable: true, leaks: [] };
 const PAID = { ...BASE_VERDICT, gateEntitled: true, gateLevel: "paid" };
 const FREE = { ...BASE_VERDICT, gateEntitled: false, gateLevel: "none" };
@@ -24,7 +26,7 @@ function repo() {
   return { dir, head: sh(dir, "rev-parse", "HEAD").trim() };
 }
 
-async function run(argv, verdict, { pr = false } = {}) {
+async function run(argv, verdict, { pr = false, token = oidc("private") } = {}) {
   const { dir, head: base } = repo();
   let head = base, prEnv = { GITHUB_EVENT_NAME: "push" }, ev = null;
   if (pr) {
@@ -41,7 +43,7 @@ async function run(argv, verdict, { pr = false } = {}) {
   const heisen = [], out = [];
   globalThis.fetch = async (url, opts) => {
     const u = String(url);
-    if (u.startsWith("https://oidc.example/")) return { ok: true, status: 200, json: async () => ({ value: "eyJ.oidc.token" }) };
+    if (u.startsWith("https://oidc.example/")) return { ok: true, status: 200, json: async () => ({ value: token }) };
     if (u.endsWith("/api/ci/pro-extractors")) return { ok: false, status: 402, json: async () => ({ error: "plan-required" }) };
     if (u.endsWith("/api/ci/heisen")) {
       const body = JSON.parse(opts.body);
@@ -62,27 +64,54 @@ async function run(argv, verdict, { pr = false } = {}) {
   }
 }
 
-test("auto on a PAID repo: the sink-bearing source is sent once and the log names what left and the opt-out", async () => {
-  const r = await run(["--gate", "--deep-scan", "--deep-scan-auto"], PAID);
+// 0.13.6 (Jeff 2026-11-04) : the private-code pitch stays true. On "auto" a private repo sends nothing, paid or not.
+test("auto on a PAID PRIVATE repo: no source leaves, and the log invites the opt-in", async () => {
+  const r = await run(["--gate", "--deep-scan", "--deep-scan-auto", "--change-review", "--change-review-auto"], PAID, { pr: true });
+  assert.equal(r.code, 0);
+  assert.equal(r.heisen.length, 0, "a private repo never sends source on the auto default");
+  assert.match(r.text, /Deep scan available on this paid repo: add `deep-scan: "true"`/);
+  assert.doesNotMatch(r.text, /deep scan is on by default/);
+  assert.doesNotMatch(r.text, /deep scan is a paid feature/);
+  assert.doesNotMatch(r.text, /change review/);
+});
+
+test("auto with an unreadable token: the repo counts as private, nothing leaves", async () => {
+  for (const token of ["eyJ.oidc.token", "not-a-jwt", oidc("internal"), "h." + Buffer.from('{"repository_visibility":["public"]}').toString("base64url") + ".s"]) {
+    const r = await run(["--gate", "--deep-scan", "--deep-scan-auto"], PAID, { token });
+    assert.equal(r.heisen.length, 0, token);
+  }
+});
+
+test("an explicit deep-scan: true on a PAID PRIVATE repo sends the source, without the auto notice", async () => {
+  const r = await run(["--gate", "--deep-scan"], PAID);
+  assert.equal(r.heisen.length, 1);
+  assert.deepEqual(r.heisen[0].units.map((u) => u.path), ["app.py"]);
+  assert.doesNotMatch(r.text, /deep scan is on by default/);
+  assert.doesNotMatch(r.text, /Deep scan available/);
+});
+
+test("auto on a PAID PUBLIC repo: the source is sent once and the log names what left and the opt-out", async () => {
+  const r = await run(["--gate", "--deep-scan", "--deep-scan-auto"], PAID, { token: oidc("public") });
   assert.equal(r.code, 0);
   assert.equal(r.heisen.length, 1, "one deep-scan request");
   assert.deepEqual(r.heisen[0].units.map((u) => u.path), ["app.py"]);
   assert.ok(r.text.includes(`::notice title=slopGrade Firewall::${DEEP_AUTO_NOTICE(1, 0)}`), r.text);
+  assert.match(DEEP_AUTO_NOTICE(1, 0), /this public repo/);
   assert.match(DEEP_AUTO_NOTICE(1, 0), /deep-scan: "false"/);
   assert.doesNotMatch(r.text, /deep scan is a paid feature/);
 });
 
 test("auto on a PUBLIC repo, pull request: the source is scanned, the log says so, and no PR hunk ever leaves", async () => {
   const PUBLIC = { ...BASE_VERDICT, gateEntitled: true, gateLevel: "public" };
-  const r = await run(["--gate", "--deep-scan", "--deep-scan-auto", "--change-review", "--change-review-auto"], PUBLIC, { pr: true });
+  const r = await run(["--gate", "--deep-scan", "--deep-scan-auto", "--change-review", "--change-review-auto"], PUBLIC, { pr: true, token: oidc("public") });
   assert.equal(r.code, 0);
   assert.equal(r.heisen.length, 1, "one deep-scan request");
   assert.deepEqual(r.heisen[0].units.map((u) => u.path), ["app.py"]);
   assert.equal(r.heisen[0].hunks, undefined, "change review is paid only : hunks are never sent");
-  assert.ok(r.text.includes(`::notice title=slopGrade Firewall::${DEEP_AUTO_NOTICE(1, 0, "public")}`), r.text);
+  assert.ok(r.text.includes(`::notice title=slopGrade Firewall::${DEEP_AUTO_NOTICE(1, 0)}`), r.text);
   assert.doesNotMatch(r.text, /change review/);
   // an explicit change-review on a public repo says why nothing was reviewed
-  const ex = await run(["--gate", "--deep-scan", "--change-review"], PUBLIC, { pr: true });
+  const ex = await run(["--gate", "--deep-scan", "--change-review"], PUBLIC, { pr: true, token: oidc("public") });
   assert.equal(ex.heisen[0].hunks, undefined);
   assert.match(ex.text, /change review is a paid feature — no PR hunk was sent/);
 });
@@ -108,7 +137,7 @@ test("an explicit --deep-scan on a FREE repo still sends nothing and still warns
 // print « not a pull request run — nothing reviewed » on every run.
 const FULL_AUTO = ["--gate", "--deep-scan", "--deep-scan-auto", "--library-mode", "--library-mode-auto", "--change-review", "--change-review-auto"];
 test("full auto on a PAID application repo, push run : no « requested » / « not a pull request » line ; explicit flags still explain", async () => {
-  const auto = await run(FULL_AUTO, PAID);
+  const auto = await run(FULL_AUTO, PAID, { token: oidc("public") });
   assert.equal(auto.heisen.length, 1);
   assert.equal(auto.heisen[0].library, undefined, "an application is never sent as a library (the field is only sent when true)");
   assert.doesNotMatch(auto.text, /library mode requested/);

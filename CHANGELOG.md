@@ -5,6 +5,14 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.13.6] — 2026-11-04
+
+### Changed
+- **Private repos are opt-in again.** On the "auto" default the deep scan now runs on public repos only, read from the
+  run's own OIDC `repository_visibility` claim. A paid private repo sends no source until it sets `deep-scan: "true"`,
+  and its run log invites it to. A token this client cannot read counts as private. This reverses the 0.13.1 default for
+  private repos ; `deep-scan: "true"` and `deep-scan: "false"` are unchanged.
+
 ## [0.13.5] — 2026-11-04
 
 ### Changed
