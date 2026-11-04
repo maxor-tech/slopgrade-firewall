@@ -340,6 +340,9 @@ export function splitAgainstFeed(rows, feed) {
  * `gateEntitled` is also true for public and free-oss repos (they have the free gate but not the paid catalogue), so it
  * is only a fallback for a server that predates `gateLevel`.
  */
+/** A public repo gets the taint scan free (server slopgrade#1618) : its source is already public. Never change review. */
+export const isPublicVerdict = (v) => !!v && v.gateLevel === "public";
+
 export function isPaidVerdict(v) {
   if (v && typeof v.gateLevel === "string") return v.gateLevel === "paid";
   return !!v && v.gateEntitled === true;

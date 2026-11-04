@@ -24,10 +24,19 @@ function repo() {
   return { dir, head: sh(dir, "rev-parse", "HEAD").trim() };
 }
 
-async function run(argv, verdict) {
-  const { dir, head } = repo();
+async function run(argv, verdict, { pr = false } = {}) {
+  const { dir, head: base } = repo();
+  let head = base, prEnv = { GITHUB_EVENT_NAME: "push" }, ev = null;
+  if (pr) {
+    writeFileSync(join(dir, "app.py"), readFileSync(join(dir, "app.py"), "utf8").replace("return 'ok'", "return 'done'"));
+    sh(dir, "commit", "-qam", "change");
+    head = sh(dir, "rev-parse", "HEAD").trim();
+    ev = join(dir, "..", `${dir.split(/[\\/]/).pop()}-event.json`);
+    writeFileSync(ev, JSON.stringify({ pull_request: { base: { sha: base }, head: { sha: head } } }));
+    prEnv = { GITHUB_EVENT_NAME: "pull_request", GITHUB_EVENT_PATH: ev };
+  }
   const env = { GITHUB_ACTIONS: "true", ACTIONS_ID_TOKEN_REQUEST_URL: "https://oidc.example/token?api-version=2",
-    ACTIONS_ID_TOKEN_REQUEST_TOKEN: "runner-token", GITHUB_SHA: head, GITHUB_WORKSPACE: dir, GITHUB_EVENT_NAME: "push" };
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: "runner-token", GITHUB_SHA: head, GITHUB_WORKSPACE: dir, ...prEnv };
   const realFetch = globalThis.fetch, realLog = console.log;
   const heisen = [], out = [];
   globalThis.fetch = async (url, opts) => {
@@ -49,6 +58,7 @@ async function run(argv, verdict) {
     globalThis.fetch = realFetch;
     console.log = realLog;
     rmSync(dir, { recursive: true, force: true });
+    if (ev) rmSync(ev, { force: true });
   }
 }
 
@@ -60,6 +70,21 @@ test("auto on a PAID repo: the sink-bearing source is sent once and the log name
   assert.ok(r.text.includes(`::notice title=slopGrade Firewall::${DEEP_AUTO_NOTICE(1, 0)}`), r.text);
   assert.match(DEEP_AUTO_NOTICE(1, 0), /deep-scan: "false"/);
   assert.doesNotMatch(r.text, /deep scan is a paid feature/);
+});
+
+test("auto on a PUBLIC repo, pull request: the source is scanned, the log says so, and no PR hunk ever leaves", async () => {
+  const PUBLIC = { ...BASE_VERDICT, gateEntitled: true, gateLevel: "public" };
+  const r = await run(["--gate", "--deep-scan", "--deep-scan-auto", "--change-review", "--change-review-auto"], PUBLIC, { pr: true });
+  assert.equal(r.code, 0);
+  assert.equal(r.heisen.length, 1, "one deep-scan request");
+  assert.deepEqual(r.heisen[0].units.map((u) => u.path), ["app.py"]);
+  assert.equal(r.heisen[0].hunks, undefined, "change review is paid only : hunks are never sent");
+  assert.ok(r.text.includes(`::notice title=slopGrade Firewall::${DEEP_AUTO_NOTICE(1, 0, "public")}`), r.text);
+  assert.doesNotMatch(r.text, /change review/);
+  // an explicit change-review on a public repo says why nothing was reviewed
+  const ex = await run(["--gate", "--deep-scan", "--change-review"], PUBLIC, { pr: true });
+  assert.equal(ex.heisen[0].hunks, undefined);
+  assert.match(ex.text, /change review is a paid feature — no PR hunk was sent/);
 });
 
 test("auto on a FREE repo: no source is sent and the log says nothing about the deep scan", async () => {
