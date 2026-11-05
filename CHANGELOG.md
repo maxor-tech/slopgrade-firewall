@@ -5,6 +5,13 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.13.10] — 2026-11-05
+
+### Fixed
+- **An advisory pack keeps a low severity.** Every advisory finding was reported as medium, so the server's order never
+  reached a reader. A low finding is now a notice in the log and a SARIF note, and it reads after stronger findings in its
+  pack. Blocking is unchanged, and a finding above low still reads as medium.
+
 ## [0.13.9] — 2026-11-05
 
 ### Added
