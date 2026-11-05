@@ -5,6 +5,12 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.13.8] — 2026-11-04
+
+### Fixed
+- **The deep scan summary keeps its finding count.** 0.13.7 put the unanswered paths in the summary line. A log line is
+  capped at 240 characters, so long paths cut off the rest of the line. The paths now have their own line.
+
 ## [0.13.7] — 2026-11-04
 
 ### Fixed

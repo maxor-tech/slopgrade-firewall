@@ -64,7 +64,7 @@ import {
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs, refusalLine,
   advisoryOfferOf, offerLogLine,
 } from "./src/client-lib.mjs";
-import { oidcRepoIsPublic, sinkFiles, prChangedPaths, prChangedRanges, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, CANDIDATES_RANKED_NOTE, heisenFeed, splitAgainstFeed, isPaidVerdict, isPublicVerdict, deepScanNudge, unansweredNote } from "./src/deep-scan.mjs";
+import { oidcRepoIsPublic, sinkFiles, prChangedPaths, prChangedRanges, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, CANDIDATES_RANKED_NOTE, heisenFeed, splitAgainstFeed, isPaidVerdict, isPublicVerdict, deepScanNudge, unansweredNote, unansweredFiles } from "./src/deep-scan.mjs";
 import { prHunks, validChangeReview, C_HUNK, C_REVIEW_NOTE, CPP_HUNK, CPP_REVIEW_NOTE, RUST_HUNK, RUST_REVIEW_NOTE, noticeHint, unreviewedNote, REVIEW_BAND_NOTE, reviewBandHeading } from "./src/change-review.mjs";
 import { fixableHitIndex, attachFixes } from "./src/autofix.mjs";
 import { IGNORE_FILE, parseIgnore, ignoreMatcher, readIgnoreText } from "./src/ignore.mjs";
@@ -474,7 +474,7 @@ export async function main(argv = [], env = process.env) {
 
   // 5b. OPT-IN deep scan (heisen taint engine) — source only ever goes to the CANONICAL origin, like the pro bundle
   //     only ever comes from it. Fail-open on every path: a deep-scan hiccup never touches the verdict above.
-  let deepRows = [], deepLine = null, deepBlocking = 0, libRows = [], libOutcomes = null, libRanked = false, changeBlock = null;
+  let deepRows = [], deepLine = null, deepUnanswered = "", deepBlocking = 0, libRows = [], libOutcomes = null, libRanked = false, changeBlock = null;
   if (deep) {
     if (origin !== DEFAULT_ORIGIN) { if (!deepAuto) ghWarn("deep scan skipped — source is only ever sent to the canonical slopGrade origin."); }
     // Source leaves the runner ONLY for a paid or public repo. Before 0.10.12 a free or public repo with the option on uploaded its
@@ -495,7 +495,8 @@ export async function main(argv = [], env = process.env) {
         libOutcomes = libKind?.kind === "library" ? r.response.candidateOutcomes : null;
         libRanked = libKind?.kind === "library" && r.response.candidatesRanked === true;
         changeBlock = change?.hunks.length ? validChangeReview(r.response.changeReview) : null;
-        deepLine = `${r.response.scanned} file(s) analysed${deep.fromPr ? ` (${deep.fromPr} changed by this PR, sent first)` : ""}${deep.skipped ? ` (+${deep.skipped} over the cap, not sent)` : ""}${unansweredNote(r.response.unanswered, r.response.unansweredPaths)}${Number.isInteger(r.response.scoped) && r.response.scoped > 0 ? ` · ${r.response.scoped} analysed only where this PR changed them (and their callers)` : ""}`;
+        deepUnanswered = unansweredFiles(r.response.unansweredPaths);
+        deepLine = `${r.response.scanned} file(s) analysed${deep.fromPr ? ` (${deep.fromPr} changed by this PR, sent first)` : ""}${deep.skipped ? ` (+${deep.skipped} over the cap, not sent)` : ""}${unansweredNote(r.response.unanswered)}${Number.isInteger(r.response.scoped) && r.response.scoped > 0 ? ` · ${r.response.scoped} analysed only where this PR changed them (and their callers)` : ""}`;
       }
     }
   }
@@ -565,6 +566,7 @@ export async function main(argv = [], env = process.env) {
     // otherwise it stays an advisory warning. A confirming row is never re-annotated (its pack already reported it).
     const mode = deepBlock ? "blocking — opted in" : "advisory";
     line(`\nslopGrade Firewall — deep scan (heisen taint engine, ${mode}): ${deepLine}${deepRows.length ? ` · ${fresh.length} new finding(s), ${confirmed.length} confirming an existing one` : " · 0 finding(s)"}`);
+    if (deepUnanswered) line(deepUnanswered);
     let bcDemoted = 0;
     for (const f of fresh) {
       const promote = deepBlock && !(repoAggregates && applyBlockConfidence(f));
