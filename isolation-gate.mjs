@@ -29,7 +29,7 @@ import { receiptLine } from "./src/receipt.mjs";
 // The 10 flagship classes (base + go/dotnet variants where they exist).
 import { sqliWrapperCfg } from "./src/sqli-extract.mjs";
 import { extractSqliFingerprintBest } from "./src/sqli-best.mjs";
-import { initIr } from "./src/ts-ir.mjs";
+import { initIr, parseFile, irReady } from "./src/ts-ir.mjs";
 import { vendoredRuntime } from "./src/ts-vendor.mjs";
 import { setOptInSources, optInTokens } from "./src/sources.mjs";
 import { extractGoSqliFingerprint } from "./src/gosqli-extract.mjs";
@@ -182,6 +182,9 @@ async function loadProPacks(origin, oidcToken, root, rel, isIgnored = () => fals
   // The pro walk set adds the infra formats (yaml/tf/json/Dockerfile…) the free CODE_EXTS walk never reads.
   const proFiles = (mod?.PRO_WALK_EXTS instanceof RegExp ? walk(root, mod.PRO_WALK_EXTS) : walk(root, CODE_EXTS)).filter((f) => !isIgnored(rel(f)));
   const prepare = typeof mod?.PRO_PREPARE === "function" ? mod.PRO_PREPARE : undefined;   // per-repo pre-pass (optional)
+  // The bundle has no tree-sitter runtime of its own : lend it this one. An older bundle has no hook, and a failure here
+  // only leaves the bundle's tree rules silent.
+  try { mod?.PRO_ADOPT_IR?.({ parseFile, irReady }); } catch { /* line rules keep working */ }
   const { wire, errors } = runProPacks(packs, proFiles, { read: (f) => readFileSync(f, "utf8"), rel, prepare });
   if (errors > 0) ghWarn(`${errors} pro extractor call(s) threw and were skipped.`);
   return { wire: sanitizeProFingerprints(wire), packCount: packs.length, version: String(j.version), note: ` (paid · pro extractors ${sanitizeLogLine(String(j.version), 40)})` };

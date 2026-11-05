@@ -67,11 +67,17 @@ export async function initIr(grammars = Object.keys(GRAMMAR), runtime = null) {
   }
 }
 
+// The pro bundle is its own module on the runner, with no runtime of its own : the client lends it the one it loaded.
+let adopted = null;
+/** Read files through another instance of this module (`{ parseFile, irReady }`). */
+export function adoptIr(other) { adopted = other && typeof other.parseFile === "function" && typeof other.irReady === "function" ? other : null; }
+
 /** True once initIr() has loaded the grammar for this file. */
-export const irReady = (file) => parsers.has(langOf(file) ?? "");
+export const irReady = (file) => (adopted ? adopted.irReady(file) : parsers.has(langOf(file) ?? ""));
 
 /** Parse one file → { tree, lang } or null (no grammar loaded, or a parse error at the root). */
 export function parseFile(text, file) {
+  if (adopted) return adopted.parseFile(text, file);
   const lang = langOf(file);
   const p = lang && parsers.get(lang);
   if (!p) return null;
