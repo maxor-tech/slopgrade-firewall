@@ -5,6 +5,8 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.13.7] — 2026-11-04
+
 ### Fixed
 - **The deep scan log names the files it did not answer.** It used to print only a count, so a reader could not see
   which files the scan never covered. At most 5 are named, then `+N more`.
