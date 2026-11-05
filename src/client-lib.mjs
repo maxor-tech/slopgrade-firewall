@@ -140,7 +140,7 @@ export function refusalLine(status, body) {
  */
 // Coerce to a bounded identifier string — the boundary must not trust the shape of names/paths coming from the
 // extractor, so a future extractor bug can never let a source-bearing value ride through tableCols/rls untouched.
-const ident = (x) => String(x).replace(/[ --]/g, "").slice(0, 200);
+const ident = (x) => String(x).replace(/[\x00-\x1f\x7f-\x9f]/g, "").slice(0, 200);
 
 // rls.loc = { table: { file, line } }  the table's definition site, so an rls leak can be scoped to the PR that touches it
 // (P9). Untrusted at this boundary: d 200 entries, table/file d 300 chars, line a positive integer, file a repo-relative
