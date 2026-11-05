@@ -297,14 +297,19 @@ export const CANDIDATE_DISMISS_HINT = "reviewed and not a bug? add a `heisen-ign
 
 export const UNANSWERED_NAMED_MAX = 5;
 
-/** The run-log clause for files the engine did not answer. Names them, so a reader can see what the scan never covered;
- *  a server without `unansweredPaths` still gets the count. Empty when every file was answered. */
-export function unansweredNote(count, paths) {
-  if (!count) return "";
+/** The summary clause for files the engine did not answer. Count only: sanitizeLogLine caps a line at 240 characters, so
+ *  paths in the summary push out the finding count that follows them. Empty when every file was answered. */
+export function unansweredNote(count) {
+  return count ? ` · ${count} unanswered (partial)` : "";
+}
+
+/** The log line that names the unanswered files, so a reader can see what the scan never covered. Empty when the server
+ *  sent no usable paths. */
+export function unansweredFiles(paths) {
   const named = Array.isArray(paths) ? paths.filter((p) => typeof p === "string" && p) : [];
+  if (!named.length) return "";
   const more = named.length - UNANSWERED_NAMED_MAX;
-  const list = named.slice(0, UNANSWERED_NAMED_MAX).join(", ");
-  return ` · ${count} unanswered (partial)${list ? `: ${list}${more > 0 ? ` +${more} more` : ""}` : ""}`;
+  return `slopGrade Firewall — unanswered files: ${named.slice(0, UNANSWERED_NAMED_MAX).join(", ")}${more > 0 ? ` +${more} more` : ""}`;
 }
 
 /** Shape check of the server answer; anything else is treated as no answer (fail open). */

@@ -3,10 +3,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { sanitizeLogLine } from "../client-lib.mjs";
 import { prSentence, loadFigures } from "../../scripts/sync-pr-figures.mjs";
 import {
   oidcRepoIsPublic, sinkFiles, selectDeepUnits, hasSinkMarker, prChangedPaths, validHeisenResponse, evidenceLine, heisenFeed, requestDeepScan, splitAgainstFeed, deepScanNudge, isPaidVerdict,
-  DEEP_MAX_UNITS, DEEP_MAX_UNIT_CHARS, DEEP_MAX_TOTAL_CHARS, unansweredNote,
+  DEEP_MAX_UNITS, DEEP_MAX_UNIT_CHARS, DEEP_MAX_TOTAL_CHARS, unansweredNote, unansweredFiles,
 } from "../deep-scan.mjs";
 
 test("sinkFiles = the files a pack recorded hits for (deduped, sorted); hitless files are not candidates", () => {
@@ -263,18 +264,22 @@ test("heisenFeed preserves both confidence spellings without rejecting malformed
 
 // 2026-11-04 : the log said « 3 unanswered (partial) » on every run of this very repo and no file was named, though the
 // server sends `unansweredPaths`. A reader could not tell which files the scan never covered.
-test("unansweredNote names the files, capped, and says nothing when every file was answered", () => {
-  assert.equal(unansweredNote(0, []), "");
-  assert.equal(unansweredNote(0, undefined), "");
-  assert.equal(unansweredNote(2, ["a.mjs", "b.mjs"]), " · 2 unanswered (partial): a.mjs, b.mjs");
-  const many = Array.from({ length: 9 }, (_, i) => `f${i}.ts`);
-  assert.equal(unansweredNote(9, many), " · 9 unanswered (partial): f0.ts, f1.ts, f2.ts, f3.ts, f4.ts +4 more");
+test("unansweredNote is the count alone, so long paths cannot push the finding count out of the capped summary", () => {
+  assert.equal(unansweredNote(0), "");
+  assert.equal(unansweredNote(undefined), "");
+  assert.equal(unansweredNote(8), " · 8 unanswered (partial)");
+  const summary = sanitizeLogLine(`80 file(s) analysed (1 changed by this PR, sent first) (+609 over the cap, not sent)${unansweredNote(8)} · 0 finding(s)`);
+  assert.ok(summary.endsWith("0 finding(s)"), summary);
 });
 
-test("unansweredNote still reports the count when an older server sends no paths or a bad shape", () => {
-  assert.equal(unansweredNote(3, undefined), " · 3 unanswered (partial)");
-  assert.equal(unansweredNote(3, "a.mjs"), " · 3 unanswered (partial)");
-  assert.equal(unansweredNote(3, [1, null, "a.mjs"]), " · 3 unanswered (partial): a.mjs");
+test("unansweredFiles names the files on their own line, capped, and is empty with no usable paths", () => {
+  assert.equal(unansweredFiles(["a.mjs", "b.mjs"]), "slopGrade Firewall — unanswered files: a.mjs, b.mjs");
+  const many = Array.from({ length: 9 }, (_, i) => `f${i}.ts`);
+  assert.equal(unansweredFiles(many), "slopGrade Firewall — unanswered files: f0.ts, f1.ts, f2.ts, f3.ts, f4.ts +4 more");
+  assert.equal(unansweredFiles([]), "");
+  assert.equal(unansweredFiles(undefined), "");
+  assert.equal(unansweredFiles("a.mjs"), "");
+  assert.equal(unansweredFiles([1, null, "a.mjs"]), "slopGrade Firewall — unanswered files: a.mjs");
 });
 
 test("no source file of this client holds a raw NUL: the engine refuses such a file whole", async () => {
