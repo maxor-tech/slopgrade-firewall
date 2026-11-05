@@ -5,6 +5,12 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.13.9] — 2026-11-05
+
+### Added
+- **The client lends its syntax tree to the paid extractors.** They run as their own module on the runner, with no parser
+  of their own, so rules that read the tree could not run there. No source leaves the runner, and only fingerprints are sent, as before.
+
 ## [0.13.8] — 2026-11-04
 
 ### Fixed
