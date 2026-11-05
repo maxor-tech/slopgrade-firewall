@@ -5,6 +5,12 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+### Fixed
+- **The deep scan log names the files it did not answer.** It used to print only a count, so a reader could not see
+  which files the scan never covered. At most 5 are named, then `+N more`.
+- **`src/client-lib.mjs` is scanned again.** It held raw NUL bytes in a regular expression, and the engine refuses such
+  a file whole. The expression is now written with escapes and matches the same characters.
+
 ## [0.13.6] — 2026-11-04
 
 ### Changed

@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { prSentence, loadFigures } from "../../scripts/sync-pr-figures.mjs";
 import {
   oidcRepoIsPublic, sinkFiles, selectDeepUnits, hasSinkMarker, prChangedPaths, validHeisenResponse, evidenceLine, heisenFeed, requestDeepScan, splitAgainstFeed, deepScanNudge, isPaidVerdict,
-  DEEP_MAX_UNITS, DEEP_MAX_UNIT_CHARS, DEEP_MAX_TOTAL_CHARS,
+  DEEP_MAX_UNITS, DEEP_MAX_UNIT_CHARS, DEEP_MAX_TOTAL_CHARS, unansweredNote,
 } from "../deep-scan.mjs";
 
 test("sinkFiles = the files a pack recorded hits for (deduped, sorted); hitless files are not candidates", () => {
@@ -259,4 +259,28 @@ test("heisenFeed preserves both confidence spellings without rejecting malformed
       assert.equal(feed[0].line, 3);
     }
   }
+});
+
+// 2026-11-04 : the log said « 3 unanswered (partial) » on every run of this very repo and no file was named, though the
+// server sends `unansweredPaths`. A reader could not tell which files the scan never covered.
+test("unansweredNote names the files, capped, and says nothing when every file was answered", () => {
+  assert.equal(unansweredNote(0, []), "");
+  assert.equal(unansweredNote(0, undefined), "");
+  assert.equal(unansweredNote(2, ["a.mjs", "b.mjs"]), " · 2 unanswered (partial): a.mjs, b.mjs");
+  const many = Array.from({ length: 9 }, (_, i) => `f${i}.ts`);
+  assert.equal(unansweredNote(9, many), " · 9 unanswered (partial): f0.ts, f1.ts, f2.ts, f3.ts, f4.ts +4 more");
+});
+
+test("unansweredNote still reports the count when an older server sends no paths or a bad shape", () => {
+  assert.equal(unansweredNote(3, undefined), " · 3 unanswered (partial)");
+  assert.equal(unansweredNote(3, "a.mjs"), " · 3 unanswered (partial)");
+  assert.equal(unansweredNote(3, [1, null, "a.mjs"]), " · 3 unanswered (partial): a.mjs");
+});
+
+test("no source file of this client holds a raw NUL: the engine refuses such a file whole", async () => {
+  const { readFileSync, readdirSync } = await import("node:fs");
+  const root = new URL("../../", import.meta.url);
+  const files = ["isolation-gate.mjs", ...readdirSync(new URL("src/", root)).filter((f) => f.endsWith(".mjs")).map((f) => `src/${f}`)];
+  assert.ok(files.length > 20);
+  assert.deepEqual(files.filter((f) => readFileSync(new URL(f, root)).includes(0)), []);
 });
