@@ -59,7 +59,7 @@ import { firewallVerdict } from "./src/gate-verdict.mjs";
 import { postFindingReview, resolvePrContext, fetchPrDiff, classifyAgainstDiff, scopedBlocking, diffSummaryMarkdown, gateScopeOf } from "./src/pr-suggest.mjs";
 import {
   resolveOrigin, DEFAULT_ORIGIN, classifyEnv, validVerdict, sanitizeLogLine, sanitizeFingerprint, sanitizePackFingerprints,
-  parseLeak, leakText, findingLocation, buildSarif, collectPackBlocks, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
+  parseLeak, leakText, findingLocation, buildSarif, collectPackBlocks, advisoryLevel, advisoryOrder, advisorySeverity, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
   validProBundleResponse, verifyBundleSig, PRO_BUNDLE_PUBKEY, runProPacks, sanitizeProFingerprints, FREE_PACK_COUNT, MAX_SARIF_RESULTS, MAX_PRO_BUNDLE_BYTES,
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs, refusalLine,
   advisoryOfferOf, offerLogLine,
@@ -533,7 +533,8 @@ export async function main(argv = [], env = process.env) {
     const demoted = !calibrating && purposeAdvisory;
     const advisory = calibrating || demoted;
     line(`\nslopGrade Firewall — ${label}: ${block.count} finding(s)${calibrating ? " (advisory — calibration window)" : demoted ? ` (advisory — ${purpose.purpose} repository)` : ""}`);
-    const findings = Array.isArray(block.findings) ? block.findings : [];
+    const rows = Array.isArray(block.findings) ? block.findings : [];
+    const findings = advisory ? advisoryOrder(rows) : rows;
     // Location: most packs put "file:line" in `table`; the AC family (accessControl/dbSafety) puts a DB TABLE NAME
     // there + the real path in `file` — findingLocation resolves both, so annotations/feed/SARIF land on the RIGHT file.
     for (const f of findings) {
@@ -549,12 +550,12 @@ export async function main(argv = [], env = process.env) {
         const exc = advisory ? null : exceptionFor(exceptions.active, { pack: key, rule: f.rule, file: loc.file, line: loc.line });
         if (exc && (f.severity === "high" || f.severity === "critical")) exceptedBlocking++;
         const warnOnly = advisory || Boolean(exc);
-        console.log(`::${warnOnly ? "warning" : "error"} file=${wfFile(loc.file)},line=${loc.line},title=slopGrade Firewall::[${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(detail)}`);
+        console.log(`::${warnOnly ? advisoryLevel(f.severity) : "error"} file=${wfFile(loc.file)},line=${loc.line},title=slopGrade Firewall::[${sanitizeLogLine(f.rule)}] ${sanitizeLogLine(detail)}`);
         // origSeverity lets the exit decision below count what WOULD have blocked, to print the purpose line only then.
         // The reason rides in the feed row too (review + SARIF), not only in the pack header line (e2e 2026-10-27).
         const note = calibrating ? "(advisory — calibration window)" : demoted ? `(advisory — ${purpose.purpose} repository)`
           : exc ? `(excepted until ${exc.until} by ${exc.owner} — ${exc.reason})` : "";
-        feed.push({ file: loc.file, line: loc.line, pack: key, rule: f.rule, detail: note ? `${detail} ${note}` : detail, severity: warnOnly ? "medium" : f.severity,
+        feed.push({ file: loc.file, line: loc.line, pack: key, rule: f.rule, detail: note ? `${detail} ${note}` : detail, severity: warnOnly ? advisorySeverity(f.severity) : f.severity,
           ...(note ? { advisoryNote: note } : {}), ...(demoted ? { origSeverity: f.severity } : {}) });
       }
     }

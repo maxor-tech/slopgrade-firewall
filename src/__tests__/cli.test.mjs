@@ -225,6 +225,42 @@ test("a pack in the server's calibration window (advisory:true) annotates as a W
   });
 });
 
+test("an advisory pack keeps the server's low severity : a notice, a SARIF note, last in the log, and never blocking", async () => {
+  const paid = { ...VERDICT, gateEntitled: true, gateLevel: "paid", packBlocking: 0,
+    libraryThreat: { count: 3, hidden: 0, blocking: 0, advisory: true, findings: [
+      { rule: "library-xss", table: "src/a.js:4", detail: "weak signal", severity: "low" },
+      { rule: "library-xxe", table: "src/B.java:9", detail: "strong signal", severity: "medium" },
+      { rule: "library-injected", table: "src/c.js:2", detail: "a high in calibration", severity: "high" },
+    ] } };
+  const sarif = join(deepWorkspace(), "low.sarif");
+  await withStubbedNetwork(paid, async ({ out }) => {
+    const code = await main(["--gate", "--sarif", sarif], { ...CI_ENV, FW_UPLOAD_SARIF: "false" });
+    assert.equal(code, 0);
+    const text = out.join("\n");
+    assert.match(text, /::notice file=src\/a\.js,line=4,title=slopGrade Firewall::\[library-xss\]/);
+    assert.match(text, /::warning file=src\/B\.java,line=9,title=slopGrade Firewall::\[library-xxe\]/);
+    assert.match(text, /::warning file=src\/c\.js,line=2,title=slopGrade Firewall::\[library-injected\]/);
+    assert.doesNotMatch(text, /::error [^\n]*\[library-/);
+    assert.ok(text.indexOf("[library-xxe]") < text.indexOf("[library-xss]"), "a stronger line reads before a low one");
+    const levels = Object.fromEntries(JSON.parse(readFileSync(sarif, "utf8")).runs[0].results.map((r) => [r.locations[0].physicalLocation.artifactLocation.uri, r.level]));
+    assert.deepEqual([levels["src/a.js"], levels["src/B.java"], levels["src/c.js"]], ["note", "warning", "warning"]);
+  });
+});
+
+test("a low finding outside an advisory pack keeps today's behaviour", async () => {
+  const live = { ...VERDICT, gateEntitled: true, gateLevel: "paid", packBlocking: 0,
+    rlsPerf: { count: 2, hidden: 0, blocking: 0, findings: [
+      { rule: "rls-perf-a", table: "db/a.sql:1", detail: "first", severity: "low" },
+      { rule: "rls-perf-b", table: "db/b.sql:2", detail: "second", severity: "medium" },
+    ] } };
+  await withStubbedNetwork(live, async ({ out }) => {
+    await main(["--gate"], { ...CI_ENV, FW_UPLOAD_SARIF: "false" });
+    const text = out.join("\n");
+    assert.match(text, /::error file=db\/a\.sql,line=1,/);
+    assert.ok(text.indexOf("[rls-perf-a]") < text.indexOf("[rls-perf-b]"), "the server's order holds");
+  });
+});
+
 test("--gate --strict fails CLOSED on a blocked custom origin (a no-verdict path)", async () => {
   await withStubbedNetwork(VERDICT, async ({ calls, out }) => {
     const code = await main(["--gate", "--strict"], { ...CI_ENV, SLOPGRADE_ORIGIN: "https://evil.example" });
