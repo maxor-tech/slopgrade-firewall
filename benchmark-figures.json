@@ -6,5 +6,12 @@
   "labels": 1025,
   "kappa": 0.933,
   "deep": { "replayedPrs": 52089, "blockedPrs": 245, "justified": 46 },
-  "static": { "replayedPrs": 52089, "blockedPrs": 59, "justified": 11 }
+  "static": { "replayedPrs": 52089, "blockedPrs": 59, "justified": 11 },
+  "blocking": {
+    "note": "What blocks today, copied from the live catalog (`node scripts/sync-pr-figures.mjs --catalog`). README.md and action.yml must state these lists ; the --check mode and src/__tests__/blocking-truth.test.mjs fail on drift.",
+    "source": "https://app.slopgrade.ai/api/catalog",
+    "checked": "2026-11-08",
+    "free": [{ "key": "accessControl" }, { "key": "xss", "kinds": ["php-echo"] }],
+    "paid": [{ "key": "accessControl" }, { "key": "xss", "kinds": ["php-echo"] }, { "key": "timingUnsafeCompare" }]
+  }
 }
