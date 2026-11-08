@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
-      - uses: maxor-tech/slopgrade-firewall@v0.13.10
+      - uses: maxor-tech/slopgrade-firewall@v0.13.11
 ```
 
 `id-token: write` is required (it is how the repo proves itself). `pull-requests: write` posts the findings on the PR.
@@ -55,8 +55,8 @@ jobs:
       - uses: maxor-tech/slopgrade-firewall@<sha>   # pin the commit SHA (a tag can be re-pointed; a SHA cannot)
         with:
           # firewall-mode: "gate"      # DEFAULT — block on a hard leak or a blocking finding. Free: public repos and your
-          #                              FIRST private repo block on cross-tenant + the 22 OSS classes; other repos
-          #                              without a paid slot stay advisory, never blocked
+          #                              FIRST private repo block on cross-tenant + XSS in PHP output (every other
+          #                              class reports, never blocks); other repos without a paid slot stay advisory
           # firewall-mode: "advisory"  # opt into report-only: report leaks, never block
           # firewall-mode: "off"       # disable
           # strict: "true"             # with gate: fail the build if no verdict is available (default: fail open)
@@ -137,8 +137,9 @@ marked ✓ (the four unmarked — XXE, insecure deserialization, hardcoded secre
 5. **Exit** — `advisory` always exits 0 (reports only). `gate` (the default) blocks (exit 1) **only** on a `reliable`
    cross-tenant hard leak in an entitled repo, **or** a blocking (critical/high) detector finding the server counted
    for this repo, **or** (opt-in `deep-scan-block`) a new deep-scan finding. **Entitled** = a public repo, your **first
-   private repo** (the free allocation — both block on cross-tenant + the 22 OSS classes), or a paid slot (every
-   calibrated class). Any other repo in `gate` mode stays advisory — the paywall fails open, it is never blocked. The
+   private repo** (the free allocation — both block on cross-tenant + XSS in PHP output), or a paid slot
+   (cross-tenant + XSS in PHP output + timing-unsafe signature checks). Every other class reports as a warning and
+   never blocks : a class blocks only after blind evidence shows it is right often enough. Any other repo in `gate` mode stays advisory — the paywall fails open, it is never blocked. The
    whole decision is the pure, tested [`firewallVerdict`](./src/gate-verdict.mjs).
    **Clean as you code:** on a pull request those counts are **scoped to what the PR introduced** — pre-existing debt
    is reported but never blocks the PR, so adopting the gate on a repo with a backlog doesn't block its next PR on
@@ -343,9 +344,9 @@ public repos and on your first private repo. The **hosted** [slopGrade Firewall]
 | Dataflow | intra-function | cross-function + cross-file (interprocedural taint) |
 | False-positive suppression | commodity context checks | calibrated on a large private corpus |
 | Findings shown | the 22 OSS classes : every finding ; the other classes : the **count** + **one located sample** (`file:line`, rule name withheld) | every finding, rule name + detail |
-| **Public** repos | cross-tenant gate + the 22 OSS classes **block, free** | blocking gate on every calibrated class |
-| **Your first private repo** | cross-tenant gate + the 22 OSS classes **block, free** (one per account) | blocking gate on every calibrated class |
-| **Other private repos** | **advisory only** — never blocked | **blocking gate** on every calibrated class |
+| **Public** repos | cross-tenant + XSS in PHP output **block, free** ; the other classes report | blocking gate : cross-tenant + XSS in PHP output + timing-unsafe signature checks |
+| **Your first private repo** | cross-tenant + XSS in PHP output **block, free** (one per account) ; the other classes report | blocking gate : cross-tenant + XSS in PHP output + timing-unsafe signature checks |
+| **Other private repos** | **advisory only** — never blocked | **blocking gate** : cross-tenant + XSS in PHP output + timing-unsafe signature checks |
 | Verified auto-fix + inline PR feed | feed : the located sample per class | full feed + verified auto-fix |
 
 Your **first private repo** blocks for free on the same classes as a public repo. **Further** private repos run

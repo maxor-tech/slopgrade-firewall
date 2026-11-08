@@ -5,6 +5,16 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.13.11] — 2026-11-08
+
+### Fixed
+- **The README and the action inputs now say what really blocks.** They said that public repos and the first private
+  repo block on « cross-tenant + the 22 OSS classes », and that a paid slot blocks on every calibrated class. The live
+  catalog blocks on cross-tenant + XSS in PHP output for free, and adds timing-unsafe signature checks on a paid slot.
+  Every other class reports as a warning. The blocking lists now come from the catalog (`benchmark-figures.json`
+  `blocking`, refreshed by `node scripts/sync-pr-figures.mjs --catalog`), and `--check` plus a test fail when the copy
+  drifts. Blocking behavior does not change.
+
 ## [0.13.10] — 2026-11-05
 
 ### Fixed
