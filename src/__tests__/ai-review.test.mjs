@@ -177,7 +177,7 @@ test("aiReviewOutput: flags become notices on the real file and line, and an unm
   assert.equal(out.warn, false);
   assert.deepEqual(out.notices, ["::notice file=a%2Cb%3Ac.py,line=3,title=slopGrade AI review (triage)::XSS (confidence 0.90) — raw input"]);
   assert.match(out.lines[0], /AI review \(your key, claude-opus-5-5, triage\): 1 of 3 PR hunk\(s\) flagged\. Notices only, never blocking\./);
-  assert.equal(out.lines[1], "  Measured on slopGrade's sets: 88 of 100 real CVE changes flagged, 56 of 60 CVEs published after the model's cutoff; 15 of 600 ordinary commits flagged, 10 of them matching a published CVE of the same class.");
+  assert.equal(out.lines[1], "  Measured on slopGrade's sets: 88 of 100 real CVE changes flagged, 56 of 60 CVEs published after the model's cutoff; 15 of 600 ordinary commits flagged, 10 of them matching a published CVE of the same class. On 8,165 AI-written public commits: 126 flagged (1.5 %); a blind second reviewer judged 72 of the 87 flags it could decide real (83 %).");
   assert.match(aiReviewOutput({ ...r, model: "gpt-6.1-sol" }).lines[1], /84 of 100 real CVE changes flagged.*8 of 150 ordinary commits/);
   const other = aiReviewOutput({ ...r, model: "claude-sonnet-5-5" });
   assert.match(other.lines[1], /claude-sonnet-5-5 is not measured by slopGrade; claude-opus-5-5 flagged 88 of 100/);
