@@ -278,7 +278,7 @@ or logic bugs that no taint engine or pattern sees; this is the part of the gate
 - **No key, on a paid slot: hosted** (client ≥ 0.15.0). Leave `ai-review-key` empty and the hunks go, after the
   verdict confirms the paid slot, to `https://app.slopgrade.ai/api/ci/ai-review` with the run's OIDC proof. slopGrade
   runs the default model with its own key, then drops the code: never logged, never stored; only counts (hunks
-  reviewed, flagged, tokens) are kept with the run. At most 200 hosted reviews per repo per 24 h. A free repo with no key
+  reviewed, flagged, tokens) are kept with the run. One hosted review per commit run, at most 200 per repo per 24 h. A free repo with no key
   sends nothing and reads one warning. The hosted review is turned on per deployment; until then the run says to use
   your own key.
 - **What is sent** — the PR's changed lines with 3 lines of context, for the files the change review reads, up to

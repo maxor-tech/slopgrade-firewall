@@ -121,6 +121,8 @@ test("requestHostedReview: a refusal says why in the reader's terms, a flag on a
     [reply(402, { error: "plan-required" }), /needs a paid slot — set ai-review-key/],
     [reply(503, { error: "ai-review-unavailable" }), /not available yet — set ai-review-key/],
     [reply(429, { error: "daily-cap", cap: 200 }), /daily cap of 200 hosted reviews/],
+    [reply(409, { error: "already-reviewed" }), /already had its hosted review \(one per run\)/],
+    [reply(409, { error: "no-run" }), /no run for this commit/],
     [reply(502, { error: "provider-failed", detail: "provider HTTP 529" }), /model provider failed \(provider HTTP 529\)/],
     [reply(200, { flags: [{ path: "other.py", newStart: 3, class: "x", confidence: 0.9, why: "y" }] }), /malformed answer/],
     [reply(200, { flags: [{ path: "app/login.py", newStart: 10, class: "x", confidence: 7, why: "y" }] }), /malformed answer/],

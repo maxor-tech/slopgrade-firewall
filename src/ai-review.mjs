@@ -179,6 +179,7 @@ export function hostedRefusal(status, body) {
   if (status === 402) return "the hosted AI review needs a paid slot — set ai-review-key to use your own key instead";
   if (status === 503) return "the hosted AI review is not available yet — set ai-review-key to use your own key";
   if (status === 429) return body?.error === "daily-cap" ? `this repo reached its daily cap of ${Number(body.cap) || 200} hosted reviews` : "rate-limited";
+  if (status === 409) return body?.error === "already-reviewed" ? "this commit already had its hosted review (one per run)" : "slopGrade has no run for this commit (the verdict call did not land)";
   if (status === 502) return `the model provider failed (${String(body?.detail || "no detail").slice(0, 120)})`;
   return `HTTP ${status}`;
 }
