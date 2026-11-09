@@ -5,6 +5,13 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.14.1] — 2026-11-09
+
+### Added
+- **The AI review states what it cost.** The run log prints the input and output tokens your provider billed for the
+  call, read from the provider's answer (never estimated; absent when the provider does not return them). Measured on
+  90 commits with `claude-opus-5-5` at list price: median $0.016 per PR, 9 in 10 under $0.05, the largest $0.13.
+
 ## [0.14.0] — 2026-11-09
 
 ### Added

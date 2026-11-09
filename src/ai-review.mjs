@@ -160,7 +160,8 @@ export function aiReviewOutput(r, requestedModel = AI_REVIEW_DEFAULT_MODEL) {
     return { lines, notices, warn: true };
   }
   const model = r.model || requestedModel;
-  lines.push(`slopGrade Firewall — AI review (your key, ${model}, triage): ${r.flags.length} of ${r.sent.length} PR hunk(s) flagged${notSent}. Notices only, never blocking.`);
+  const used = r.usage ? ` · ${r.usage.input.toLocaleString("en-US")} input + ${r.usage.output.toLocaleString("en-US")} output tokens billed to your key` : "";
+  lines.push(`slopGrade Firewall — AI review (your key, ${model}, triage): ${r.flags.length} of ${r.sent.length} PR hunk(s) flagged${notSent}${used}. Notices only, never blocking.`);
   lines.push(MEASURED_LINE[model] || `  ${model} is not measured by slopGrade; ${AI_REVIEW_DEFAULT_MODEL} flagged 88 of 100 real CVE changes and 15 of 600 ordinary commits on slopGrade's sets.`);
   for (const f of r.flags) {
     notices.push(`::notice file=${ghProp(f.path)},line=${f.newStart},title=slopGrade AI review (triage)::${ghMsg(`${f.class} (confidence ${f.confidence.toFixed(2)}) — ${f.why}`)}`);
@@ -169,8 +170,14 @@ export function aiReviewOutput(r, requestedModel = AI_REVIEW_DEFAULT_MODEL) {
   return { lines, notices, warn: false };
 }
 
+/** The provider's token counts ({ input, output }), or null when absent or malformed (never guessed). */
+export function readUsage(u) {
+  const i = Number(u?.input_tokens), o = Number(u?.output_tokens);
+  return Number.isFinite(i) && Number.isFinite(o) && i >= 0 && o >= 0 ? { input: i, output: o } : null;
+}
+
 /**
- * One Messages API call from the runner, with the caller's key. Returns { flags, sent, skipped, model } or
+ * One Messages API call from the runner, with the caller's key. Returns { flags, sent, skipped, model, usage } or
  * { error, sent, skipped } — it never throws, so the gate always goes on (fail open).
  */
 export async function aiReview({ key, model = AI_REVIEW_DEFAULT_MODEL, hunks, fetchImpl = fetch, timeoutMs = AI_REVIEW_TIMEOUT_MS }) {
@@ -201,7 +208,7 @@ export async function aiReview({ key, model = AI_REVIEW_DEFAULT_MODEL, hunks, fe
     if (body?.stop_reason === "refusal") return { error: `the model declined (${body?.stop_details?.category ?? "no category"})`, sent, skipped };
     if (body?.stop_reason === "max_tokens") return { error: "the answer was cut at max_tokens", sent, skipped };
     const text = (body?.content || []).filter((b) => b?.type === "text").map((b) => b.text).join("");
-    return { flags: parseFlags(text, sent), sent, skipped, model: body?.model || model };
+    return { flags: parseFlags(text, sent), sent, skipped, model: body?.model || model, usage: readUsage(body?.usage) };
   } catch (e) {
     const msg = e?.name === "TimeoutError" ? `no answer within ${Math.round(timeoutMs / 1000)} s` : `call failed (${e?.message || e})`;
     return { error: msg, sent, skipped };

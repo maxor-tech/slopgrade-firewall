@@ -82,6 +82,18 @@ test("aiReview maps a flag back to its file and line", async () => {
   assert.deepEqual(r.flags, [{ path: "app/login.py", newStart: 10, class: "missing authorization", confidence: 0.92, why: "the token check is removed" }]);
 });
 
+test("aiReview returns the provider's token counts, and the run log states them; absent or malformed usage is null, never guessed", async () => {
+  const { aiReviewOutput, readUsage } = await import("../ai-review.mjs");
+  const r = await aiReview({ key: "k", hunks: H, fetchImpl: fakeFetch(answer({ flags: [] }, { usage: { input_tokens: 4210, output_tokens: 1873 } })) });
+  assert.deepEqual(r.usage, { input: 4210, output: 1873 });
+  assert.match(aiReviewOutput(r).lines[0], /flagged · 4,210 input \+ 1,873 output tokens billed to your key\. Notices only/);
+  const none = await aiReview({ key: "k", hunks: H, fetchImpl: fakeFetch(answer({ flags: [] })) });
+  assert.equal(none.usage, null);
+  assert.doesNotMatch(aiReviewOutput(none).lines[0], /tokens/);
+  assert.equal(readUsage({ input_tokens: "x", output_tokens: 3 }), null);
+  assert.equal(readUsage({ input_tokens: -1, output_tokens: 3 }), null);
+});
+
 test("no key: no call is made and the result says why", async () => {
   const seen = [];
   const r = await aiReview({ key: "", hunks: H, fetchImpl: fakeFetch(answer({ flags: [] }), 200, seen) });
