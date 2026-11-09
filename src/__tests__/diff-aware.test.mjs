@@ -112,6 +112,28 @@ test("unlocated hard leaks : attributed to the PR only when it touches a schema 
   assert.equal(s2.hardLeaks, 5, "a PR touching the schema owns the 5 leaks nobody could locate");
 });
 
+// 2026-11-09: parseLeak dropped the server's `advisory` flag, so an advisory idor-by-id leak (never counted in the
+// server's hard total) became a high cross-tenant feed row and blocked the PR that introduced its line — server hard 0,
+// verdict gate-blocked. 250 of the 61,661 benchmark repos carry such leaks, 23 of them on a reliable verdict.
+test("an ADVISORY leak (idor-by-id) never counts as a hard leak, even when the PR introduces its line", async () => {
+  const { parseLeak, leakFeedRow } = await import("../client-lib.mjs");
+  const leak = { kind: "idor-by-id", advisory: true, file: "app/api/notes/[id]/route.ts", line: 12, table: "notes" };
+  assert.equal(parseLeak(leak).advisory, true, "parseLeak keeps the server's advisory flag");
+  assert.equal(parseLeak({ kind: "rls-off", table: "notes", file: "db/1.sql", line: 2 }).advisory, false);
+  const row = leakFeedRow(parseLeak(leak));
+  assert.deepEqual(row, { file: "app/api/notes/[id]/route.ts", line: 12, pack: "cross-tenant", rule: "cross-tenant", detail: "idor-by-id notes", severity: "medium", advisory: true });
+  const diff = diffOf({ changed: ["app/api/notes/[id]/route.ts:12"], files: ["app/api/notes/[id]/route.ts"] });
+  const s = scopedBlocking({ hardLeaks: 0, packBlocking: 0 }, classifyAgainstDiff([row], diff), { diff });
+  assert.equal(s.hardLeaks, 0, "server hard 0 + an introduced advisory leak → still 0");
+  assert.equal(firewallVerdict({ gateMode: true, reliable: true, hardLeaks: s.hardLeaks, gateEntitled: true }).block, false);
+  // CONTROL: the same line as a HARD leak still blocks the PR that introduces it
+  const hard = leakFeedRow(parseLeak({ kind: "rls-off", table: "notes", file: "app/api/notes/[id]/route.ts", line: 12 }));
+  assert.equal(hard.severity, "high");
+  const s2 = scopedBlocking({ hardLeaks: 1, packBlocking: 0 }, classifyAgainstDiff([hard], diff), { diff });
+  assert.equal(s2.hardLeaks, 1);
+  assert.equal(firewallVerdict({ gateMode: true, reliable: true, hardLeaks: s2.hardLeaks, gateEntitled: true }).block, true);
+});
+
 test("deep-scan blocking is capped by what the PR introduced", () => {
   const diff = diffOf({ changed: ["a.py:2"], files: ["a.py"] });
   const cls = classifyAgainstDiff([

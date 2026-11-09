@@ -59,7 +59,7 @@ import { firewallVerdict } from "./src/gate-verdict.mjs";
 import { postFindingReview, resolvePrContext, fetchPrDiff, classifyAgainstDiff, scopedBlocking, diffSummaryMarkdown, gateScopeOf } from "./src/pr-suggest.mjs";
 import {
   resolveOrigin, DEFAULT_ORIGIN, classifyEnv, validVerdict, sanitizeLogLine, sanitizeFingerprint, sanitizePackFingerprints,
-  parseLeak, leakText, findingLocation, buildSarif, collectPackBlocks, advisoryLevel, advisoryOrder, advisorySeverity, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
+  parseLeak, leakFeedRow, leakText, findingLocation, buildSarif, collectPackBlocks, advisoryLevel, advisoryOrder, advisorySeverity, errMsg, CLIENT_VERSION, FINGERPRINT_VERSION, MAX_PAYLOAD_BYTES,
   validProBundleResponse, verifyBundleSig, PRO_BUNDLE_PUBKEY, runProPacks, sanitizeProFingerprints, FREE_PACK_COUNT, MAX_SARIF_RESULTS, MAX_PRO_BUNDLE_BYTES,
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs, refusalLine,
   advisoryOfferOf, offerLogLine,
@@ -560,7 +560,7 @@ export async function main(argv = [], env = process.env) {
   // file (the old `_` replacement pointed at a file that does not exist).
   const wfFile = (f) => sanitizeLogLine(f).replace(/%/g, "%25").replace(/:/g, "%3A").replace(/,/g, "%2C");
   for (const p of (Array.isArray(v.leaks) ? v.leaks : []).map(parseLeak)) {
-    if (p.file) { console.log(`::error file=${wfFile(p.file)},line=${p.line},title=slopGrade Firewall::${p.message}`); feed.push({ file: p.file, line: p.line, pack: "cross-tenant", rule: "cross-tenant", detail: p.message, severity: "high" }); }
+    if (p.file) { console.log(`::${p.advisory ? "warning" : "error"} file=${wfFile(p.file)},line=${p.line},title=slopGrade Firewall${p.advisory ? " (advisory)" : ""}::${p.message}`); feed.push(leakFeedRow(p)); }
   }
   // Every detector pack the server returned — DATA-DRIVEN (collectPackBlocks), never a hardcoded key list: a pack
   // missing from a static list would be silently dropped from the log, the feed and the SARIF (release-audit B-P0-2).

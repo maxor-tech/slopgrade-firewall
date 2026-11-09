@@ -5,6 +5,15 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.15.2] — 2026-11-09
+
+### Fixed
+- **An advisory cross-tenant leak no longer blocks the PR that introduces it.** The server marks a by-id IDOR finding
+  (`idor-by-id`) advisory and never counts it as a hard leak, but the client dropped that flag: the finding became a
+  blocking cross-tenant row, and in gate mode a PR that added its line was blocked while the server reported 0 hard
+  leaks. It now prints as a warning, reads « (advisory) », and never counts toward the block. 250 of the 61,661 repos
+  of the release benchmark carry such findings, 23 of them on a verdict that can block. A hard leak blocks as before.
+
 ## [0.15.1] — 2026-11-09
 
 ### Changed

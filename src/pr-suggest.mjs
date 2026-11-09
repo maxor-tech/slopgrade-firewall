@@ -244,7 +244,8 @@ const SCHEMA_FILE = /\.(sql|prisma)$|(^|\/)(migrations?|schema)(\/|\.)/i;
  */
 export function scopedBlocking(v, classified, { deepBlocking = 0, diff = null } = {}) {
   const rows = Array.isArray(classified) ? classified : [];
-  const ct = rows.filter((f) => f.pack === "cross-tenant");
+  // An advisory cross-tenant row (idor-by-id) is never part of the server's hard count, so it never blocks here.
+  const ct = rows.filter((f) => f.pack === "cross-tenant" && f.advisory !== true);
   const packs = rows.filter((f) => f.pack !== "cross-tenant" && f.pack !== "heisen" && isBlockingSev(f));
   const deep = rows.filter((f) => f.pack === "heisen" && isBlockingSev(f));
   const hard = Number(v && v.hardLeaks) || 0, packBlocking = Number(v && v.packBlocking) || 0;
