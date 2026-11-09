@@ -94,6 +94,51 @@ test("aiReview returns the provider's token counts, and the run log states them;
   assert.equal(readUsage({ input_tokens: -1, output_tokens: 3 }), null);
 });
 
+// The SAME hash is pinned in slopgrade lib/__tests__/ai-review-hosted.test.ts: the hosted and BYO prompts never drift.
+test("the system prompt is the measured one, byte-identical to slopGrade's hosted copy", async () => {
+  const { createHash } = await import("node:crypto");
+  assert.equal(createHash("sha256").update(AI_REVIEW_SYSTEM).digest("hex"), "bb8d6431c920ea2de12da96f0ca27cda454673824543ddd8a04e0823ecfcb9b6");
+});
+
+test("requestHostedReview posts the ordered, budgeted hunks with the OIDC proof and keeps only flags on sent hunks", async () => {
+  const { requestHostedReview, aiReviewOutput } = await import("../ai-review.mjs");
+  const calls = [];
+  const post = async (url, body) => { calls.push({ url, body: JSON.parse(body) }); return { ok: true, status: 200, json: async () => ({ ok: true, model: "claude-opus-5-5", flags: [{ path: "app/login.py", newStart: 10, class: "missing authorization", confidence: 0.9, why: "token check removed" }] }) }; };
+  const r = await requestHostedReview(post, "https://app.slopgrade.ai", "oidc-t", "abc", [H[1], H[0]]);
+  assert.equal(calls[0].url, "https://app.slopgrade.ai/api/ci/ai-review");
+  assert.deepEqual(calls[0].body, { oidcToken: "oidc-t", sha: "abc", hunks: [{ path: "app/login.py", newStart: 10, text: H[0].text }, { path: "README.md", newStart: 1, text: "+docs" }] });
+  assert.deepEqual(r.flags, [{ path: "app/login.py", newStart: 10, class: "missing authorization", confidence: 0.9, why: "token check removed" }]);
+  assert.equal(r.hosted, true);
+  const out = aiReviewOutput(r);
+  assert.match(out.lines[0], /^slopGrade Firewall — AI review \(slopGrade-hosted, claude-opus-5-5, triage\): 1 of 2 PR hunk\(s\) flagged · 2 hunk\(s\) sent to slopGrade, forwarded to the model provider and dropped\. Notices only/);
+  assert.doesNotMatch(out.lines[0], /billed to your key/);
+});
+
+test("requestHostedReview: a refusal says why in the reader's terms, a flag on an unsent hunk is malformed — never clean", async () => {
+  const { requestHostedReview, aiReviewOutput } = await import("../ai-review.mjs");
+  const reply = (status, body) => async () => ({ ok: status === 200, status, json: async () => body });
+  const cases = [
+    [reply(402, { error: "plan-required" }), /needs a paid slot — set ai-review-key/],
+    [reply(503, { error: "ai-review-unavailable" }), /not available yet — set ai-review-key/],
+    [reply(429, { error: "daily-cap", cap: 200 }), /daily cap of 200 hosted reviews/],
+    [reply(409, { error: "already-reviewed" }), /already had its hosted review \(one per run\)/],
+    [reply(409, { error: "no-run" }), /no run for this commit/],
+    [reply(502, { error: "provider-failed", detail: "provider HTTP 529" }), /model provider failed \(provider HTTP 529\)/],
+    [reply(200, { flags: [{ path: "other.py", newStart: 3, class: "x", confidence: 0.9, why: "y" }] }), /malformed answer/],
+    [reply(200, { flags: [{ path: "app/login.py", newStart: 10, class: "x", confidence: 7, why: "y" }] }), /malformed answer/],
+    [reply(200, { nope: 1 }), /malformed answer/],
+    [async () => { const e = new Error("t"); e.name = "TimeoutError"; throw e; }, /did not answer in time/],
+  ];
+  for (const [post, re] of cases) {
+    const r = await requestHostedReview(post, "https://app.slopgrade.ai", "t", "abc", H);
+    assert.equal(r.flags, undefined);
+    assert.match(r.error, re);
+    const out = aiReviewOutput(r);
+    assert.equal(out.warn, true);
+    assert.match(out.lines[0], /^slopGrade Firewall — AI review \(slopGrade-hosted\) unavailable: .* — verdict unaffected\.$/);
+  }
+});
+
 test("no key: no call is made and the result says why", async () => {
   const seen = [];
   const r = await aiReview({ key: "", hunks: H, fetchImpl: fakeFetch(answer({ flags: [] }), 200, seen) });

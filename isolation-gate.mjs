@@ -67,7 +67,7 @@ import {
 import { oidcRepoIsPublic, sinkFiles, prChangedPaths, prChangedRanges, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, CANDIDATES_RANKED_NOTE, heisenFeed, splitAgainstFeed, isPaidVerdict, isPublicVerdict, deepScanNudge, unansweredNote, unansweredFiles } from "./src/deep-scan.mjs";
 import { prHunks, validChangeReview, C_HUNK, C_REVIEW_NOTE, CPP_HUNK, CPP_REVIEW_NOTE, RUST_HUNK, RUST_REVIEW_NOTE, noticeHint, unreviewedNote, REVIEW_BAND_NOTE, reviewBandHeading } from "./src/change-review.mjs";
 import { fixableHitIndex, attachFixes } from "./src/autofix.mjs";
-import { aiReview, aiReviewOutput, prAllHunks, AI_REVIEW_DEFAULT_MODEL } from "./src/ai-review.mjs";
+import { aiReview, aiReviewOutput, prAllHunks, requestHostedReview, AI_REVIEW_DEFAULT_MODEL, AI_REVIEW_TIMEOUT_MS } from "./src/ai-review.mjs";
 import { IGNORE_FILE, parseIgnore, ignoreMatcher, readIgnoreText } from "./src/ignore.mjs";
 import { EXCEPTIONS_FILE, parseExceptions, exceptionFor, readExceptionsText } from "./src/exceptions.mjs";
 import { decidePurpose, purposeAdvisoryLine } from "./src/repo-purpose.mjs";
@@ -220,9 +220,10 @@ Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <p
                    check). Notices to triage, never blocking. Held-out: 36% of security fixes undone caught at 0.23% false alarms
                    per hunk; on real CVE-introducing commits, 19% of commits flagged vs 2.1% of ordinary commits, the note on the
                    buggy hunk in 3.9% (CVE commits are large, so a commit-level rate is mostly size).
-  --ai-review      OPT-IN, pull requests only, BRING YOUR OWN KEY (env FW_AI_REVIEW_KEY, model FW_AI_REVIEW_MODEL,
-                   default ${AI_REVIEW_DEFAULT_MODEL}): a reasoning model reads EVERY PR hunk from your runner with your key,
-                   and lists the changes that introduce a flaw. Nothing passes through slopGrade. Notices, never blocking.
+  --ai-review      OPT-IN, pull requests only (model FW_AI_REVIEW_MODEL, default ${AI_REVIEW_DEFAULT_MODEL}): a reasoning
+                   model reads EVERY PR hunk and lists the changes that introduce a flaw. Notices, never blocking.
+                   With FW_AI_REVIEW_KEY: your runner → your provider, nothing passes through slopGrade. Without a key, on
+                   a PAID slot: the hunks go to slopGrade, which runs the default model with its key and drops them.
   --help           show this help
 Exit codes: 1 only on a gate-blocked verdict (or --strict with no verdict); 0 otherwise (fail open).`;
 const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-auto", "--deep-scan-block", "--block-confidence", "--library-mode", "--library-mode-auto", "--change-review", "--change-review-auto", "--no-fix", "--ai-review"]);
@@ -260,8 +261,16 @@ export async function main(argv = [], env = process.env) {
     "hard-leaks": "", "blocking-findings": "", conformance: "", entitled: "", "sarif-uploaded": false,
   }, appendFileSync);
 
-  // 0. AI review (BYO key, opt-in) — runs first and on its own: it needs no slopGrade verdict, and it never blocks.
-  //    A missing key, a provider error or a malformed answer prints one warning (fail open).
+  // 0. AI review (opt-in) — never blocks ; every failure prints one warning (fail open).
+  //    WITH ai-review-key: runs here, on its own (no slopGrade verdict needed) — your runner → your provider.
+  //    WITHOUT a key: the hunks wait for step 5c, which asks slopGrade to run it on a paid slot (needs the OIDC proof).
+  let aiHostedHunks = null;
+  const printAiReview = (r, model) => {
+    const out = aiReviewOutput(r, model);
+    for (const n of out.notices) console.log(n);
+    for (const l of out.lines) line(l);
+    if (out.warn) ghWarn(out.lines[0]);
+  };
   if (argv.includes("--ai-review")) {
     const isPr = env.GITHUB_EVENT_NAME === "pull_request" || env.GITHUB_EVENT_NAME === "pull_request_target";
     if (isPr) {
@@ -269,11 +278,10 @@ export async function main(argv = [], env = process.env) {
       const readEventAi = () => JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8"));
       const hunks = prAllHunks(env, readEventAi, gitAi);
       const model = (env.FW_AI_REVIEW_MODEL || "").trim() || AI_REVIEW_DEFAULT_MODEL;
-      const r = hunks ? await aiReview({ key: (env.FW_AI_REVIEW_KEY || "").trim(), model, hunks }) : { error: "git could not diff the PR base", sent: [], skipped: 0 };
-      const out = aiReviewOutput(r, model);
-      for (const n of out.notices) console.log(n);
-      for (const l of out.lines) line(l);
-      if (out.warn) ghWarn(out.lines[0]);
+      const key = (env.FW_AI_REVIEW_KEY || "").trim();
+      if (!hunks) printAiReview({ error: "git could not diff the PR base", sent: [], skipped: 0 }, model);
+      else if (key) printAiReview(await aiReview({ key, model, hunks }), model);
+      else aiHostedHunks = hunks;
     }
   }
 
@@ -522,6 +530,17 @@ export async function main(argv = [], env = process.env) {
         deepUnanswered = unansweredFiles(r.response.unansweredPaths);
         deepLine = `${r.response.scanned} file(s) analysed${deep.fromPr ? ` (${deep.fromPr} changed by this PR, sent first)` : ""}${deep.skipped ? ` (+${deep.skipped} over the cap, not sent)` : ""}${unansweredNote(r.response.unanswered)}${Number.isInteger(r.response.scoped) && r.response.scoped > 0 ? ` · ${r.response.scoped} analysed only where this PR changed them (and their callers)` : ""}`;
       }
+    }
+  }
+
+  // 5c. HOSTED AI review (ai-review on, no ai-review-key): a PAID slot asks slopGrade to run it with slopGrade's key.
+  //     The hunks go only to the CANONICAL origin, and only once the verdict says this repo is paid. Fail-open.
+  if (aiHostedHunks) {
+    if (origin !== DEFAULT_ORIGIN) ghWarn("AI review skipped — no ai-review-key, and the hosted review runs only on the canonical slopGrade origin.");
+    else if (!paid) printAiReview({ error: "no ai-review-key, and the hosted AI review needs a paid slot — nothing was sent", sent: [], skipped: aiHostedHunks.length, hosted: true }, AI_REVIEW_DEFAULT_MODEL);
+    else {
+      const post = (url, body) => fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal: AbortSignal.timeout(AI_REVIEW_TIMEOUT_MS + 30_000) });
+      printAiReview(await requestHostedReview(post, origin, oidcToken, sha, aiHostedHunks), AI_REVIEW_DEFAULT_MODEL);
     }
   }
 
