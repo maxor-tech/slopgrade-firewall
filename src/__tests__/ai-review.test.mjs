@@ -35,6 +35,17 @@ test("buildReviewPrompt counts the hunks past the character budget as skipped, n
   assert.equal(skipped, 2);
 });
 
+test("buildReviewPrompt sends source hunks before test and generated padding, so padding cannot push them past the budget", async () => {
+  const { hunkTier } = await import("../ai-review.mjs");
+  const pad = (p) => ({ path: p, newStart: 1, text: "+" + "y".repeat(AI_REVIEW_MAX_CHARS / 2) });
+  const src = { path: "src/auth.js", newStart: 5, text: "-  if (!isAdmin(u)) return deny()" };
+  const { sent, skipped } = buildReviewPrompt([pad("tests/a.test.js"), pad("dist/bundle.min.js"), pad("docs/x.md"), src]);
+  assert.equal(sent[0], src);
+  assert.equal(sent.length, 2);
+  assert.equal(skipped, 2);
+  assert.deepEqual(["src/a.py", "pkg/x_test.go", "tests/test_x.py", "yarn.lock", "vendor/a/b.go", "README.md"].map(hunkTier), [0, 1, 1, 2, 2, 2]);
+});
+
 test("aiReview sends the measured prompt, the schema and the caller's key to the Messages API", async () => {
   const seen = [];
   const r = await aiReview({ key: "sk-test", hunks: H, fetchImpl: fakeFetch(answer({ flags: [] }), 200, seen) });

@@ -73,15 +73,28 @@ export const AI_REVIEW_SCHEMA = {
   },
 };
 
+const LOW_TIER = /(?:^|\/)(?:dist|build|vendor|node_modules|third_party|generated|__snapshots__)\/|\.(?:min\.js|map|snap|lock|md|rst|txt)$|(?:^|\/)(?:package-lock\.json|yarn\.lock|pnpm-lock\.yaml|go\.sum|composer\.lock|Gemfile\.lock|poetry\.lock)$/i;
+const TEST_TIER = /(?:^|\/)(?:tests?|__tests__|spec|testdata|fixtures?)\/|(?:_test\.go|\.(?:test|spec)\.[cm]?[jt]sx?|_spec\.rb)$|(?:^|\/)test_[^/]*\.py$|Test\.java$/i;
+
+/** 0 = source, 1 = test, 2 = docs / lockfile / generated / vendored. Used only to order hunks for the budget. */
+export function hunkTier(path) {
+  if (LOW_TIER.test(path)) return 2;
+  if (TEST_TIER.test(path)) return 1;
+  return 0;
+}
+
 /**
- * hunks ([{ path, newStart, text }], every hunk of the PR) -> { prompt, sent, skipped }. Hunks are numbered in order;
- * once the next hunk would pass AI_REVIEW_MAX_CHARS it and every later hunk are skipped (counted, never silently lost).
+ * hunks ([{ path, newStart, text }], every hunk of the PR) -> { prompt, sent, skipped }. Source hunks come first, then
+ * tests, then docs / lockfiles / generated files (stable inside a tier), so padding a PR with tests or generated files
+ * cannot push a source hunk past the budget. Once the next hunk would pass AI_REVIEW_MAX_CHARS it and every later hunk
+ * are skipped (counted, never silently lost).
  */
 export function buildReviewPrompt(hunks) {
   const sent = [];
   const parts = [];
   let size = 0;
-  for (const h of hunks || []) {
+  const ordered = (hunks || []).map((h, i) => [hunkTier(h.path), i, h]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((x) => x[2]);
+  for (const h of ordered) {
     const part = `\n## hunk ${sent.length} — ${h.path}\n\`\`\`diff\n${h.text}\n\`\`\`\n`;
     if (size + part.length > AI_REVIEW_MAX_CHARS) break;
     parts.push(part);
