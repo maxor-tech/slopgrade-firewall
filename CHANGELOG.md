@@ -5,6 +5,15 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-11-09
+
+### Added
+- **Hosted AI review on a paid slot.** With `ai-review: "true"` and no `ai-review-key`, a paid repo sends the PR hunks
+  (the same order and budget as with your own key) to `app.slopgrade.ai/api/ci/ai-review` after the verdict, with the
+  run's OIDC proof. slopGrade runs the default model with its key and drops the code; only counts are kept. A free repo
+  with no key sends nothing and reads one warning. Notices only, never blocking; a refusal (no paid slot, not turned on
+  yet, daily cap of 200, provider error) prints one warning with the reason.
+
 ## [0.14.1] — 2026-11-09
 
 ### Added

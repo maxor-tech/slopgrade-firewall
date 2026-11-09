@@ -1,6 +1,8 @@
 // AI review (opt-in, `ai-review: "true"`, pull requests only) — a reasoning model reads EVERY hunk of the PR and lists
-// the hunks whose change introduces an exploitable flaw. BRING YOUR OWN KEY: the call goes from YOUR runner to the model
+// the hunks whose change introduces an exploitable flaw. WITH A KEY (aiReview): the call goes from YOUR runner to the model
 // provider with YOUR API key; nothing passes through slopGrade, and slopGrade never sees the key or the code.
+// WITHOUT A KEY, on a PAID slot (requestHostedReview): the same hunks go to slopGrade /api/ci/ai-review, which runs the
+// same prompt (hash-pinned in both repos) with its own key and drops the code.
 //
 // Measured (slopGrade research, blind, pre-registered, this module and prompt, flag = confidence >= 0.5), with the
 // default model claude-opus-5-5: on security fixes played backwards (the exact security change), 88 of 100 validation
@@ -155,19 +157,58 @@ export function aiReviewOutput(r, requestedModel = AI_REVIEW_DEFAULT_MODEL) {
   const lines = [];
   const notices = [];
   const notSent = r.skipped ? ` · ${r.skipped} hunk(s) over the ${AI_REVIEW_MAX_CHARS.toLocaleString("en-US")}-character budget, not reviewed` : "";
+  const who = r.hosted ? "slopGrade-hosted" : "your key";
   if (r.error) {
-    lines.push(`slopGrade Firewall — AI review (your key) unavailable: ${r.error} — verdict unaffected.`);
+    lines.push(`slopGrade Firewall — AI review (${who}) unavailable: ${r.error} — verdict unaffected.`);
     return { lines, notices, warn: true };
   }
   const model = r.model || requestedModel;
   const used = r.usage ? ` · ${r.usage.input.toLocaleString("en-US")} input + ${r.usage.output.toLocaleString("en-US")} output tokens billed to your key` : "";
-  lines.push(`slopGrade Firewall — AI review (your key, ${model}, triage): ${r.flags.length} of ${r.sent.length} PR hunk(s) flagged${notSent}${used}. Notices only, never blocking.`);
+  const egress = r.hosted ? ` · ${r.sent.length} hunk(s) sent to slopGrade, forwarded to the model provider and dropped` : "";
+  lines.push(`slopGrade Firewall — AI review (${who}, ${model}, triage): ${r.flags.length} of ${r.sent.length} PR hunk(s) flagged${notSent}${used}${egress}. Notices only, never blocking.`);
   lines.push(MEASURED_LINE[model] || `  ${model} is not measured by slopGrade; ${AI_REVIEW_DEFAULT_MODEL} flagged 88 of 100 real CVE changes and 15 of 600 ordinary commits on slopGrade's sets.`);
   for (const f of r.flags) {
     notices.push(`::notice file=${ghProp(f.path)},line=${f.newStart},title=slopGrade AI review (triage)::${ghMsg(`${f.class} (confidence ${f.confidence.toFixed(2)}) — ${f.why}`)}`);
     lines.push(`    - ${f.path}:${f.newStart}  ${f.class}  confidence=${f.confidence.toFixed(2)}`);
   }
   return { lines, notices, warn: false };
+}
+
+/** Why the hosted review did not run, in the reader's terms (the HTTP status of /api/ci/ai-review). */
+export function hostedRefusal(status, body) {
+  if (status === 402) return "the hosted AI review needs a paid slot — set ai-review-key to use your own key instead";
+  if (status === 503) return "the hosted AI review is not available yet — set ai-review-key to use your own key";
+  if (status === 429) return body?.error === "daily-cap" ? `this repo reached its daily cap of ${Number(body.cap) || 200} hosted reviews` : "rate-limited";
+  if (status === 502) return `the model provider failed (${String(body?.detail || "no detail").slice(0, 120)})`;
+  return `HTTP ${status}`;
+}
+
+/**
+ * HOSTED review (no ai-review-key, a paid slot): the same hunks, ordered and budgeted exactly as for your own key, go to
+ * the CANONICAL slopGrade origin with the run's OIDC proof; slopGrade forwards them to the model with its key and drops
+ * them. Every flag must name a hunk that was sent (else the answer is malformed — an error, never « clean »).
+ * Returns the aiReview shape plus `hosted: true`. Never throws.
+ */
+export async function requestHostedReview(post, origin, oidcToken, sha, hunks) {
+  const { sent, skipped } = buildReviewPrompt(hunks);
+  const fail = (error) => ({ error, sent: [], skipped: (hunks || []).length, hosted: true });
+  if (!sent.length) return { flags: [], sent, skipped, model: AI_REVIEW_DEFAULT_MODEL, usage: null, hosted: true };
+  try {
+    const res = await post(`${origin}/api/ci/ai-review`, JSON.stringify({ oidcToken, sha, hunks: sent.map((h) => ({ path: h.path, newStart: h.newStart, text: h.text })) }));
+    const body = await res.json().catch(() => null);
+    if (!res.ok) return fail(hostedRefusal(res.status, body));
+    if (!body || !Array.isArray(body.flags)) return fail("malformed answer from slopGrade");
+    const known = new Set(sent.map((h) => `${h.path}\u0000${h.newStart}`));
+    const flags = [];
+    for (const f of body.flags.slice(0, AI_REVIEW_MAX_FLAGS)) {
+      const c = Number(f?.confidence);
+      if (!known.has(`${f?.path}\u0000${f?.newStart}`) || !Number.isFinite(c) || c < 0 || c > 1) return fail("malformed answer from slopGrade");
+      flags.push({ path: f.path, newStart: f.newStart, class: String(f.class || "").slice(0, 80), confidence: c, why: String(f.why || "").slice(0, 400) });
+    }
+    return { flags, sent, skipped, model: typeof body.model === "string" ? body.model : AI_REVIEW_DEFAULT_MODEL, usage: null, hosted: true };
+  } catch (e) {
+    return fail(e?.name === "TimeoutError" ? "slopGrade did not answer in time" : `call failed (${e?.message || e})`);
+  }
 }
 
 /** The provider's token counts ({ input, output }), or null when absent or malformed (never guessed). */
