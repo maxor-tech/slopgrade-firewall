@@ -314,3 +314,28 @@ test("v2: recon / scanner tools are offensive ; numbered product components are 
   const lessons = ["00-getting-started", "01-features", "02-use-cases", "03-integrations", "04-best-practices", "05-blueprints"];
   assert.notEqual(classify({ "README.md": "# Agent samples\n\nRead each folder in order.\n" }, lessons).purpose, "product");
 });
+
+// v3 (2026-11-09, release-benchmark Deep Scan wrong blocks labeled TEST, shipped view): three teaching repos read as
+// products. Paraphrased inputs ; the controls keep products with numbered parts, a « 2. Usage » README and a « SOC 2
+// certification » sentence as products.
+test("v3: « 01. Fundamentals »-style numbered topic directories are lessons (period + space separator)", () => {
+  const dirs = ["01. Fundamentals", "02. React Hooks", "03. Beginners Projects", "04. React w TypeScript", "05. UI Libraries", "06. Zustand"];
+  assert.equal(classify({ "README.md": "# React Monster Class\n\nThe complete React ecosystem.\n" }, dirs).purpose, "teaching");
+  // control: a product whose numbered directories name its components stays a product
+  assert.equal(classify({ "README.md": "# Acme\n\nAn AI platform.\n" }, ["1. sdks", "2. api platform", "3. web app", "4. deploy"]).purpose, "product");
+});
+
+test("v3: a security-certification study repository is teaching (OSCP / OSWE … named as the goal)", () => {
+  const r = classify({ "README.md": "# OSCP\n\nThis repository contains the knowledge required to obtain the OSCP certification, organized into modules.\n" }, ["modules", "report"]);
+  assert.equal(r.purpose, "teaching");
+  assert.match(r.why, /certification/);
+  // control: a product that mentions a compliance certification stays a product
+  assert.equal(classify({ "README.md": "# Billing API\n\nA billing service. We hold a SOC 2 certification and ISO 27001.\n" }).purpose, "product");
+});
+
+test("v3: the companion source code of a book is teaching (《title》 + 源码 / 书籍 / 专栏)", () => {
+  const r = classify({ "readme.md": "## 《Java 开发坑点解析：从根因分析到最佳实践》源码目录\n\n### 书籍购买地址\n\n每一个案例都是独立的 Spring Boot 应用。\n" });
+  assert.equal(r.purpose, "teaching");
+  // control: a Chinese product README with a quoted product name stays a product
+  assert.equal(classify({ "README.md": "## 《云管家》管理平台\n\n企业级多租户运维平台，支持主机与告警管理。\n" }).purpose, "product");
+});

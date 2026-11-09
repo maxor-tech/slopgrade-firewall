@@ -85,6 +85,14 @@ const TEACHING = [
   // written for a course or a degree : « built as course project in DBMS subject, B.Tech » (rubric : coursework = TEST)
   T("academic project", BOUNDARY("(?:course|college|university|school|semester|academic|final[\\s-]year|capstone|graduation|degree|b\\.?\\s?tech|bachelor'?s?|master'?s?)\\s+projects?|projects?\\s+for\\s+(?:my|our|the)\\s+(?:course|class|college|university|degree)|dbms\\s+(?:project|subject)"), 2, 2),
   T("zero to hero", BOUNDARY("zero[\\s-]to[\\s-]hero"), 2, 1),
+  // v3 (release-benchmark Deep Scan TEST labels, 2026-11-09) : study material for a named security certification
+  // (« the knowledge required to obtain the OSCP certification ») ; a verb + certification/exam, never a bare
+  // « SOC 2 certification » (a product's compliance line).
+  T("certification study", BOUNDARY("(?:oscp|oswe|osep|oswa|osed|ejpt|ecppt|pnpt|crto)|(?:obtain|pass|passing|prepare\\s+for|preparing\\s+for|study\\s+for|studying\\s+for)\\s+(?:the\\s+)?[\\w+-]{2,12}\\s+(?:certification|certificate|exam)"), 2, 2),
+  // v3 : a book's companion code — « 《书名》源码目录 », « 随书源码 », « 配套源码 », « 书籍购买 » (a quoted product name alone
+  // is not). Corpus blast radius (6,936 repos) rejected « 配套代码 » (products' « accompanying code ») and « 本书 »
+  // (« 本书架 », a bookshelf app).
+  T("book companion code", plain("《[^》\\n]{2,60}》\\s*源码|随书(?:源码|代码)|配套源码|书籍购买"), 2, 2),
 ];
 
 const SECURITY_CUE = /(?<![\p{L}\p{N}])(?:vulnerab\w*|exploit\w*|hack\w*|pentest\w*|attack\w*|injection|xss|sqli|csrf|rce)(?![\p{L}\p{N}])|靶场|漏洞/iu;
@@ -99,7 +107,8 @@ const NAME_TEACH = BOUNDARY("course|courses|curso|tutorial|tutorials|lessons?|le
 
 // Top-level directory names.
 const DIR_NUMBERED_COURSE = /^(?:week|lesson|lecture|chapter|chap|ch|day|module|unit|session|class|exercise|assignment|hw|homework|tp|section|part|step|episode|level|lab)[-_ .]?\d+/i;
-const DIR_NUMBER_PREFIX = /^\d{1,2}[-_. ][\p{L}]/u;
+// v3 : « 01. Fundamentals » (period + space) is the most common course layout ; one separator only missed it.
+const DIR_NUMBER_PREFIX = /^\d{1,2}[-_. ]+[\p{L}]/u;
 const DIR_PRODUCT_PART = /(?:^|[-_. ])(?:sdks?|api|apis|app|apps|platform|server|services?|backend|frontend|web[-_ ]?app|deploy(?:ment)?)(?:$|[-_. ])/i;
 const DIR_TEACH = /^(?:exercises?|assignments?|homework|lessons?|tutorials?|workshops?|courses?|chapters?|appunti|solutions?)$/i;
 const DIR_LAB = /^(?:challenges?|ctf|vulns?|vulnerabilities|wargames?)$/i;
