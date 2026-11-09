@@ -5,6 +5,23 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-11-09
+
+### Added
+- **AI review, opt-in, with your own key** (`ai-review: "true"`, `ai-review-key`, `ai-review-model`; pull requests
+  only; default off). A reasoning model reads every hunk of the PR (no 64-hunk cap) and lists the hunks whose change
+  introduces an exploitable flaw. The call goes from your runner to Anthropic with your key; nothing passes through
+  slopGrade. Flags are notices on their file and line and never change the verdict. Every error prints one warning and
+  the run goes on. Source hunks are sent before tests, docs and generated files, so padding cannot push code past the
+  400,000-character budget.
+- **Measured, blind, with this module** (flag = confidence ≥ 0.5): with the default `claude-opus-5-5`, 88 of 100
+  validation CVE changes and 56 of 60 CVEs published after the model's cutoff were flagged; 15 of 600 ordinary commits
+  were flagged, and 10 of those match a published CVE of the same class in that repo (5, 0.8 %, match none). Any other model is stated as unmeasured in the run log.
+
+### Changed
+- **What leaves your runner:** with `ai-review` on, the PR's changed lines (3 lines of context) go to Anthropic. With it
+  off, nothing changes.
+
 ## [0.13.11] — 2026-11-08
 
 ### Fixed

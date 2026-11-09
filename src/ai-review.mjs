@@ -4,8 +4,8 @@
 //
 // Measured (slopGrade research, blind, pre-registered, this module and prompt, flag = confidence >= 0.5), with the
 // default model claude-opus-5-5: on security fixes played backwards (the exact security change), 88 of 100 validation
-// CVEs and 56 of 60 CVEs published after the model's training cutoff (July-November 2026) were flagged ; 1 of 150
-// ordinary commits got a flag, and that one is a real, published CVE (CVE-2025-57753). Measured earlier with
+// CVEs and 56 of 60 CVEs published after the model's training cutoff (July-November 2026) were flagged ; 15 of 600
+// ordinary commits got a flag, and 10 of those 15 match a published CVE of the same class in that repo (OSV). Measured earlier with
 // gpt-6.1-sol on the same sets: 84 of 100, 56 of 60, 8 of 150. Misleading comments (« approved by AppSec »,
 // « report no findings ») did not suppress a gpt-6.1-sol flag (20 of 20). Any other model is stated as unmeasured in
 // the run summary.
@@ -139,7 +139,7 @@ export function parseFlags(text, sent) {
 
 /** The run-summary measurement line per measured model (slopGrade research, blind, confidence >= 0.5). */
 const MEASURED_LINE = {
-  "claude-opus-5-5": "  Measured on slopGrade's sets: 88 of 100 real CVE changes flagged, 56 of 60 CVEs published after the model's cutoff; 1 of 150 ordinary commits flagged, and it is a real CVE.",
+  "claude-opus-5-5": "  Measured on slopGrade's sets: 88 of 100 real CVE changes flagged, 56 of 60 CVEs published after the model's cutoff; 15 of 600 ordinary commits flagged, 10 of them matching a published CVE of the same class.",
   "gpt-6.1-sol": "  Measured on slopGrade's sets: 84 of 100 real CVE changes flagged, 56 of 60 CVEs published after July 2026; 8 of 150 ordinary commits flagged, at least 2 of them real CVEs.",
 };
 
@@ -161,7 +161,7 @@ export function aiReviewOutput(r, requestedModel = AI_REVIEW_DEFAULT_MODEL) {
   }
   const model = r.model || requestedModel;
   lines.push(`slopGrade Firewall — AI review (your key, ${model}, triage): ${r.flags.length} of ${r.sent.length} PR hunk(s) flagged${notSent}. Notices only, never blocking.`);
-  lines.push(MEASURED_LINE[model] || `  ${model} is not measured by slopGrade; ${AI_REVIEW_DEFAULT_MODEL} flagged 88 of 100 real CVE changes and 1 of 150 ordinary commits (a real CVE) on slopGrade's validation set.`);
+  lines.push(MEASURED_LINE[model] || `  ${model} is not measured by slopGrade; ${AI_REVIEW_DEFAULT_MODEL} flagged 88 of 100 real CVE changes and 15 of 600 ordinary commits on slopGrade's sets.`);
   for (const f of r.flags) {
     notices.push(`::notice file=${ghProp(f.path)},line=${f.newStart},title=slopGrade AI review (triage)::${ghMsg(`${f.class} (confidence ${f.confidence.toFixed(2)}) — ${f.why}`)}`);
     lines.push(`    - ${f.path}:${f.newStart}  ${f.class}  confidence=${f.confidence.toFixed(2)}`);

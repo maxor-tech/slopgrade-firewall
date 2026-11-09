@@ -3,9 +3,10 @@
 The **open-source client** of the [slopGrade Firewall](https://www.slopgrade.ai/firewall?utm_source=github-marketplace&utm_medium=listing&utm_campaign=launch-v3). It runs in your CI,
 detects high-severity security leaks in the diff. **On a free private repo, your source code and file contents never
 leave your runner** — only a structural fingerprint (table/column names + `{file, line, kind}` locations, no code) is
-posted for classification. The one exception is [`deep-scan`](#deep-scan--on-by-default-for-public-repos-opt-in-for-private-repos):
-it is **on by default for public repos** (`deep-scan: "auto"`; public code is already public) and **opt-in for private repos** (paid: `deep-scan: "true"`); set
-`deep-scan: "false"` to keep all source in the runner. This repository is the exact code that runs in your runner: **audit every line before you pin it.**
+posted for classification. There are two exceptions. [`deep-scan`](#deep-scan--on-by-default-for-public-repos-opt-in-for-private-repos)
+is **on by default for public repos** (`deep-scan: "auto"`; public code is already public) and **opt-in for private repos** (paid: `deep-scan: "true"`); set
+`deep-scan: "false"` to keep all source in the runner. [`ai-review`](#ai-review--opt-in-your-own-key) is **off by default**: when you turn it on, the
+PR's changed lines go from your runner to Anthropic with **your own API key**, never to slopGrade. This repository is the exact code that runs in your runner: **audit every line before you pin it.**
 
 **What it catches in a pull request, before it merges:** cross-tenant data access (a query that forgets the tenant
 filter), SQL and command injection, SSRF, XSS, path traversal and secrets in code — the 10 open-source classes
@@ -30,7 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
-      - uses: maxor-tech/slopgrade-firewall@v0.13.11
+      - uses: maxor-tech/slopgrade-firewall@v0.14.0
 ```
 
 `id-token: write` is required (it is how the repo proves itself). `pull-requests: write` posts the findings on the PR.
@@ -68,6 +69,9 @@ jobs:
           # deep-scan-block: "true"        # with deep-scan + gate: a NEW deep-scan finding fails the check (default false)
           # block-confidence: "false"      # opt out of advisory demotion below the engine threshold (ON by default)
           # fix: "off"                     # one-click « Commit suggestion » fixes on the PR (default: suggest)
+          # ai-review: "true"              # OPT-IN (default false), PRs only: a reasoning model reads every PR hunk with YOUR key;
+          # ai-review-key: ${{ secrets.ANTHROPIC_API_KEY }}   # the PR's changed lines go to Anthropic, never to slopGrade
+          # ai-review-model: "claude-opus-5-5"               # the default, and the only model with a published measurement
 ```
 
 Or run it directly: `node isolation-gate.mjs --print-payload` (audit exactly what would leave the runner).
@@ -262,6 +266,36 @@ of a public repo says so on every run (how many files and PR hunks were sent, an
   Both library tier and audit rules are triage tiers, not blocks; the requests-only tier is what `deep-scan-block` can
   block on: on the fixed files it blocked 1 in the PyPI set above and 0 in the GitHub-advisory sample.
 
+### AI review — opt-in, your own key
+
+`ai-review: "true"` (client ≥ 0.14.0, pull requests only, default **off**) asks a reasoning model to read **every hunk**
+of the PR and list the hunks whose change introduces an exploitable flaw. Most real CVEs are validation, authorization
+or logic bugs that no taint engine or pattern sees; this is the part of the gate that reads them.
+
+- **Your key, your provider.** The call goes from your runner to `https://api.anthropic.com` with the key you pass in
+  `ai-review-key` (store it as a repository secret). Nothing passes through slopGrade; slopGrade never sees the key,
+  the code or the answer. Your provider bills you for the call.
+- **What is sent** — the PR's changed lines with 3 lines of context, for the files the change review reads, up to
+  400,000 characters. Source hunks go first, then tests, then docs, lockfiles and generated files, so padding a PR
+  cannot push its code past the budget. The run log counts any hunk past the budget as not reviewed.
+- **Notices, never a block.** Each flag is a notice on its file and line, with the class, the model's confidence and
+  one sentence. It never changes the verdict. A missing key, a provider error, a refusal, a timeout (180 s) or a
+  malformed answer prints one warning and the run goes on.
+- **The hunk text is data, not instructions.** The prompt says so; a comment in the PR that tells the reviewer to
+  approve or to report nothing is not followed (20 of 20 planted comments did not suppress a flag).
+- **Measured, blind, with this module and its prompt** (a flag = confidence ≥ 0.5, slopGrade research, 2026-11-09).
+  The positives are real security fixes played backwards, so the exact security change is known:
+
+  | | `claude-opus-5-5` (default) | `gpt-6.1-sol` |
+  |---|---:|---:|
+  | CVE changes flagged, validation set | **88 of 100** | 84 of 100 |
+  | CVEs published after the model's cutoff (Jul–Nov 2026) | **56 of 60** | 56 of 60 |
+  | ordinary commits flagged | **15 of 600** (2.5 %) — 10 match a published CVE of the same class in that repo; 5 (0.8 %) match none | 8 of 150 |
+  | security fixes flagged as a new flaw | 1 of 50 | 5 of 50 |
+
+  Caveats: these are open-source commits, not your code. A flag can still be wrong, and no flag is not a clearance.
+  Any other model you set in `ai-review-model` is stated as **unmeasured** in the run log.
+
 ## Excluding paths — `.slopgradeignore`
 
 Tests, fixtures, `vendor/`, `dist/` and example folders are already skipped. For anything else that is not your running
@@ -331,7 +365,10 @@ would rather the control not silently self-disable, `strict: "true"` fails **clo
 - **No stored secret.** Identity is a short-lived, GitHub-signed OIDC token, audience-bound to the server origin.
 - **Endpoint is fixed.** A custom `SLOPGRADE_ORIGIN` is refused (the run goes dry) unless you explicitly set
   `SLOPGRADE_ALLOW_CUSTOM_ORIGIN=1` for a self-hosted server.
-- **$0 · local · deterministic.** Zero npm dependencies (only `node:*`). Pin the **SHA** to freeze the exact code.
+- **With `ai-review` on (opt-in, off by default)**, the PR's changed lines go to Anthropic with **your** key, never to
+  slopGrade (see *AI review* above).
+- **$0 · local · deterministic** by default. Zero npm dependencies (only `node:*`). Pin the **SHA** to freeze the exact code.
+  The opt-in `ai-review` is the exception: your provider bills the call, and a model's answer can vary between runs.
 
 ## Free vs hosted
 
