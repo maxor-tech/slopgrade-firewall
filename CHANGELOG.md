@@ -5,6 +5,13 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+### Changed
+- **A Deep Scan finding in tooling code never blocks**, even with `deep-scan-block`: build and release scripts, tests,
+  benchmarks, fixtures, examples and generated doc assets (`scripts/`, `tests/`, `perf/`, `sbin/`, `_static/`, `*_test.go`
+  …). It stays a warning that says « (advisory — tooling path scripts/) ». `docs/`, `tools/` and `tasks/` still block,
+  because two real flaws in the release labels lived there. Release run re-scored as shipped: Deep Scan block precision
+  22.3 % → 24.0 % (held-out 21.4 % → 23.3 %), no true positive lost.
+
 ### Fixed
 - **Three kinds of teaching repository now read as teaching**, so their pack and Deep Scan blocks are advisory:
   - course folders named « 01. Fundamentals » (a period and a space before the topic)

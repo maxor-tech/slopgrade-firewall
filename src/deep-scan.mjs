@@ -172,7 +172,21 @@ export const STRONG_TAINT_SINK = /\b(?:os\.system|subprocess|child_process|execS
 // inside a tier they go AFTER production code: on Ghost the 40 slots went to release/bench scripts while
 // core/frontend/src/admin-auth/message-handler.js (6 SSRF) and web/middleware/admin-toolbar.js (open redirect) were cut.
 // Sample-dir segments (*-examples, example-*, tutorials, courses, labs, workshops) mirror SAMPLE_DIR_SRC in extract.mjs.
-export const DEV_PATH = /(?:^|\/)(?:examples?|samples?|demos?|[^/]*[-_](?:examples?|samples?|demos?)|examples?[-_][^/]*|tutorials?|courses|labs|workshops?|scripts?|tools?|bench(?:marks?)?|tests?|__tests__|spec|specs|e2e|fixtures?|mocks?|docs?|stories)(?:\/|$)|\.(?:test|spec|stories)\.[cm]?[jt]sx?$|(?:^|\/)test_[^/]*\.py$|_test\.(?:go|py)$/i;
+/**
+ * A tooling path: code that runs on a developer's or CI machine, not in the request-serving product (build / release
+ * scripts, tests, benchmarks, fixtures, examples, generated doc assets). A NEW Deep Scan finding there never blocks,
+ * even with deep-scan-block; it stays a warning that says why. Release run re-scored as shipped (2026-11-09): block
+ * precision 22.3 % → 24.0 % (held-out 21.4 % → 23.3 %), 0 true positive lost. Deliberately NOT here: docs/ (a served
+ * static help page was a real XSS), tools/ and tasks/ (an api/task/service Zip Slip was real) — DEV_PATH keeps them for
+ * scan ordering only. PURE. Returns the matched directory (« scripts/ ») or the file-name kind, or null.
+ */
+export const TOOLING_PATH = /(?:^|\/)((?:examples?|samples?|demos?|[^/]*[-_](?:examples?|samples?|demos?)|examples?[-_][^/]*|tutorials?|courses|workshops?|scripts?|bench(?:marks?)?|tests?|__tests__|spec|specs|e2e|fixtures?|mocks?|sbin|perf|_build|_static|hack|devtools)\/)|\.(?:test|spec|stories)\.[cm]?[jt]sx?$|(?:^|\/)test_[^/]*\.py$|_test\.(?:go|py)$/i;
+export function toolingPath(file) {
+  const m = TOOLING_PATH.exec(String(file ?? ""));
+  return m ? (m[1] ?? "test file") : null;
+}
+
+export const DEV_PATH =/(?:^|\/)(?:examples?|samples?|demos?|[^/]*[-_](?:examples?|samples?|demos?)|examples?[-_][^/]*|tutorials?|courses|labs|workshops?|scripts?|tools?|bench(?:marks?)?|tests?|__tests__|spec|specs|e2e|fixtures?|mocks?|docs?|stories)(?:\/|$)|\.(?:test|spec|stories)\.[cm]?[jt]sx?$|(?:^|\/)test_[^/]*\.py$|_test\.(?:go|py)$/i;
 
 /** How many weakness families a source carries — a tie-breaker: a file touching more families goes first. */
 function familyCount(code) {

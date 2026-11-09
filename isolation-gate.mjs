@@ -64,7 +64,7 @@ import {
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs, refusalLine,
   advisoryOfferOf, offerLogLine,
 } from "./src/client-lib.mjs";
-import { oidcRepoIsPublic, sinkFiles, prChangedPaths, prChangedRanges, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, CANDIDATES_RANKED_NOTE, heisenFeed, splitAgainstFeed, isPaidVerdict, isPublicVerdict, deepScanNudge, unansweredNote, unansweredFiles } from "./src/deep-scan.mjs";
+import { oidcRepoIsPublic, sinkFiles, prChangedPaths, prChangedRanges, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, CANDIDATES_RANKED_NOTE, heisenFeed, splitAgainstFeed, toolingPath, isPaidVerdict, isPublicVerdict, deepScanNudge, unansweredNote, unansweredFiles } from "./src/deep-scan.mjs";
 import { prHunks, validChangeReview, C_HUNK, C_REVIEW_NOTE, CPP_HUNK, CPP_REVIEW_NOTE, RUST_HUNK, RUST_REVIEW_NOTE, noticeHint, unreviewedNote, REVIEW_BAND_NOTE, reviewBandHeading } from "./src/change-review.mjs";
 import { fixableHitIndex, attachFixes } from "./src/autofix.mjs";
 import { aiReview, aiReviewOutput, prAllHunks, requestHostedReview, AI_REVIEW_DEFAULT_MODEL, AI_REVIEW_TIMEOUT_MS } from "./src/ai-review.mjs";
@@ -613,17 +613,20 @@ export async function main(argv = [], env = process.env) {
     if (deepUnanswered) line(deepUnanswered);
     let bcDemoted = 0;
     for (const f of fresh) {
-      const promote = deepBlock && !(repoAggregates && applyBlockConfidence(f));
+      // A tooling path (scripts/, tests/, perf/ … — src/deep-scan.mjs TOOLING_PATH) never blocks: not request-serving code.
+      const tooling = deepBlock ? toolingPath(f.file) : null;
+      const promote = deepBlock && !tooling && !(repoAggregates && applyBlockConfidence(f));
       if (promote) deepBlocking++; // Preserve the existing purpose-policy accounting below.
       const blocksHere = promote && !purposeAdvisory;
-      const confidence = deepBlock && !promote ? (f.blockConfidence ?? f.block_confidence) : null;
+      const confidence = deepBlock && !promote && !tooling ? (f.blockConfidence ?? f.block_confidence) : null;
       // The reason rides in `detail`, so the log line, the PR review (summary + inline comment) and SARIF all say WHY the
       // row does not block — not only the annotation (e2e 2026-10-27 : the review showed a bare 🟡 medium).
       const confidenceNote = confidence ? ` (advisory — block confidence ${confidence.score.toFixed(2)} below ${confidence.tau.toFixed(2)})` : "";
       if (confidence) bcDemoted++;
       // A row that would block but sits in a non-product repo says so as well (same channels).
       const purposeNote = promote && !blocksHere ? ` (advisory — ${purpose.purpose} repository)` : "";
-      const note = confidenceNote || purposeNote;
+      const toolingNote = tooling ? ` (advisory — tooling path ${tooling})` : "";
+      const note = toolingNote || confidenceNote || purposeNote;
       const base = note ? { ...f, detail: `${f.detail}${note}`, advisoryNote: note.trim() } : f;
       const row = promote ? { ...base, severity: blocksHere ? "high" : "medium", ...(blocksHere ? {} : { origSeverity: "high" }) } : base;
       console.log(`::${blocksHere ? "error" : "warning"} file=${wfFile(row.file)},line=${row.line},title=slopGrade Firewall deep scan::[${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}`);
