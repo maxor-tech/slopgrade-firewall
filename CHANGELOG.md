@@ -5,6 +5,14 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+### Fixed
+- **Three kinds of teaching repository now read as teaching**, so their pack and Deep Scan blocks are advisory:
+  - course folders named « 01. Fundamentals » (a period and a space before the topic)
+  - study material for a named security certification (« the knowledge required to obtain the OSCP certification »)
+  - a book's companion code (« 《书名》源码目录 », 随书源码, 配套源码)
+  Measured on the 61,661-repo release run, re-scored as shipped: Deep Scan block precision 21.9 % → 22.3 %, no true
+  positive lost. On 6,936 working-tree repos, 2 change purpose, both teaching repos.
+
 ## [0.15.2] — 2026-11-09
 
 ### Fixed
