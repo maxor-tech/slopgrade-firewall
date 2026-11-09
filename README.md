@@ -31,7 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
-      - uses: maxor-tech/slopgrade-firewall@v0.15.0
+      - uses: maxor-tech/slopgrade-firewall@v0.15.1
 ```
 
 `id-token: write` is required (it is how the repo proves itself). `pull-requests: write` posts the findings on the PR.
@@ -279,14 +279,15 @@ or logic bugs that no taint engine or pattern sees; this is the part of the gate
   verdict confirms the paid slot, to `https://app.slopgrade.ai/api/ci/ai-review` with the run's OIDC proof. slopGrade
   runs the default model with its own key, then drops the code: never logged, never stored; only counts (hunks
   reviewed, flagged, tokens) are kept with the run. One hosted review per commit run, at most 200 per repo per 24 h. A free repo with no key
-  sends nothing and reads one warning. The hosted review is turned on per deployment; until then the run says to use
-  your own key.
+  sends nothing and reads one warning. Anthropic does not train on the code and deletes it within 30 days (see the
+  slopGrade privacy policy).
 - **What is sent** — the PR's changed lines with 3 lines of context, for the files the change review reads, up to
   400,000 characters. Source hunks go first, then tests, then docs, lockfiles and generated files, so padding a PR
   cannot push its code past the budget. The run log counts any hunk past the budget as not reviewed.
 - **What it costs you** — the run log prints the input and output tokens your provider billed (client ≥ 0.14.1).
-  Measured on 90 commits with `claude-opus-5-5` at list price ($4 / $20 per million tokens): median **$0.016** per
-  PR, 9 in 10 under **$0.05**, the largest (72 hunks) $0.13.
+  Measured with `claude-opus-5-5` at list price ($4 / $20 per million tokens) on 8,165 AI-written public commits:
+  median **$0.027** per PR, mean $0.044, 9 in 10 under **$0.11**, the largest $0.38. (On 90 CVE commits, which are
+  smaller: median $0.016.)
 - **Notices, never a block.** Each flag is a notice on its file and line, with the class, the model's confidence and
   one sentence. It never changes the verdict. A missing key, a provider error, a refusal, a timeout (180 s) or a
   malformed answer prints one warning and the run goes on.
@@ -301,6 +302,13 @@ or logic bugs that no taint engine or pattern sees; this is the part of the gate
   | CVEs published after the model's cutoff (Jul–Nov 2026) | **56 of 60** | 56 of 60 |
   | ordinary commits flagged | **15 of 600** (2.5 %) — 10 match a published CVE of the same class in that repo; 5 (0.8 %) match none | 8 of 150 |
   | security fixes flagged as a new flaw | 1 of 50 | 5 of 50 |
+
+  **On AI-written code** (8,165 public commits with a Claude, Claude Code, Cursor, Copilot, Codex or Devin co-author
+  trailer, July–November 2026): `claude-opus-5-5` flagged **126 (1.5 %)**. A second model (`gpt-6.1-sol`) labeled them
+  blind, without seeing the flags: of the 87 flags it could decide from the diff, **72 were real (83 %, 95 % CI
+  74–89 %)**; 39 needed code outside the diff. In a blind sample of 811 commits with no flag, it found a flaw in 18
+  (2.2 %), so the review catches about **3 in 10** of the flawed AI commits that reviewer sees. It finds real flaws
+  when it speaks, and stays quiet on most commits; it does not find most of them.
 
   Caveats: these are open-source commits, not your code. A flag can still be wrong, and no flag is not a clearance.
   Any other model you set in `ai-review-model` is stated as **unmeasured** in the run log.

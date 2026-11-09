@@ -5,6 +5,18 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.15.1] — 2026-11-09
+
+### Changed
+- **The AI review states what it measures on AI-written code.** On 8,165 public commits with an AI co-author trailer,
+  `claude-opus-5-5` flagged 126 (1.5 %). A blind second reviewer judged 72 of the 87 flags it could decide real (83 %,
+  95 % CI 74–89 %); in 811 unflagged commits it found a flaw in 18 (2.2 %), so about 3 in 10 flawed commits get a flag.
+  The run log line and the README say so.
+- **The cost figure is the one for AI-written PRs**, which are larger than CVE fixes: median $0.027, mean $0.044, 9 in
+  10 under $0.11, the largest $0.38 (was median $0.016 on 90 CVE commits).
+- The README no longer says the hosted review is off: it is on for paid repos. Anthropic does not train on the code
+  and deletes it within 30 days.
+
 ## [0.15.0] — 2026-11-09
 
 ### Added

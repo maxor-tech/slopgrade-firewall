@@ -141,7 +141,7 @@ export function parseFlags(text, sent) {
 
 /** The run-summary measurement line per measured model (slopGrade research, blind, confidence >= 0.5). */
 const MEASURED_LINE = {
-  "claude-opus-5-5": "  Measured on slopGrade's sets: 88 of 100 real CVE changes flagged, 56 of 60 CVEs published after the model's cutoff; 15 of 600 ordinary commits flagged, 10 of them matching a published CVE of the same class.",
+  "claude-opus-5-5": "  Measured on slopGrade's sets: 88 of 100 real CVE changes flagged, 56 of 60 CVEs published after the model's cutoff; 15 of 600 ordinary commits flagged, 10 of them matching a published CVE of the same class. On 8,165 AI-written public commits: 126 flagged (1.5 %); a blind second reviewer judged 72 of the 87 flags it could decide real (83 %).",
   "gpt-6.1-sol": "  Measured on slopGrade's sets: 84 of 100 real CVE changes flagged, 56 of 60 CVEs published after July 2026; 8 of 150 ordinary commits flagged, at least 2 of them real CVEs.",
 };
 
