@@ -67,6 +67,7 @@ import {
 import { oidcRepoIsPublic, sinkFiles, prChangedPaths, prChangedRanges, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, CANDIDATES_RANKED_NOTE, heisenFeed, splitAgainstFeed, isPaidVerdict, isPublicVerdict, deepScanNudge, unansweredNote, unansweredFiles } from "./src/deep-scan.mjs";
 import { prHunks, validChangeReview, C_HUNK, C_REVIEW_NOTE, CPP_HUNK, CPP_REVIEW_NOTE, RUST_HUNK, RUST_REVIEW_NOTE, noticeHint, unreviewedNote, REVIEW_BAND_NOTE, reviewBandHeading } from "./src/change-review.mjs";
 import { fixableHitIndex, attachFixes } from "./src/autofix.mjs";
+import { aiReview, aiReviewOutput, prAllHunks, AI_REVIEW_DEFAULT_MODEL } from "./src/ai-review.mjs";
 import { IGNORE_FILE, parseIgnore, ignoreMatcher, readIgnoreText } from "./src/ignore.mjs";
 import { EXCEPTIONS_FILE, parseExceptions, exceptionFor, readExceptionsText } from "./src/exceptions.mjs";
 import { decidePurpose, purposeAdvisoryLine } from "./src/repo-purpose.mjs";
@@ -219,9 +220,12 @@ Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <p
                    check). Notices to triage, never blocking. Held-out: 36% of security fixes undone caught at 0.23% false alarms
                    per hunk; on real CVE-introducing commits, 19% of commits flagged vs 2.1% of ordinary commits, the note on the
                    buggy hunk in 3.9% (CVE commits are large, so a commit-level rate is mostly size).
+  --ai-review      OPT-IN, pull requests only, BRING YOUR OWN KEY (env FW_AI_REVIEW_KEY, model FW_AI_REVIEW_MODEL,
+                   default ${AI_REVIEW_DEFAULT_MODEL}): a reasoning model reads EVERY PR hunk from your runner with your key,
+                   and lists the changes that introduce a flaw. Nothing passes through slopGrade. Notices, never blocking.
   --help           show this help
 Exit codes: 1 only on a gate-blocked verdict (or --strict with no verdict); 0 otherwise (fail open).`;
-const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-auto", "--deep-scan-block", "--block-confidence", "--library-mode", "--library-mode-auto", "--change-review", "--change-review-auto", "--no-fix"]);
+const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-auto", "--deep-scan-block", "--block-confidence", "--library-mode", "--library-mode-auto", "--change-review", "--change-review-auto", "--no-fix", "--ai-review"]);
 
 export async function main(argv = [], env = process.env) {
   if (argv.includes("--help")) { console.log(HELP); return 0; }
@@ -255,6 +259,23 @@ export async function main(argv = [], env = process.env) {
     verdict: "no-verdict", blocked: strict && gateMode,
     "hard-leaks": "", "blocking-findings": "", conformance: "", entitled: "", "sarif-uploaded": false,
   }, appendFileSync);
+
+  // 0. AI review (BYO key, opt-in) — runs first and on its own: it needs no slopGrade verdict, and it never blocks.
+  //    A missing key, a provider error or a malformed answer prints one warning (fail open).
+  if (argv.includes("--ai-review")) {
+    const isPr = env.GITHUB_EVENT_NAME === "pull_request" || env.GITHUB_EVENT_NAME === "pull_request_target";
+    if (isPr) {
+      const gitAi = (args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15_000, maxBuffer: 64 * 1024 * 1024 });
+      const readEventAi = () => JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8"));
+      const hunks = prAllHunks(env, readEventAi, gitAi);
+      const model = (env.FW_AI_REVIEW_MODEL || "").trim() || AI_REVIEW_DEFAULT_MODEL;
+      const r = hunks ? await aiReview({ key: (env.FW_AI_REVIEW_KEY || "").trim(), model, hunks }) : { error: "git could not diff the PR base", sent: [], skipped: 0 };
+      const out = aiReviewOutput(r, model);
+      for (const n of out.notices) console.log(n);
+      for (const l of out.lines) line(l);
+      if (out.warn) ghWarn(out.lines[0]);
+    }
+  }
 
   // 1. LOCAL — the structural fingerprint (file contents never leave). Wrapped so a crafted repo (symlink cycle)
   //    that makes extraction throw routes through noVerdict(), NOT the entrypoint catch (which fails OPEN).
