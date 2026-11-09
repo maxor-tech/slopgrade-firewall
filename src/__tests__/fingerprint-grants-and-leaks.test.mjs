@@ -47,11 +47,11 @@ test("sanitizeFingerprint now carries granted / revoked across the egress bounda
 
 test("parseLeak locates the server's leak OBJECTS (the old path lost every located leak)", () => {
   assert.deepEqual(parseLeak({ kind: "list-bulk-unscoped", file: "app/api/x/route.ts", line: 42, table: "orders" }),
-    { file: "app/api/x/route.ts", line: 42, message: "list-bulk-unscoped orders" });
+    { file: "app/api/x/route.ts", line: 42, message: "list-bulk-unscoped orders", advisory: false });
   assert.deepEqual(parseLeak({ kind: "rls-no-policy", table: "email_change_requests" }),
-    { file: null, line: 0, message: "rls-no-policy email_change_requests" }, "a table-level leak has no source location");
+    { file: null, line: 0, message: "rls-no-policy email_change_requests", advisory: false }, "a table-level leak has no source location");
   assert.deepEqual(parseLeak({ kind: "unscoped", file: "a.py", table: "t", method: "findMany" }),
-    { file: "a.py", line: 1, message: "unscoped t findMany" }, "missing line → 1, never 0 (SARIF needs ≥ 1)");
+    { file: "a.py", line: 1, message: "unscoped t findMany", advisory: false }, "missing line → 1, never 0 (SARIF needs ≥ 1)");
   assert.deepEqual(parseLeak("lib/db.ts:7  [orders]  unscoped"), { file: "lib/db.ts", line: 7, message: "[orders]  unscoped" }, "legacy string form unchanged");
 });
 

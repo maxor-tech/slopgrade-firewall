@@ -80,6 +80,6 @@ test("sanitizeFingerprint caps loc at 200 entries", () => {
 
 test("a located rls-off leak from the server parses to its file and line", () => {
   assert.deepEqual(parseLeak({ kind: "rls-off", table: "orders", file: "db/migrations/001.sql", line: 3 }),
-    { file: "db/migrations/001.sql", line: 3, message: "rls-off orders" });
+    { file: "db/migrations/001.sql", line: 3, message: "rls-off orders", advisory: false });
   assert.equal(parseLeak({ kind: "rls-off", table: "orders" }).file, null);
 });

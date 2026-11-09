@@ -4,7 +4,7 @@ import { gzipSync } from "node:zlib"; // builtin, pure (no I/O) — for the Code
 import { verify as edVerify, createPublicKey } from "node:crypto"; // builtin — Ed25519 verify of the pro-bundle signature.
 
 export const DEFAULT_ORIGIN = "https://app.slopgrade.ai";
-export const CLIENT_VERSION = "0.15.1"; // keep in lock-step with package.json (pinned by client-lib.test.mjs)
+export const CLIENT_VERSION = "0.15.2"; // keep in lock-step with package.json (pinned by client-lib.test.mjs)
 export const FINGERPRINT_VERSION = 1;
 export const MAX_PAYLOAD_BYTES = 8 * 1024 * 1024; // 8MB hard cap on the POST body (clear error, not an opaque 413)
 /** The pro-extractor bundle a PAID repo receives from /api/ci/pro-extractors — bounded like every other input. */
@@ -409,13 +409,24 @@ export function leakText(l) {
 export function parseLeak(s) {
   if (s && typeof s === "object") {
     const message = sanitizeLogLine([s.kind, s.table, s.method].filter((x) => typeof x === "string" && x).join(" ") || "cross-tenant isolation leak");
+    // The server's `advisory` flag (idor-by-id) must survive: dropped, an advisory leak became a blocking feed row.
+    const advisory = s.advisory === true;
     return typeof s.file === "string" && s.file
-      ? { file: s.file, line: Math.max(1, Number(s.line) || 1), message }
-      : { file: null, line: 0, message };
+      ? { file: s.file, line: Math.max(1, Number(s.line) || 1), message, advisory }
+      : { file: null, line: 0, message, advisory };
   }
   const m = /^(.+?):(\d+)\s+(.*)$/.exec(String(s).trim());
   if (!m) return { file: null, line: 0, message: sanitizeLogLine(String(s)) };
   return { file: m[1], line: Number(m[2]), message: sanitizeLogLine(m[3] || "cross-tenant isolation leak") };
+}
+
+/**
+ * The feed row of a located cross-tenant leak. PURE. An advisory leak (the server never counts it as hard) is a medium
+ * row flagged `advisory`, which scopedBlocking never counts; a hard leak stays a high row.
+ */
+export function leakFeedRow(p) {
+  const row = { file: p.file, line: p.line, pack: "cross-tenant", rule: "cross-tenant", detail: p.message, severity: p.advisory ? "medium" : "high" };
+  return p.advisory ? { ...row, advisory: true } : row;
 }
 
 /**
