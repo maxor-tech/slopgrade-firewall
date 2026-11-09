@@ -31,7 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
-      - uses: maxor-tech/slopgrade-firewall@v0.14.0
+      - uses: maxor-tech/slopgrade-firewall@v0.14.1
 ```
 
 `id-token: write` is required (it is how the repo proves itself). `pull-requests: write` posts the findings on the PR.
@@ -278,6 +278,9 @@ or logic bugs that no taint engine or pattern sees; this is the part of the gate
 - **What is sent** — the PR's changed lines with 3 lines of context, for the files the change review reads, up to
   400,000 characters. Source hunks go first, then tests, then docs, lockfiles and generated files, so padding a PR
   cannot push its code past the budget. The run log counts any hunk past the budget as not reviewed.
+- **What it costs you** — the run log prints the input and output tokens your provider billed (client ≥ 0.14.1).
+  Measured on 90 commits with `claude-opus-5-5` at list price ($4 / $20 per million tokens): median **$0.016** per
+  PR, 9 in 10 under **$0.05**, the largest (72 hunks) $0.13.
 - **Notices, never a block.** Each flag is a notice on its file and line, with the class, the model's confidence and
   one sentence. It never changes the verdict. A missing key, a provider error, a refusal, a timeout (180 s) or a
   malformed answer prints one warning and the run goes on.
