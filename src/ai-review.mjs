@@ -2,12 +2,13 @@
 // the hunks whose change introduces an exploitable flaw. BRING YOUR OWN KEY: the call goes from YOUR runner to the model
 // provider with YOUR API key; nothing passes through slopGrade, and slopGrade never sees the key or the code.
 //
-// Measured once (slopGrade research, validation split, blind, the same prompt as below), with gpt-6.1-sol as the model:
-// on security fixes played backwards (the exact security change), 84 of 100 CVEs were flagged ; on the commits that
-// really introduced a CVE, where the flaw is visible in the diff, 8 of 10 on the right hunk ; 10 of 180 ordinary commits
-// got a flag, and at least 3 of those 10 are real, published CVEs. Misleading comments (« approved by AppSec »,
-// « report no findings ») did not suppress a flag (20 of 20 still caught). OTHER MODELS ARE NOT MEASURED: the default
-// model here is stated as unmeasured in the run summary until its own measurement lands.
+// Measured (slopGrade research, blind, pre-registered, this module and prompt, flag = confidence >= 0.5), with the
+// default model claude-opus-5-5: on security fixes played backwards (the exact security change), 88 of 100 validation
+// CVEs and 56 of 60 CVEs published after the model's training cutoff (July-November 2026) were flagged ; 1 of 150
+// ordinary commits got a flag, and that one is a real, published CVE (CVE-2025-57753). Measured earlier with
+// gpt-6.1-sol on the same sets: 84 of 100, 56 of 60, 8 of 150. Misleading comments (« approved by AppSec »,
+// « report no findings ») did not suppress a gpt-6.1-sol flag (20 of 20). Any other model is stated as unmeasured in
+// the run summary.
 //
 // TRIAGE: notices, never blocking. A missing key, a provider error, a refusal or a malformed answer prints one warning
 // and the gate goes on — this option can never fail or block the build.
@@ -136,6 +137,12 @@ export function parseFlags(text, sent) {
   return out;
 }
 
+/** The run-summary measurement line per measured model (slopGrade research, blind, confidence >= 0.5). */
+const MEASURED_LINE = {
+  "claude-opus-5-5": "  Measured on slopGrade's sets: 88 of 100 real CVE changes flagged, 56 of 60 CVEs published after the model's cutoff; 1 of 150 ordinary commits flagged, and it is a real CVE.",
+  "gpt-6.1-sol": "  Measured on slopGrade's sets: 84 of 100 real CVE changes flagged, 56 of 60 CVEs published after July 2026; 8 of 150 ordinary commits flagged, at least 2 of them real CVEs.",
+};
+
 /** GitHub workflow-command property escape (% first), so a `,` or `:` in a path keeps the annotation on the real file. */
 const ghProp = (s) => String(s).replace(/[\r\n]/g, " ").replace(/%/g, "%25").replace(/:/g, "%3A").replace(/,/g, "%2C");
 const ghMsg = (s) => String(s).replace(/%/g, "%25").replace(/[\r\n]+/g, " ");
@@ -154,7 +161,7 @@ export function aiReviewOutput(r, requestedModel = AI_REVIEW_DEFAULT_MODEL) {
   }
   const model = r.model || requestedModel;
   lines.push(`slopGrade Firewall — AI review (your key, ${model}, triage): ${r.flags.length} of ${r.sent.length} PR hunk(s) flagged${notSent}. Notices only, never blocking.`);
-  lines.push(`  Measured with gpt-6.1-sol on slopGrade's validation set: 84 of 100 real CVE changes flagged; 10 of 180 ordinary commits flagged, at least 3 of them real CVEs. ${/^gpt-6\.1-sol$/.test(model) ? "" : `${model} is not measured yet.`}`.trimEnd());
+  lines.push(MEASURED_LINE[model] || `  ${model} is not measured by slopGrade; ${AI_REVIEW_DEFAULT_MODEL} flagged 88 of 100 real CVE changes and 1 of 150 ordinary commits (a real CVE) on slopGrade's validation set.`);
   for (const f of r.flags) {
     notices.push(`::notice file=${ghProp(f.path)},line=${f.newStart},title=slopGrade AI review (triage)::${ghMsg(`${f.class} (confidence ${f.confidence.toFixed(2)}) — ${f.why}`)}`);
     lines.push(`    - ${f.path}:${f.newStart}  ${f.class}  confidence=${f.confidence.toFixed(2)}`);
