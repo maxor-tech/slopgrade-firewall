@@ -289,3 +289,23 @@ test("no source file of this client holds a raw NUL: the engine refuses such a f
   assert.ok(files.length > 20);
   assert.deepEqual(files.filter((f) => readFileSync(new URL(f, root)).includes(0)), []);
 });
+
+test("toolingPath: build/test/bench code is tooling; served code under docs/, tools/, tasks/ is not (two real TPs)", async () => {
+  const { toolingPath } = await import("../deep-scan.mjs");
+  assert.equal(toolingPath("scripts/release.py"), "scripts/");
+  assert.equal(toolingPath("website/scripts/serve-export.mjs"), "scripts/");
+  assert.equal(toolingPath("perf/ab-bench.mjs"), "perf/");
+  assert.equal(toolingPath("sbin/auto_grades.py"), "sbin/");
+  assert.equal(toolingPath("docs/_static/searchtools.js"), "_static/");
+  assert.equal(toolingPath("pkg/server_test.go"), "test file");
+  assert.equal(toolingPath("app/page.test.tsx"), "test file");
+  assert.equal(toolingPath("my-examples/app.js"), "my-examples/");
+  // real true positives in the release labels must keep blocking
+  assert.equal(toolingPath("v4/autoops-api-v4/api/task/service/taskansible.go"), null, "api/task/service Zip Slip");
+  assert.equal(toolingPath("rule-server/src/static/archives/2026.09.02/doc/common/help.js"), null, "served static help page XSS");
+  assert.equal(toolingPath("tools/api/handler.go"), null);
+  assert.equal(toolingPath("app/api/users/route.ts"), null);
+  assert.equal(toolingPath("scriptsx/a.py"), null, "a directory must match whole");
+  assert.equal(toolingPath(""), null);
+  assert.equal(toolingPath(undefined), null);
+});

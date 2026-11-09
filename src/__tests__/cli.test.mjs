@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { main } from "../../isolation-gate.mjs";
@@ -404,6 +404,33 @@ for (const scenario of [
       const deepPromoted = scenario.confirmation ? 0 : scenario.mixed ? 1 : scenario.pack ? 0 : scenario.blocks;
       assert.equal(deepLine, `- **Deep Scan** (${scenario.noDeepBlock ? "advisory" : "blocking"}) ${nFresh} new finding${nFresh === 1 ? "" : "s"}`
         + (scenario.noDeepBlock ? "" : ` · ${deepPromoted} blocking`) + (note ? " · 1 kept as warning by block confidence (score below the engine threshold)" : ""));
+    }, PRO_FREE, deep);
+  });
+}
+
+// 2026-11-09 — a NEW Deep Scan finding in a tooling path (scripts/, tests/, perf/, sbin/, _static/ …) is a warning, never a
+// block, even with deep-scan-block. Release run re-scored as shipped: Deep Scan block precision 22.3 % → 24.0 % (held-out
+// 21.4 % → 23.3 %), 0 true positive lost; « docs/ », « tools/ », « tasks/ » stay blocking (a served static doc page and an
+// api/task/service Zip Slip were real). Control: the same finding in app code still blocks.
+for (const s of [
+  { name: "a tooling-path finding (scripts/) warns and passes", dir: "scripts", blocks: 0 },
+  { name: "the same finding in app code blocks (control)", dir: "", blocks: 1 },
+  { name: "a docs/ finding still blocks (served static pages are real)", dir: "docs", blocks: 1 },
+]) {
+  test("deep scan tooling path: " + s.name, async () => {
+    const ws = mkdtempSync(join(tmpdir(), "sg-fw-tool-"));
+    const rel = s.dir ? `${s.dir}/build.py` : "build.py";
+    if (s.dir) mkdirSync(join(ws, s.dir), { recursive: true });
+    writeFileSync(join(ws, rel), "import subprocess\nfrom flask import request\n\ndef ping():\n    return subprocess.check_output('ping ' + request.args['h'], shell=True)\n", "utf8");
+    const paid = { ...VERDICT, sqli: undefined, cmdi: undefined, weakCrypto: undefined, secrets: undefined, gateEntitled: true, gateLevel: "paid", packBlocking: 0 };
+    const deep = { ok: true, scanned: 1, unanswered: 0, findings: [{ path: rel, cwe: "CWE-78", p: 0.94, evidence: "request at line 2 reaches sink at line 5" }] };
+    await withStubbedNetwork(paid, async ({ out }) => {
+      const code = await main(["--gate", "--deep-scan", "--deep-scan-block"], { ...CI_ENV, GITHUB_WORKSPACE: ws, SLOPGRADE_PURPOSE_CLASSIFIER: "off" });
+      assert.equal(code, s.blocks);
+      const ann = out.filter((l) => l.includes(",title=slopGrade Firewall deep scan::"));
+      assert.deepEqual(ann, [s.blocks
+        ? `::error file=${rel},line=5,title=slopGrade Firewall deep scan::[CWE-78] request at line 2 reaches sink at line 5`
+        : `::warning file=${rel},line=5,title=slopGrade Firewall deep scan::[CWE-78] request at line 2 reaches sink at line 5 (advisory — tooling path ${s.dir}/)`]);
     }, PRO_FREE, deep);
   });
 }
