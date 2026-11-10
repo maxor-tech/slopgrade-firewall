@@ -5,6 +5,8 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-11-10
+
 ### Changed
 - **A Deep Scan finding in tooling code never blocks**, even with `deep-scan-block`: build and release scripts, tests,
   benchmarks, fixtures, examples and generated doc assets (`scripts/`, `tests/`, `perf/`, `sbin/`, `_static/`, `*_test.go`
@@ -22,7 +24,9 @@ All notable changes to the open-source slopGrade Firewall client are documented 
   Weak crypto, TLS verification off, CSRF off and insecure cookies still block: rules for them removed real flaws.
   The rules come from the reasons an AI verifier gave when it rejected a blocking finding on the 61,661-repo release run.
   Re-scored as shipped: Deep Scan block precision 24.0 % → 30.9 % (held-out 23.3 % → 31.6 %), no true positive lost.
-  The rules were found on the same PRs, so these figures are confirmed only once a fresh labeled sample agrees.
+  The rules were found on the same PRs, so that figure is optimistic. Out of sample, on 241 blocked PRs from other
+  commits of the same repos with earlier independent labels: 18.7 % → 21.6 %, 0 true positives among the 67 labeled
+  findings the rules cleared (95 % upper bound 5.4 %), every justified block kept.
 
 ### Fixed
 - **Three kinds of teaching repository now read as teaching**, so their pack and Deep Scan blocks are advisory:
