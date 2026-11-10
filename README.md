@@ -321,6 +321,23 @@ or logic bugs that no taint engine or pattern sees; this is the part of the gate
   flag (pre-registered, blind labels): **17 of 19 real flaws caught, 61 % of its flags real** (95 % CI 42–76 %) at
   confidence ≥ 0.3, the cut it prints. It costs one more call on about 6 % of PRs. Notices only, never blocking.
 
+### Dependency scan — on by default (client ≥ 0.18.0)
+
+On a pull request that adds or changes a `package-lock.json`, the client lists the package versions the PR **adds**
+(a bump or a new package, never one it removes) and checks them against [OSV](https://osv.dev), the open advisory
+database behind the GitHub, npm and PyPI advisories. Each version with a published advisory is a warning on the
+lockfile, with the advisory ids and a link. Warnings only, never blocking; an OSV error prints one warning and the gate
+goes on. `dependency-scan: "false"` turns it off.
+
+- **What is sent**: `{ecosystem, name, version}` of packages resolved from the public npm registry, from your runner to
+  `api.osv.dev` — never to slopGrade, never source. A package from a private registry, a git URL or another tarball
+  host is never sent.
+- **Measured** on slopGrade's release run (61,661 repositories, 52,534 replayed pull requests): 1,750 pull requests
+  changed a `package-lock.json`, and **366 of them (20.9 %) added a version whose advisory was already published** when
+  the PR was made — 13.5 % of lockfile bumps, 65.5 % of new lockfiles. The lockfile parser matched an independent parse
+  on all 1,227,202 entries. For comparison, the deterministic gate blocked 7 pull requests for a real flaw on that run.
+- **Scope**: npm `package-lock.json` (v1, v2, v3) today; pnpm, yarn and other ecosystems follow.
+
 ## Excluding paths — `.slopgradeignore`
 
 Tests, fixtures, `vendor/`, `dist/` and example folders are already skipped. For anything else that is not your running
@@ -390,6 +407,8 @@ would rather the control not silently self-disable, `strict: "true"` fails **clo
 - **No stored secret.** Identity is a short-lived, GitHub-signed OIDC token, audience-bound to the server origin.
 - **Endpoint is fixed.** A custom `SLOPGRADE_ORIGIN` is refused (the run goes dry) unless you explicitly set
   `SLOPGRADE_ALLOW_CUSTOM_ORIGIN=1` for a self-hosted server.
+- **Dependency scan (on by default, PRs that change a `package-lock.json`)**: `{ecosystem, name, version}` of the
+  public-registry packages the PR adds go to `api.osv.dev` from your runner — never to slopGrade. `dependency-scan: "false"` turns it off.
 - **With `ai-review` on (opt-in, off by default)**, the PR's changed lines go to Anthropic with **your** key, never to
   slopGrade; or, with no key on a paid slot, to slopGrade, which forwards them to Anthropic and drops them (see *AI review* above).
 - **Local · deterministic** by default. Zero npm dependencies (only `node:*`). Pin the **SHA** to freeze the exact code.

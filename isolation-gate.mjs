@@ -64,11 +64,13 @@ import {
   githubBlobBase, stepSummaryMarkdown, emitStepSummary, uploadSarifToCodeScanning, emitOutputs, refusalLine,
   advisoryOfferOf, offerLogLine,
 } from "./src/client-lib.mjs";
-import { oidcRepoIsPublic, sinkFiles, prChangedPaths, prChangedRanges, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, CANDIDATES_RANKED_NOTE, heisenFeed, splitAgainstFeed, toolingPath, isPaidVerdict, isPublicVerdict, deepScanNudge, unansweredNote, unansweredFiles } from "./src/deep-scan.mjs";
+import { oidcRepoIsPublic, sinkFiles, prChangedPaths, prChangedRanges, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, CANDIDATES_RANKED_NOTE, heisenFeed, splitAgainstFeed, toolingPath, prShas, isPaidVerdict, isPublicVerdict, deepScanNudge, unansweredNote, unansweredFiles } from "./src/deep-scan.mjs";
 import { prHunks, validChangeReview, C_HUNK, C_REVIEW_NOTE, CPP_HUNK, CPP_REVIEW_NOTE, RUST_HUNK, RUST_REVIEW_NOTE, noticeHint, unreviewedNote, REVIEW_BAND_NOTE, reviewBandHeading } from "./src/change-review.mjs";
 import { fixableHitIndex, attachFixes } from "./src/autofix.mjs";
 import { aiReview, aiReviewOutput, prAllHunks, requestHostedReview, AI_REVIEW_DEFAULT_MODEL, AI_REVIEW_TIMEOUT_MS, AI_FOCUS_SYSTEM, wantsFocusedPass, focusedResult } from "./src/ai-review.mjs";
 import { surfaceDelta } from "./src/surface-delta.mjs";
+import { prLockfileChanges } from "./src/deps-lock.mjs";
+import { queryOsv, depsOutput } from "./src/deps-osv.mjs";
 import { IGNORE_FILE, parseIgnore, ignoreMatcher, readIgnoreText } from "./src/ignore.mjs";
 import { EXCEPTIONS_FILE, parseExceptions, exceptionFor, readExceptionsText } from "./src/exceptions.mjs";
 import { decidePurpose, purposeAdvisoryLine } from "./src/repo-purpose.mjs";
@@ -290,6 +292,22 @@ export async function main(argv = [], env = process.env) {
         // runs the same check at step 5c, and the server re-checks it.
         if (wantsFocusedPass(surfaceDelta(hunks), first)) printAiReview(focusedResult(await aiReview({ key, model, hunks, system: AI_FOCUS_SYSTEM })), model);
       } else aiHostedHunks = hunks;
+    }
+  }
+
+  // 0b. Dependency scan (0.18.0, default on, PRs only) — the package versions this PR ADDS to a package-lock.json,
+  //     matched against OSV from the runner (src/deps-osv.mjs). Public-registry {name, version} only; never blocking.
+  if (argv.includes("--dependency-scan")) {
+    const prs = prShas(env, () => JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8")));
+    if (prs) {
+      const gitDeps = (args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15_000, maxBuffer: 256 * 1024 * 1024 });
+      for (const { path, introduced } of prLockfileChanges(gitDeps, (p) => readFileSync(join(root, p), "utf8"), prs.base)) {
+        if (!introduced.length) continue;
+        const out = depsOutput(path, await queryOsv(introduced));
+        for (const n of out.notices) console.log(n);
+        for (const l of out.lines) line(l);
+        if (out.warn) ghWarn(out.lines[0]);
+      }
     }
   }
 
