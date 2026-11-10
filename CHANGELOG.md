@@ -5,6 +5,15 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+### Added
+- **Dependency scan, on by default.** On a pull request that adds or changes a `package-lock.json` (v1, v2, v3), the
+  package versions the PR adds are checked against OSV from the runner; each one with a published advisory is a
+  warning on the lockfile with its advisory ids. Only `{ecosystem, name, version}` of public npm-registry packages is
+  sent, to `api.osv.dev`, never to slopGrade. Never blocking; `dependency-scan: "false"` turns it off. Measured on the
+  release run (PREREG-DEPS-1 / READ-DEPS-1): 366 of 1,750 pull requests that changed a `package-lock.json` (20.9 %)
+  added a version whose advisory was already published at PR time; the parser matched an independent parse on
+  1,227,202 of 1,227,202 entries.
+
 ## [0.17.0] — 2026-11-10
 
 ### Added

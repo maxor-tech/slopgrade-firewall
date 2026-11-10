@@ -47,6 +47,10 @@ inputs:
     description: "The model ai-review calls. Default claude-opus-5-5."
     required: false
     default: "claude-opus-5-5"
+  dependency-scan:
+    description: "Default true, pull requests only. The package versions the PR ADDS to a package-lock.json are checked against OSV (osv.dev) from your runner: only {name, version} of public npm-registry packages are sent to api.osv.dev, never to slopGrade, never source; private-registry, git and tarball packages are never sent. Warnings, never blocking. Measured on slopGrade's release run: of 1,750 pull requests that changed a package-lock.json, 366 (20.9 %) added a version whose advisory was already published. \"false\" turns it off."
+    required: false
+    default: "true"
   deep-scan-block:
     description: "OPT-IN (default false; needs deep-scan: \"true\" and firewall-mode: gate). A NEW deep-scan finding — one no detector pack reported — BLOCKS the check instead of annotating a warning. Measured block precision of the taint engine: ~94% on labeled benchmark code, but at least 78% (25 of 32) on real-world CVE code (about 1 false block in 4-5, mostly project-specific validators it does not recognise); on 52,534 ordinary open-source pull requests it blocked 143, 43 of them for a real flaw — so it stays off unless you choose it."
     required: false
@@ -115,6 +119,7 @@ runs:
         FW_AI_REVIEW_KEY: ${{ inputs.ai-review-key }}
         FW_AI_REVIEW_MODEL: ${{ inputs.ai-review-model }}
         FW_AI_REVIEW: ${{ inputs.ai-review }}
+        FW_DEPENDENCY_SCAN: ${{ inputs.dependency-scan }}
         # The caller's OWN GITHUB_TOKEN, used for two consumer-side surfaces, both posting to the caller's OWN repo and
         # never reaching slopGrade: the inline PR comment feed (`permissions: pull-requests: write`) and the Code
         # Scanning SARIF upload (`permissions: security-events: write`). Missing either permission = that surface
@@ -147,4 +152,5 @@ runs:
         [ "${FW_CHANGE_REVIEW}" = "auto" ] && [ "${FW_DEEP_SCAN}" != "false" ] && ARGS+=(--change-review --change-review-auto)
         [ "${FW_FIX}" = "off" ] && ARGS+=(--no-fix)
         [ "${FW_AI_REVIEW}" = "true" ] && ARGS+=(--ai-review)
+        [ "${FW_DEPENDENCY_SCAN}" != "false" ] && ARGS+=(--dependency-scan)
         node "$FW_CLI" "${ARGS[@]}"
