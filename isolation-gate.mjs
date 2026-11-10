@@ -72,6 +72,7 @@ import { IGNORE_FILE, parseIgnore, ignoreMatcher, readIgnoreText } from "./src/i
 import { EXCEPTIONS_FILE, parseExceptions, exceptionFor, readExceptionsText } from "./src/exceptions.mjs";
 import { decidePurpose, purposeAdvisoryLine } from "./src/repo-purpose.mjs";
 import { readRepoAggregates, applyBlockConfidence } from "./src/block-confidence.mjs";
+import { deepGuard } from "./src/deep-guard.mjs";
 
 const CODE_EXTS = /\.(py|ts|tsx|js|jsx|mjs|cjs|sql|rb|go|php|prisma|java|cs|rs|c|cc|cpp|h|hpp|kt|scala|ex|exs)$/;
 const BUILD_FILES = /(?:^|\/)(?:pom\.xml|build\.gradle(?:\.kts)?|libs\.versions\.toml)$/;
@@ -615,10 +616,13 @@ export async function main(argv = [], env = process.env) {
     for (const f of fresh) {
       // A tooling path (scripts/, tests/, perf/ … — src/deep-scan.mjs TOOLING_PATH) never blocks: not request-serving code.
       const tooling = deepBlock ? toolingPath(f.file) : null;
-      const promote = deepBlock && !tooling && !(repoAggregates && applyBlockConfidence(f));
+      // A finding no external attacker can reach (src/deep-guard.mjs : command-line input, vendored or test code,
+      // a posture setting, the page's own URL …) never blocks either ; the reason rides in the note below.
+      const guard = deepBlock && !tooling ? deepGuard(f, (p) => readFileSync(join(root, p), "utf8")) : null;
+      const promote = deepBlock && !tooling && !guard && !(repoAggregates && applyBlockConfidence(f));
       if (promote) deepBlocking++; // Preserve the existing purpose-policy accounting below.
       const blocksHere = promote && !purposeAdvisory;
-      const confidence = deepBlock && !promote && !tooling ? (f.blockConfidence ?? f.block_confidence) : null;
+      const confidence = deepBlock && !promote && !tooling && !guard ? (f.blockConfidence ?? f.block_confidence) : null;
       // The reason rides in `detail`, so the log line, the PR review (summary + inline comment) and SARIF all say WHY the
       // row does not block — not only the annotation (e2e 2026-10-27 : the review showed a bare 🟡 medium).
       const confidenceNote = confidence ? ` (advisory — block confidence ${confidence.score.toFixed(2)} below ${confidence.tau.toFixed(2)})` : "";
@@ -626,7 +630,8 @@ export async function main(argv = [], env = process.env) {
       // A row that would block but sits in a non-product repo says so as well (same channels).
       const purposeNote = promote && !blocksHere ? ` (advisory — ${purpose.purpose} repository)` : "";
       const toolingNote = tooling ? ` (advisory — tooling path ${tooling})` : "";
-      const note = toolingNote || confidenceNote || purposeNote;
+      const guardNote = guard ? ` (advisory — ${guard})` : "";
+      const note = toolingNote || guardNote || confidenceNote || purposeNote;
       const base = note ? { ...f, detail: `${f.detail}${note}`, advisoryNote: note.trim() } : f;
       const row = promote ? { ...base, severity: blocksHere ? "high" : "medium", ...(blocksHere ? {} : { origSeverity: "high" }) } : base;
       console.log(`::${blocksHere ? "error" : "warning"} file=${wfFile(row.file)},line=${row.line},title=slopGrade Firewall deep scan::[${sanitizeLogLine(row.rule)}] ${sanitizeLogLine(row.detail)}`);

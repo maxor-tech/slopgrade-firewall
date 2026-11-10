@@ -434,3 +434,28 @@ for (const s of [
     }, PRO_FREE, deep);
   });
 }
+
+// 2026-11-10 — a NEW Deep Scan finding no external attacker can reach (src/deep-guard.mjs) is a warning, never a block.
+// Shipped view re-scored with the shipped module: Deep Scan block precision 24.0 % → 30.9 % (held-out 23.3 % → 31.6 %),
+// 0 true positive lost. Control: the same sink fed by a request parameter still blocks.
+for (const s of [
+  { name: "a command-line source warns and passes", src: "h = sys.argv[1]", ev: "ast-taint: the request value read at line 4 reaches subprocess.check_output() at line 5 (CWE-78)", blocks: 0, why: "command-line input" },
+  { name: "a request source blocks (control)", src: "h = request.args['h']", ev: "ast-taint: the request value read at line 4 reaches subprocess.check_output() at line 5 (CWE-78)", blocks: 1 },
+  { name: "a cleartext gRPC setting warns and passes", src: "h = 1", ev: "ast-pattern: grpc.WithInsecure() (gRPC channel over cleartext, no TLS) at line 5 (CWE-319)", cwe: "CWE-319", blocks: 0, why: "configuration finding" },
+]) {
+  test("deep scan guard: " + s.name, async () => {
+    const ws = mkdtempSync(join(tmpdir(), "sg-fw-guard-"));
+    writeFileSync(join(ws, "app.py"), `import subprocess, sys\nfrom flask import request\n\n${s.src}\nsubprocess.check_output('ping ' + h, shell=True)\n`, "utf8");
+    const paid = { ...VERDICT, sqli: undefined, cmdi: undefined, weakCrypto: undefined, secrets: undefined, gateEntitled: true, gateLevel: "paid", packBlocking: 0 };
+    const cwe = s.cwe ?? "CWE-78";
+    const deep = { ok: true, scanned: 1, unanswered: 0, findings: [{ path: "app.py", cwe, p: 0.94, evidence: s.ev }] };
+    await withStubbedNetwork(paid, async ({ out }) => {
+      const code = await main(["--gate", "--deep-scan", "--deep-scan-block"], { ...CI_ENV, GITHUB_WORKSPACE: ws, SLOPGRADE_PURPOSE_CLASSIFIER: "off" });
+      assert.equal(code, s.blocks);
+      const ann = out.filter((l) => l.includes(",title=slopGrade Firewall deep scan::"));
+      assert.deepEqual(ann, [s.blocks
+        ? `::error file=app.py,line=5,title=slopGrade Firewall deep scan::[${cwe}] ${s.ev}`
+        : `::warning file=app.py,line=5,title=slopGrade Firewall deep scan::[${cwe}] ${s.ev} (advisory — ${s.why})`]);
+    }, PRO_FREE, deep);
+  });
+}

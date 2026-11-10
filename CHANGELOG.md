@@ -11,6 +11,18 @@ All notable changes to the open-source slopGrade Firewall client are documented 
   …). It stays a warning that says « (advisory — tooling path scripts/) ». `docs/`, `tools/` and `tasks/` still block,
   because two real flaws in the release labels lived there. Release run re-scored as shipped: Deep Scan block precision
   22.3 % → 24.0 % (held-out 21.4 % → 23.3 %), no true positive lost.
+- **A Deep Scan finding no external attacker can reach never blocks**, even with `deep-scan-block`. It stays a warning
+  that says why (« (advisory — command-line input) »). Deterministic rules, no AI at run time:
+  - the source is a command-line argument (`sys.argv`, `process.argv`, `os.Args`, `parse_args()` …)
+  - the file is vendored third-party code (`site-packages/`, `venv/`, `vendor/`, `node_modules/`, `*.min.js` …)
+  - the file is a test the tooling rule does not name (`test.js`, `testapp/`, `*-tests/`, `calibration/`)
+  - a posture setting with no data flow: cleartext gRPC, wildcard CORS, widened file permissions
+  - a redirect built from the page's own `location.href`, or `location.hash` given to jQuery `$()` as a selector
+  - an outgoing request in browser-side code (the visitor's browser fetches, not your server)
+  Weak crypto, TLS verification off, CSRF off and insecure cookies still block: rules for them removed real flaws.
+  The rules come from the reasons an AI verifier gave when it rejected a blocking finding on the 61,661-repo release run.
+  Re-scored as shipped: Deep Scan block precision 24.0 % → 30.9 % (held-out 23.3 % → 31.6 %), no true positive lost.
+  The rules were found on the same PRs, so these figures are confirmed only once a fresh labeled sample agrees.
 
 ### Fixed
 - **Three kinds of teaching repository now read as teaching**, so their pack and Deep Scan blocks are advisory:
