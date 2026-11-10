@@ -5,6 +5,14 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+### Changed
+- **Docs state exactly what leaves the runner, without a « $0 » promise.** The free tier on a private repo still
+  posts only a structural fingerprint; the deep scan and the opt-in AI review send code and are billed (your provider,
+  or token cost on a paid slot).
+- **`deep-scan-block` figures re-measured as shipped in 0.16.0**: on 52,534 replayed pull requests of the 61,661-repo
+  release run it blocked 143, 43 of them for a real flaw (was 245 / 46 on the 2026-10-24 run). Generated from
+  `benchmark-figures.json` by `scripts/sync-pr-figures.mjs`.
+
 ## [0.16.0] — 2026-11-10
 
 ### Changed

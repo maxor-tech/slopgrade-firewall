@@ -5,7 +5,7 @@
   "heads": "app 916c0b03 · OSS b46aaf0 · engine f56dcba",
   "labels": 1025,
   "kappa": 0.933,
-  "deep": { "replayedPrs": 52089, "blockedPrs": 245, "justified": 46 },
+  "deep": { "replayedPrs": 52534, "blockedPrs": 143, "justified": 43, "measured": "2026-11-10", "run": "61,661-repo release run, as shipped in 0.16.0 (purpose v3 + tooling path + deep guards), 1,008 adjudicated labels; fresh sample of other commits: 45 of 208 labeled blocks justified" },
   "static": { "replayedPrs": 52089, "blockedPrs": 59, "justified": 11 },
   "blocking": {
     "note": "What blocks today, copied from the live catalog (`node scripts/sync-pr-figures.mjs --catalog`). README.md and action.yml must state these lists ; the --check mode and src/__tests__/blocking-truth.test.mjs fail on drift.",
