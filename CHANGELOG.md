@@ -12,7 +12,9 @@ All notable changes to the open-source slopGrade Firewall client are documented 
   « slopGrade AI review (entry point, triage) » notices. Measured (slopGrade research N3B, pre-registered, 150 fresh
   AI-written commits in exactly that condition, blind labels): 17 of 19 real flaws caught (89.5 %, CI 68.6–97.1),
   60.7 % of flags real (CI 42.4–76.4). The surface detector matches the research detector on all 928 labeled commits
-  of the earlier set. With `ai-review-key` only; the hosted path follows. Never blocking.
+  of the earlier set. With `ai-review-key`, or hosted on a paid slot: a second request with `pass: "focus"` that the
+  server accepts only after this run's first pass flagged nothing at 0.5 and its own surface check finds a new entry
+  point (one per run, same daily cap). Never blocking.
 
 ### Changed
 - **Docs state exactly what leaves the runner, without a « $0 » promise.** The free tier on a private repo still

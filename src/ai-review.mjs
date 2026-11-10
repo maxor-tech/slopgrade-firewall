@@ -236,7 +236,13 @@ export function hostedRefusal(status, body) {
   if (status === 402) return "the hosted AI review needs a paid slot — set ai-review-key to use your own key instead";
   if (status === 503) return "the hosted AI review is not available yet — set ai-review-key to use your own key";
   if (status === 429) return body?.error === "daily-cap" ? `this repo reached its daily cap of ${Number(body.cap) || 200} hosted reviews` : "rate-limited";
-  if (status === 409) return body?.error === "already-reviewed" ? "this commit already had its hosted review (one per run)" : "slopGrade has no run for this commit (the verdict call did not land)";
+  if (status === 409) {
+    if (body?.error === "already-reviewed") return "this commit already had its hosted review (one per run)";
+    if (body?.error === "no-new-surface") return "slopGrade found no new entry point in the hunks";
+    if (body?.error === "first-pass-flagged") return "the first pass already flagged this PR";
+    if (body?.error === "no-first-pass") return "the first hosted pass of this run is missing";
+    return "slopGrade has no run for this commit (the verdict call did not land)";
+  }
   if (status === 502) return `the model provider failed (${String(body?.detail || "no detail").slice(0, 120)})`;
   return `HTTP ${status}`;
 }
@@ -247,12 +253,14 @@ export function hostedRefusal(status, body) {
  * them. Every flag must name a hunk that was sent (else the answer is malformed — an error, never « clean »).
  * Returns the aiReview shape plus `hosted: true`. Never throws.
  */
-export async function requestHostedReview(post, origin, oidcToken, sha, hunks) {
+export async function requestHostedReview(post, origin, oidcToken, sha, hunks, pass = null) {
   const { sent, skipped } = buildReviewPrompt(hunks);
   const fail = (error) => ({ error, sent: [], skipped: (hunks || []).length, hosted: true });
   if (!sent.length) return { flags: [], sent, skipped, model: AI_REVIEW_DEFAULT_MODEL, usage: null, hosted: true };
   try {
-    const res = await post(`${origin}/api/ci/ai-review`, JSON.stringify({ oidcToken, sha, hunks: sent.map((h) => ({ path: h.path, newStart: h.newStart, text: h.text })) }));
+    // pass "focus" (0.17.0): the entry-point pass of this run; the server re-checks the condition and the surface itself.
+    const payload = { oidcToken, sha, hunks: sent.map((h) => ({ path: h.path, newStart: h.newStart, text: h.text })), ...(pass ? { pass } : {}) };
+    const res = await post(`${origin}/api/ci/ai-review`, JSON.stringify(payload));
     const body = await res.json().catch(() => null);
     if (!res.ok) return fail(hostedRefusal(res.status, body));
     if (!body || !Array.isArray(body.flags)) return fail("malformed answer from slopGrade");

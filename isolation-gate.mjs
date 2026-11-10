@@ -286,8 +286,8 @@ export async function main(argv = [], env = process.env) {
         const first = await aiReview({ key, model, hunks });
         printAiReview(first, model);
         // Entry-point pass (0.17.0): a PR that adds a route / handler and got no first-pass flag at 0.5 gets a second,
-        // focused call (authentication, ownership, input bound, rate) — the condition it was measured in. Your key only
-        // for now ; the hosted path follows with the server route.
+        // focused call (authentication, ownership, input bound, rate) — the condition it was measured in. The hosted path
+        // runs the same check at step 5c, and the server re-checks it.
         if (wantsFocusedPass(surfaceDelta(hunks), first)) printAiReview(focusedResult(await aiReview({ key, model, hunks, system: AI_FOCUS_SYSTEM })), model);
       } else aiHostedHunks = hunks;
     }
@@ -548,7 +548,12 @@ export async function main(argv = [], env = process.env) {
     else if (!paid) printAiReview({ error: "no ai-review-key, and the hosted AI review needs a paid slot — nothing was sent", sent: [], skipped: aiHostedHunks.length, hosted: true }, AI_REVIEW_DEFAULT_MODEL);
     else {
       const post = (url, body) => fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body, signal: AbortSignal.timeout(AI_REVIEW_TIMEOUT_MS + 30_000) });
-      printAiReview(await requestHostedReview(post, origin, oidcToken, sha, aiHostedHunks), AI_REVIEW_DEFAULT_MODEL);
+      const first = await requestHostedReview(post, origin, oidcToken, sha, aiHostedHunks);
+      printAiReview(first, AI_REVIEW_DEFAULT_MODEL);
+      // Entry-point pass, hosted (0.17.0): same condition as with your key; the server re-checks it and the surface.
+      if (wantsFocusedPass(surfaceDelta(aiHostedHunks), first)) {
+        printAiReview(focusedResult(await requestHostedReview(post, origin, oidcToken, sha, aiHostedHunks, "focus")), AI_REVIEW_DEFAULT_MODEL);
+      }
     }
   }
 

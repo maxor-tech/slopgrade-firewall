@@ -8,7 +8,8 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { main } from "../../isolation-gate.mjs";
-import { AI_FOCUS_SYSTEM, AI_REVIEW_SYSTEM, wantsFocusedPass, focusedResult } from "../ai-review.mjs";
+import { createHash } from "node:crypto";
+import { AI_FOCUS_SYSTEM, AI_REVIEW_SYSTEM, wantsFocusedPass, focusedResult, hostedRefusal } from "../ai-review.mjs";
 
 const sh = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" });
 const VERDICT = { gateEntitled: true, gateLevel: "paid", packBlocking: 0, pattern: "none", conformancePct: null, hardLeaks: 0, reliable: true, leaks: [] };
@@ -81,6 +82,61 @@ test("controls: no new route → one call ; first pass already flagged at 0.5 �
   const b = await run(addRoute, [[{ hunk: 0, class: "missing authorization", confidence: 0.8, why: "x" }], [focusFlag]]);
   assert.equal(b.provider.length, 1);
   assert.doesNotMatch(b.text, /entry-point pass/);
+});
+
+// The SAME hash is pinned in slopgrade lib/__tests__/ai-review-hosted.test.ts: change one prompt, both suites fail.
+test("the entry-point prompt is the N3B prompt, hash-pinned in both repos", () => {
+  assert.equal(createHash("sha256").update(AI_FOCUS_SYSTEM).digest("hex"), "088e4bb75d23c2a8983b3b7cbd3e79a2df492530ea57bb947d8cfc85844caf6d");
+});
+
+async function runHosted(after, answers) {
+  const { dir, ev, head } = prRepo(after);
+  const env = { GITHUB_ACTIONS: "true", ACTIONS_ID_TOKEN_REQUEST_URL: "https://oidc.example/token?api-version=2", ACTIONS_ID_TOKEN_REQUEST_TOKEN: "rt",
+    GITHUB_SHA: head, GITHUB_WORKSPACE: dir, GITHUB_EVENT_NAME: "pull_request", GITHUB_EVENT_PATH: ev };
+  const realFetch = globalThis.fetch, realLog = console.log;
+  const hosted = [], out = [];
+  globalThis.fetch = async (url, opts) => {
+    const u = String(url);
+    if (u.startsWith("https://oidc.example/")) return { ok: true, status: 200, json: async () => ({ value: "eyJ.oidc.token" }) };
+    if (u.endsWith("/api/ci/pro-extractors")) return { ok: false, status: 402, json: async () => ({ error: "plan-required" }) };
+    if (u === "https://api.anthropic.com/v1/messages") throw new Error("no provider call from the runner without a key");
+    if (u.endsWith("/api/ci/ai-review")) {
+      const b = JSON.parse(opts.body);
+      hosted.push(b);
+      const flags = (answers[hosted.length - 1] ?? []).map((f) => ({ path: b.hunks[0].path, newStart: b.hunks[0].newStart, ...f }));
+      return { ok: true, status: 200, json: async () => ({ ok: true, model: "claude-opus-5-5", blocking: 0, flags, ...(b.pass ? { pass: b.pass } : {}) }) };
+    }
+    return { ok: true, status: 200, json: async () => VERDICT };
+  };
+  console.log = (...a) => out.push(a.join(" "));
+  try {
+    const code = await main(["--gate", "--ai-review"], env);
+    return { code, hosted, text: out.join("\n") };
+  } finally {
+    globalThis.fetch = realFetch; console.log = realLog;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("hosted (no key, paid): a PR that adds a route gets a second request with pass « focus »; controls send one", async () => {
+  const f = { class: "missing authorization", confidence: 0.35, why: "any caller posts into any room id" };
+  const a = await runHosted(addRoute, [[], [f, { class: "missing rate limit", confidence: 0.2, why: "x" }]]);
+  assert.equal(a.code, 0);
+  assert.equal(a.hosted.length, 2);
+  assert.equal(a.hosted[0].pass, undefined, "the first request is unchanged (old servers keep working)");
+  assert.equal(a.hosted[1].pass, "focus");
+  assert.match(a.text, /AI review, entry-point pass \(slopGrade-hosted, claude-opus-5-5, triage\): 1 of 1 PR hunk\(s\) flagged/);
+  assert.match(a.text, /title=slopGrade AI review \(entry point, triage\)::missing authorization \(confidence 0\.35\)/);
+  assert.doesNotMatch(a.text, /missing rate limit/);
+  assert.equal((await runHosted(noRoute, [[], [f]])).hosted.length, 1);
+  assert.equal((await runHosted(addRoute, [[{ class: "x", confidence: 0.9, why: "y" }], [f]])).hosted.length, 1);
+});
+
+test("hostedRefusal names each server-side refusal of the focus pass", () => {
+  assert.equal(hostedRefusal(409, { error: "no-new-surface" }), "slopGrade found no new entry point in the hunks");
+  assert.equal(hostedRefusal(409, { error: "first-pass-flagged" }), "the first pass already flagged this PR");
+  assert.equal(hostedRefusal(409, { error: "no-first-pass" }), "the first hosted pass of this run is missing");
+  assert.equal(hostedRefusal(409, { error: "no-run" }), "slopGrade has no run for this commit (the verdict call did not land)");
 });
 
 test("wantsFocusedPass / focusedResult: the measured condition and cut, nothing else", () => {
