@@ -69,8 +69,8 @@ import { prHunks, validChangeReview, C_HUNK, C_REVIEW_NOTE, CPP_HUNK, CPP_REVIEW
 import { fixableHitIndex, attachFixes } from "./src/autofix.mjs";
 import { aiReview, aiReviewOutput, prAllHunks, requestHostedReview, AI_REVIEW_DEFAULT_MODEL, AI_REVIEW_TIMEOUT_MS, AI_FOCUS_SYSTEM, wantsFocusedPass, focusedResult } from "./src/ai-review.mjs";
 import { surfaceDelta } from "./src/surface-delta.mjs";
-import { prLockfileChanges } from "./src/deps-lock.mjs";
-import { queryOsv, depsOutput } from "./src/deps-osv.mjs";
+import { prLockfileChanges, repoLockfiles } from "./src/deps-lock.mjs";
+import { queryOsv, depsOutput, addKev } from "./src/deps-osv.mjs";
 import { IGNORE_FILE, parseIgnore, ignoreMatcher, readIgnoreText } from "./src/ignore.mjs";
 import { EXCEPTIONS_FILE, parseExceptions, exceptionFor, readExceptionsText } from "./src/exceptions.mjs";
 import { decidePurpose, purposeAdvisoryLine } from "./src/repo-purpose.mjs";
@@ -295,19 +295,23 @@ export async function main(argv = [], env = process.env) {
     }
   }
 
-  // 0b. Dependency scan (0.18.0, default on, PRs only) — the package versions this PR ADDS to a package-lock.json,
-  //     matched against OSV from the runner (src/deps-osv.mjs). Public-registry {name, version} only; never blocking.
+  // 0b. Dependency scan (0.18.0, default on) — matched against OSV from the runner (src/deps-osv.mjs), CISA KEV first.
+  //     On a pull request: the versions this PR ADDS to a lockfile. On a schedule / push / manual run: every version the
+  //     lockfiles pin (the monitor: an advisory published after a merge). Public-registry {name, version} only; never blocking.
   if (argv.includes("--dependency-scan")) {
     const prs = prShas(env, () => JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8")));
-    if (prs) {
-      const gitDeps = (args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15_000, maxBuffer: 256 * 1024 * 1024 });
-      for (const { path, introduced } of prLockfileChanges(gitDeps, (p) => readFileSync(join(root, p), "utf8"), prs.base)) {
-        if (!introduced.length) continue;
-        const out = depsOutput(path, await queryOsv(introduced));
-        for (const n of out.notices) console.log(n);
-        for (const l of out.lines) line(l);
-        if (out.warn) ghWarn(out.lines[0]);
-      }
+    const gitDeps = (args) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15_000, maxBuffer: 256 * 1024 * 1024 });
+    const readDeps = (p) => readFileSync(join(root, p), "utf8");
+    const ctx = { owner: String(env.GITHUB_REPOSITORY || "").split("/")[0] };
+    const monitor = !prs && ["schedule", "push", "workflow_dispatch"].includes(env.GITHUB_EVENT_NAME);
+    const sets = prs ? prLockfileChanges(gitDeps, readDeps, prs.base, ctx).map((x) => ({ path: x.path, deps: x.introduced }))
+      : monitor ? repoLockfiles(gitDeps, readDeps, ctx) : [];
+    for (const { path, deps } of sets) {
+      if (!deps.length) continue;
+      const out = depsOutput(path, await addKev(await queryOsv(deps)), { scope: prs ? "pr" : "repo" });
+      for (const n of out.notices) console.log(n);
+      for (const l of out.lines) line(l);
+      if (out.warn) ghWarn(out.lines[0]);
     }
   }
 

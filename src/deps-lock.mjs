@@ -49,23 +49,104 @@ export function parsePackageLock(text) {
   return out;
 }
 
+// go.sum: "<module> <version> <hash>" = the module's code was downloaded (it is built); "<module> <version>/go.mod
+// <hash>" alone = only its go.mod was read to resolve the graph, the code is never built — such a version is skipped.
+const GO_LINE = /^(\S+)\s+(v\d+\.\d+\.\d+[0-9A-Za-z.+-]*?)\s+h1:\S+$/;
+
 /**
- * The package-lock.json files this PR adds or changes -> [{ path, introduced }]. `git(args)` runs git in the checkout
- * (string or null on failure), `read(path)` reads the head file. A lockfile git cannot show at the base is new: every
- * version in it is introduced. Never throws.
+ * go.sum text -> [{ eco: "Go", name, version }], each module version once. A module under the repository's OWN GitHub
+ * owner (`ctx.owner`, case-insensitive) is never kept: it is most often a private module whose path would leak.
  */
-export function prLockfileChanges(git, read, baseSha) {
+export function parseGoSum(text, ctx = {}) {
+  const own = typeof ctx.owner === "string" && ctx.owner ? `github.com/${ctx.owner.toLowerCase()}/` : null;
+  const out = [], seen = new Set();
+  for (const raw of String(text ?? "").split(/\r?\n/)) {
+    const m = GO_LINE.exec(raw.trim());
+    if (!m) continue;
+    const [, name, version] = m;
+    if (own && name.toLowerCase().startsWith(own)) continue;
+    const k = `${name}@${version}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({ eco: "Go", name, version });
+  }
+  return out;
+}
+
+const RUBYGEMS = /^https?:\/\/rubygems\.org\/?$/;
+const GEM_SPEC = /^ {4}([A-Za-z0-9_.-]+) \(([0-9][0-9A-Za-z.]*)(?:-[A-Za-z0-9_-]+)?\)$/;
+
+/** Gemfile.lock text -> [{ eco: "RubyGems", name, version }] — top-level specs of a GEM section on rubygems.org only. */
+export function parseGemfileLock(text) {
+  const out = [], seen = new Set();
+  let section = null, publicGem = false, inSpecs = false;
+  for (const raw of String(text ?? "").split(/\r?\n/)) {
+    const line = raw.replace(/\s+$/, "");
+    if (/^[A-Z][A-Z ]*$/.test(line)) { section = line; publicGem = false; inSpecs = false; continue; }
+    if (section !== "GEM") continue;
+    const remote = /^ {2}remote: (\S+)$/.exec(line);
+    if (remote) { publicGem = RUBYGEMS.test(remote[1]); continue; }
+    if (line === "  specs:") { inSpecs = true; continue; }
+    if (!inSpecs || !publicGem) continue;
+    const m = GEM_SPEC.exec(line);
+    if (!m) continue;
+    const k = `${m[1]}@${m[2]}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({ eco: "RubyGems", name: m[1], version: m[2] });
+  }
+  return out;
+}
+
+/** The lockfile names this module reads, and their parser. */
+const PARSERS = [
+  [/(^|\/)package-lock\.json$/, (t) => parsePackageLock(t)],
+  [/(^|\/)go\.sum$/, (t, ctx) => parseGoSum(t, ctx)],
+  [/(^|\/)Gemfile\.lock$/, (t) => parseGemfileLock(t)],
+];
+export const LOCKFILE_PATHSPEC = [":(glob)**/package-lock.json", ":(glob)**/go.sum", ":(glob)**/Gemfile.lock"];
+
+/** Any supported lockfile -> its entries; an unsupported name gives []. PURE. */
+export function parseLockfile(path, text, ctx = {}) {
+  const p = PARSERS.find(([re]) => re.test(String(path ?? "")));
+  return p ? p[1](text, ctx) : [];
+}
+
+/**
+ * The supported lockfiles this PR adds or changes -> [{ path, introduced }]. `git(args)` runs git in the checkout
+ * (string or null on failure), `read(path)` reads the head file. A lockfile git cannot show at the base is new: every
+ * version in it is introduced. `ctx.owner` = the repository owner (go.sum own-module rule). Never throws.
+ */
+export function prLockfileChanges(git, read, baseSha, ctx = {}) {
   let names;
-  try { names = git(["-c", "core.quotepath=off", "diff", "--name-only", "--diff-filter=AM", baseSha, "--", ":(glob)**/package-lock.json"]); } catch { return []; }
+  try { names = git(["-c", "core.quotepath=off", "diff", "--name-only", "--diff-filter=AM", baseSha, "--", ...LOCKFILE_PATHSPEC]); } catch { return []; }
   if (typeof names !== "string") return [];
   const out = [];
-  for (const path of names.split("\n").map((s) => s.trim()).filter((p) => /(^|\/)package-lock\.json$/.test(p))) {
+  for (const path of names.split("\n").map((s) => s.trim()).filter((p) => PARSERS.some(([re]) => re.test(p)))) {
     let head = null, base = null;
     try { head = read(path); } catch { head = null; }
     if (typeof head !== "string") continue;
     try { base = git(["show", `${baseSha}:${path}`]); } catch { base = null; }
-    const H = parsePackageLock(head);
-    out.push({ path, introduced: introducedDeps(typeof base === "string" ? parsePackageLock(base) : null, H) });
+    const H = parseLockfile(path, head, ctx);
+    out.push({ path, introduced: introducedDeps(typeof base === "string" ? parseLockfile(path, base, ctx) : null, H) });
+  }
+  return out;
+}
+
+/**
+ * Every tracked supported lockfile with ALL its pinned versions -> [{ path, deps }] — the scheduled monitor (a run that is
+ * not a pull request): an advisory published after a merge is found on the next scheduled run. Never throws.
+ */
+export function repoLockfiles(git, read, ctx = {}) {
+  let names;
+  try { names = git(["ls-files", "-z", "--", ...LOCKFILE_PATHSPEC]); } catch { return []; }
+  if (typeof names !== "string") return [];
+  const out = [];
+  for (const path of names.split(/[\0\n]/).map((s) => s.trim()).filter((p) => PARSERS.some(([re]) => re.test(p)))) {
+    let text = null;
+    try { text = read(path); } catch { text = null; }
+    if (typeof text !== "string") continue;
+    out.push({ path, deps: parseLockfile(path, text, ctx) });
   }
   return out;
 }

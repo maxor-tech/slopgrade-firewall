@@ -1,7 +1,7 @@
 // Lockfile parsing for dependency CVE matching (P3, layer 1: npm package-lock.json v1 / v2 / v3).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parsePackageLock, introducedDeps } from "../deps-lock.mjs";
+import { parsePackageLock, parseGoSum, parseGemfileLock, parseLockfile, introducedDeps, repoLockfiles } from "../deps-lock.mjs";
 
 const keys = (list) => list.map((d) => `${d.name}@${d.version}`).sort();
 
@@ -47,6 +47,55 @@ test("only public-registry packages are kept: a private registry, git or other t
     "node_modules/noresolved": { version: "2.0.0" },
   } });
   assert.deepEqual(keys(parsePackageLock(lock)), ["lodash@4.17.15", "noresolved@2.0.0"]);
+});
+
+test("go.sum: built module versions only (a /go.mod-only line is graph resolution, never built), own-owner modules never sent", () => {
+  const sum = [
+    "github.com/gin-gonic/gin v1.6.0 h1:abc=",
+    "github.com/gin-gonic/gin v1.6.0/go.mod h1:def=",
+    "golang.org/x/net v0.0.0-20190404232315-eb5bcb51f2a3 h1:x=",
+    "golang.org/x/text v0.3.0/go.mod h1:only-graph=",
+    "github.com/acme/internal-lib v1.2.3 h1:y=",
+    "github.com/ACME/other v0.1.0 h1:z=",
+    "garbage line",
+    "",
+  ].join("\n");
+  const out = parseGoSum(sum, { owner: "acme" });
+  assert.deepEqual(out.map((d) => `${d.eco}:${d.name}@${d.version}`).sort(),
+    ["Go:github.com/gin-gonic/gin@v1.6.0", "Go:golang.org/x/net@v0.0.0-20190404232315-eb5bcb51f2a3"]);
+  assert.equal(parseGoSum(sum, {}).length, 4, "without an owner, every built module is kept; the /go.mod-only x/text never");
+});
+
+test("Gemfile.lock: rubygems.org specs only (top level), platform suffix stripped, GIT / PATH / private sources skipped", () => {
+  const lock = [
+    "GIT", "  remote: https://github.com/acme/private-gem.git", "  revision: abc", "  specs:", "    private-gem (0.1.0)", "",
+    "GEM", "  remote: https://rubygems.org/", "  specs:", "    rails (5.2.0)", "      actionpack (= 5.2.0)", "    nokogiri (1.10.0-x86_64-linux)", "    rack (2.0.7)", "",
+    "GEM", "  remote: https://gems.acme.corp/", "  specs:", "    acme-secret (3.0.0)", "",
+    "PLATFORMS", "  ruby", "",
+  ].join("\n");
+  assert.deepEqual(parseGemfileLock(lock).map((d) => `${d.eco}:${d.name}@${d.version}`).sort(),
+    ["RubyGems:nokogiri@1.10.0", "RubyGems:rack@2.0.7", "RubyGems:rails@5.2.0"]);
+});
+
+test("parseLockfile dispatches on the file name; an unknown name gives []", () => {
+  assert.equal(parseLockfile("a/go.sum", "github.com/x/y v1.0.0 h1:a=", {})[0].eco, "Go");
+  assert.equal(parseLockfile("Gemfile.lock", "GEM\n  remote: https://rubygems.org/\n  specs:\n    rack (2.0.7)\n", {})[0].eco, "RubyGems");
+  assert.equal(parseLockfile("web/package-lock.json", JSON.stringify({ packages: { "node_modules/a": { version: "1.0.0" } } }), {})[0].eco, "npm");
+  assert.deepEqual(parseLockfile("yarn.lock", "x", {}), []);
+});
+
+test("repoLockfiles: every tracked supported lockfile with all its pinned versions (the scheduled monitor)", () => {
+  const files = {
+    "package-lock.json": JSON.stringify({ packages: { "node_modules/lodash": { version: "4.17.15" } } }),
+    "svc/go.sum": "github.com/gin-gonic/gin v1.6.0 h1:a=\n",
+    "README.md": "x",
+  };
+  const git = (args) => (args[0] === "ls-files" ? "package-lock.json\nsvc/go.sum\nREADME.md\n" : null);
+  const out = repoLockfiles(git, (p) => files[p], {});
+  assert.deepEqual(out.map((x) => [x.path, x.deps.map((d) => `${d.eco}:${d.name}@${d.version}`)]),
+    [["package-lock.json", ["npm:lodash@4.17.15"]], ["svc/go.sum", ["Go:github.com/gin-gonic/gin@v1.6.0"]]]);
+  assert.deepEqual(repoLockfiles(() => null, () => "", {}), [], "git failure: nothing, never a throw");
+  assert.deepEqual(repoLockfiles(() => { throw new Error("x"); }, () => "", {}), []);
 });
 
 test("introducedDeps: versions in head that base did not have (a bump, a new package), never a removal", () => {

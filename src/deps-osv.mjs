@@ -26,7 +26,7 @@ export async function queryOsv(deps, { fetchImpl = fetch, timeoutMs = OSV_TIMEOU
       const res = await fetchImpl(OSV_URL, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ queries: chunk.map((d) => ({ package: { name: d.name, ecosystem: "npm" }, version: d.version })) }),
+        body: JSON.stringify({ queries: chunk.map((d) => ({ package: { name: d.name, ecosystem: d.eco || "npm" }, version: d.version })) }),
         signal: AbortSignal.timeout(timeoutMs),
       });
       if (!res.ok) return { error: `OSV HTTP ${res.status}` };
@@ -46,16 +46,59 @@ export async function queryOsv(deps, { fetchImpl = fetch, timeoutMs = OSV_TIMEOU
 const ghProp = (s) => String(s).replace(/[\r\n]/g, " ").replace(/%/g, "%25").replace(/:/g, "%3A").replace(/,/g, "%2C");
 const ghMsg = (s) => String(s).replace(/%/g, "%25").replace(/[\r\n]+/g, " ");
 
+// CISA Known Exploited Vulnerabilities: the CVEs attacked in the wild (public JSON, nothing is sent to fetch it).
+export const KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
+const OSV_VULN_URL = "https://api.osv.dev/v1/vulns/";
+export const KEV_MAX_LOOKUPS = 100;   // advisory records read per run to find their CVE aliases
+
+/**
+ * Mark the vulnerable versions whose advisory is on CISA KEV (`kev: [CVE ids]`) and put them first. Reads the KEV list
+ * and each advisory's OSV record (aliases). Never throws; a failure keeps every finding and order, sets `kevError`.
+ */
+export async function addKev(r, { fetchImpl = fetch, timeoutMs = OSV_TIMEOUT_MS } = {}) {
+  if (!r || r.error || !r.vulnerable?.length) return r;
+  const get = async (url) => {
+    const res = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) });
+    return { status: res.status, ok: res.ok, body: res.ok ? await res.json().catch(() => null) : null };
+  };
+  try {
+    const kev = await get(KEV_URL);
+    if (!kev.ok || !Array.isArray(kev.body?.vulnerabilities)) return { ...r, kevError: `CISA KEV list unavailable (HTTP ${kev.status})` };
+    const kevSet = new Set(kev.body.vulnerabilities.map((v) => v?.cveID).filter((x) => typeof x === "string"));
+    const ids = [...new Set(r.vulnerable.flatMap((v) => v.ids))].slice(0, KEV_MAX_LOOKUPS);
+    const aliases = new Map();
+    for (const id of ids) {
+      if (id.startsWith("CVE-")) { aliases.set(id, [id]); continue; }
+      const rec = await get(OSV_VULN_URL + encodeURIComponent(id));
+      aliases.set(id, [id, ...(Array.isArray(rec.body?.aliases) ? rec.body.aliases : [])]);
+    }
+    const vulnerable = r.vulnerable.map((v) => {
+      const hit = [...new Set(v.ids.flatMap((id) => (aliases.get(id) || [])).filter((a) => kevSet.has(a)))];
+      return hit.length ? { ...v, kev: hit } : v;
+    });
+    vulnerable.sort((a, b) => (b.kev ? 1 : 0) - (a.kev ? 1 : 0));
+    return { ...r, vulnerable };
+  } catch (e) {
+    return { ...r, kevError: `CISA KEV check failed (${e?.message || e})` };
+  }
+}
+
 /** queryOsv's result for one lockfile -> run-log lines and workflow warnings. PURE, so the wording is tested. */
-export function depsOutput(lockPath, r) {
+export function depsOutput(lockPath, r, { scope = "pr" } = {}) {
   if (r?.error) return { lines: [`slopGrade Firewall — dependency scan unavailable: ${r.error} — verdict unaffected.`], notices: [], warn: true };
   const skipped = r.skipped ? ` · ${r.skipped} more not checked (cap ${OSV_MAX_QUERIES.toLocaleString("en-US")})` : "";
-  const lines = [`slopGrade Firewall — dependency scan: ${lockPath} — ${r.vulnerable.length} of ${r.checked} version(s) this PR adds have published advisories (OSV)${skipped}. Warnings only, never blocking.`];
+  const nKev = r.vulnerable.filter((v) => v.kev).length;
+  const kevNote = nKev ? `, ${nKev} of them actively exploited (CISA KEV)` : "";
+  const what = scope === "repo" ? "version(s) pinned in this lockfile" : "version(s) this PR adds";
+  const lines = [`slopGrade Firewall — dependency scan: ${lockPath} — ${r.vulnerable.length} of ${r.checked} ${what} have published advisories (OSV)${kevNote}${skipped}. Warnings only, never blocking.`];
+  if (r.kevError) lines.push(`  (${r.kevError} — advisories shown without the exploited-in-the-wild priority)`);
   const notices = [];
   for (const v of r.vulnerable) {
     const n = v.ids.length;
-    notices.push(`::warning file=${ghProp(lockPath)},line=1,title=slopGrade dependency scan::${ghMsg(`${v.name}@${v.version} has ${n} published advisor${n === 1 ? "y" : "ies"}: ${v.ids.join(", ")} — https://osv.dev/vulnerability/${v.ids[0]}`)}`);
-    lines.push(`    - ${v.name}@${v.version}  ${v.ids.join(" ")}`);
+    const title = v.kev ? "slopGrade dependency scan — actively exploited (CISA KEV)" : "slopGrade dependency scan";
+    const kev = v.kev ? ` — exploited in the wild: ${v.kev.join(", ")}` : "";
+    notices.push(`::warning file=${ghProp(lockPath)},line=1,title=${title}::${ghMsg(`${v.name}@${v.version} has ${n} published advisor${n === 1 ? "y" : "ies"}: ${v.ids.join(", ")}${kev} — https://osv.dev/vulnerability/${v.ids[0]}`)}`);
+    lines.push(`    - ${v.name}@${v.version}  ${v.ids.join(" ")}${v.kev ? `  KEV ${v.kev.join(" ")}` : ""}`);
   }
   return { lines, notices, warn: false };
 }
