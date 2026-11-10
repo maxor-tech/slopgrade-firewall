@@ -5,6 +5,8 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-11-10
+
 ### Added
 - **AI review: an entry-point pass.** When a PR adds a network entry point (route, handler, socket event, server, MCP
   tool — `src/surface-delta.mjs`, deterministic) and the first pass flagged nothing at 0.5, a second focused call checks
