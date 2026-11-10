@@ -313,7 +313,7 @@ or logic bugs that no taint engine or pattern sees; this is the part of the gate
   Caveats: these are open-source commits, not your code. A flag can still be wrong, and no flag is not a clearance.
   Any other model you set in `ai-review-model` is stated as **unmeasured** in the run log.
 
-- **Entry-point pass** (client ≥ 0.17.0, your key only for now). When the PR **adds** a route, handler, socket event,
+- **Entry-point pass** (client ≥ 0.17.0; with your key, or hosted on a paid slot — the server re-checks the condition). When the PR **adds** a route, handler, socket event,
   server or MCP tool (a deterministic check, `src/surface-delta.mjs`) and the first pass flagged nothing at confidence
   0.5, a second call asks four questions about each new entry point: authentication, ownership, input bound, rate.
   Why: in AI-written commits most real flaws are a missing access check or a missing limit on new surface, and the
