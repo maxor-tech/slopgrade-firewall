@@ -67,7 +67,8 @@ import {
 import { oidcRepoIsPublic, sinkFiles, prChangedPaths, prChangedRanges, selectDeepUnits, requestDeepScan, repoKind, libraryCandidates, candidateOutcomesLine, CANDIDATE_DISMISS_HINT, CANDIDATES_RANKED_NOTE, heisenFeed, splitAgainstFeed, toolingPath, isPaidVerdict, isPublicVerdict, deepScanNudge, unansweredNote, unansweredFiles } from "./src/deep-scan.mjs";
 import { prHunks, validChangeReview, C_HUNK, C_REVIEW_NOTE, CPP_HUNK, CPP_REVIEW_NOTE, RUST_HUNK, RUST_REVIEW_NOTE, noticeHint, unreviewedNote, REVIEW_BAND_NOTE, reviewBandHeading } from "./src/change-review.mjs";
 import { fixableHitIndex, attachFixes } from "./src/autofix.mjs";
-import { aiReview, aiReviewOutput, prAllHunks, requestHostedReview, AI_REVIEW_DEFAULT_MODEL, AI_REVIEW_TIMEOUT_MS } from "./src/ai-review.mjs";
+import { aiReview, aiReviewOutput, prAllHunks, requestHostedReview, AI_REVIEW_DEFAULT_MODEL, AI_REVIEW_TIMEOUT_MS, AI_FOCUS_SYSTEM, wantsFocusedPass, focusedResult } from "./src/ai-review.mjs";
+import { surfaceDelta } from "./src/surface-delta.mjs";
 import { IGNORE_FILE, parseIgnore, ignoreMatcher, readIgnoreText } from "./src/ignore.mjs";
 import { EXCEPTIONS_FILE, parseExceptions, exceptionFor, readExceptionsText } from "./src/exceptions.mjs";
 import { decidePurpose, purposeAdvisoryLine } from "./src/repo-purpose.mjs";
@@ -281,8 +282,14 @@ export async function main(argv = [], env = process.env) {
       const model = (env.FW_AI_REVIEW_MODEL || "").trim() || AI_REVIEW_DEFAULT_MODEL;
       const key = (env.FW_AI_REVIEW_KEY || "").trim();
       if (!hunks) printAiReview({ error: "git could not diff the PR base", sent: [], skipped: 0 }, model);
-      else if (key) printAiReview(await aiReview({ key, model, hunks }), model);
-      else aiHostedHunks = hunks;
+      else if (key) {
+        const first = await aiReview({ key, model, hunks });
+        printAiReview(first, model);
+        // Entry-point pass (0.17.0): a PR that adds a route / handler and got no first-pass flag at 0.5 gets a second,
+        // focused call (authentication, ownership, input bound, rate) — the condition it was measured in. Your key only
+        // for now ; the hosted path follows with the server route.
+        if (wantsFocusedPass(surfaceDelta(hunks), first)) printAiReview(focusedResult(await aiReview({ key, model, hunks, system: AI_FOCUS_SYSTEM })), model);
+      } else aiHostedHunks = hunks;
     }
   }
 
