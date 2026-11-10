@@ -13,6 +13,15 @@ All notable changes to the open-source slopGrade Firewall client are documented 
   release run (PREREG-DEPS-1 / READ-DEPS-1): 366 of 1,750 pull requests that changed a `package-lock.json` (20.9 %)
   added a version whose advisory was already published at PR time; the parser matched an independent parse on
   1,227,202 of 1,227,202 entries.
+- **Dependency scan: Go `go.sum` and Ruby `Gemfile.lock`.** Go: module versions that are built (a `/go.mod`-only line
+  is skipped), modules under the repository's own GitHub owner never sent. Ruby: top-level specs from rubygems.org only.
+  Measured (READ-DEPS-2b): 246 of 990 go.sum PRs (24.8 %) and 26 of 729 Gemfile.lock PRs (3.6 %) added a version with an
+  advisory published at PR time; parsers = independent parse on 160,872 of 160,872 entries.
+- **Actively exploited first (CISA KEV).** A version whose advisory (or its CVE alias) is on the CISA Known Exploited
+  Vulnerabilities list gets the title « actively exploited (CISA KEV) » and leads the list. A KEV or alias lookup
+  failure keeps every finding and says the priority is missing.
+- **Dependency monitor between pull requests.** On a `schedule`, `push` or `workflow_dispatch` run the scan checks every
+  version the lockfiles pin, so an advisory published after a merge shows up on the next run.
 
 ## [0.17.0] — 2026-11-10
 

@@ -29,10 +29,10 @@ function prRepo(changeLock) {
   return { dir, ev, head };
 }
 
-async function run({ flag = true, changeLock = true } = {}) {
+async function run({ flag = true, changeLock = true, event = "pull_request" } = {}) {
   const { dir, ev, head } = prRepo(changeLock);
   const env = { GITHUB_ACTIONS: "true", ACTIONS_ID_TOKEN_REQUEST_URL: "https://oidc.example/token?api-version=2", ACTIONS_ID_TOKEN_REQUEST_TOKEN: "rt",
-    GITHUB_SHA: head, GITHUB_WORKSPACE: dir, GITHUB_EVENT_NAME: "pull_request", GITHUB_EVENT_PATH: ev };
+    GITHUB_SHA: head, GITHUB_WORKSPACE: dir, GITHUB_EVENT_NAME: event, GITHUB_EVENT_PATH: ev };
   const realFetch = globalThis.fetch, realLog = console.log;
   const osv = [], out = [];
   globalThis.fetch = async (url, opts) => {
@@ -62,6 +62,15 @@ test("a PR that moves lodash to a version with an advisory: one OSV query with o
   assert.deepEqual(osv, [[{ package: { name: "lodash", ecosystem: "npm" }, version: "4.17.15" }]]);
   assert.match(text, /::warning file=package-lock\.json,line=1,title=slopGrade dependency scan::lodash@4\.17\.15 has 1 published advisory: GHSA-35jh-r3h4-6jhm/);
   assert.match(text, /dependency scan: package-lock\.json — 1 of 1 version\(s\) this PR adds have published advisories \(OSV\)/);
+});
+
+test("scheduled run (monitor): every pinned version of the lockfile is checked, worded « pinned », even with no change", async () => {
+  const { code, osv, text } = await run({ event: "schedule", changeLock: false });
+  assert.equal(code, 0);
+  assert.deepEqual(osv, [[{ package: { name: "lodash", ecosystem: "npm" }, version: "4.17.21" }]]);
+  assert.match(text, /dependency scan: package-lock\.json — 0 of 1 version\(s\) pinned in this lockfile/);
+  // an event that is neither a PR nor a monitor event (e.g. release) sends nothing
+  assert.deepEqual((await run({ event: "release", changeLock: false })).osv, []);
 });
 
 test("controls: option off → no OSV call ; a PR that changes no lockfile → no OSV call", async () => {
