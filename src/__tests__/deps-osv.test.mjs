@@ -1,7 +1,7 @@
 // Dependency scan (0.18.0): the versions a PR introduces, matched against OSV from the runner. Fetch is the only double.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { queryOsv, depsOutput, addKev, KEV_URL, OSV_BATCH, OSV_MAX_QUERIES } from "../deps-osv.mjs";
+import { queryOsv, depsOutput, addKev, annotated, KEV_URL, OSV_BATCH, OSV_MAX_QUERIES } from "../deps-osv.mjs";
 
 const dep = (name, version) => ({ eco: "npm", name, version });
 
@@ -76,4 +76,52 @@ test("depsOutput: one notice per vulnerable version on its lockfile, a link per 
   const err = depsOutput("package-lock.json", { error: "OSV HTTP 503" });
   assert.equal(err.warn, true);
   assert.match(err.lines[0], /unavailable: OSV HTTP 503 — verdict unaffected/);
+});
+
+test("queryOsv keeps the parser's dev flag on a vulnerable version", async () => {
+  const fetchImpl = async (_u, init) => ({ ok: true, status: 200, json: async () => ({ results: JSON.parse(init.body).queries.map(() => ({ vulns: [{ id: "GHSA-x" }] })) }) });
+  const r = await queryOsv([{ eco: "npm", name: "jest", version: "1.0.0", dev: true }, dep("lodash", "4.17.15")], { fetchImpl });
+  assert.deepEqual(r.vulnerable.map((v) => [v.name, v.dev === true]), [["jest", true], ["lodash", false]]);
+});
+
+test("addKev reads each advisory's GitHub severity (highest wins); a record failure leaves the version unrated", async () => {
+  const sev = { "GHSA-low": "LOW", "GHSA-high": "HIGH", "GHSA-mod": "MODERATE" };
+  const fetchImpl = async (url) => {
+    if (url === KEV_URL) return { ok: true, status: 200, json: async () => ({ vulnerabilities: [] }) };
+    const id = url.split("/").pop();
+    if (id === "GHSA-down") return { ok: false, status: 500, json: async () => ({}) };
+    return { ok: true, status: 200, json: async () => ({ id, aliases: [], database_specific: { severity: sev[id] } }) };
+  };
+  const r = { vulnerable: [{ name: "a", version: "1", ids: ["GHSA-low", "GHSA-high"] }, { name: "b", version: "1", ids: ["GHSA-mod"] }, { name: "c", version: "1", ids: ["GHSA-down"] }], checked: 3, skipped: 0 };
+  const out = await addKev(r, { fetchImpl });
+  assert.deepEqual(out.vulnerable.map((v) => [v.name, v.severity ?? null]), [["a", "HIGH"], ["b", "MODERATE"], ["c", null]]);
+  const noKev = await addKev(r, { fetchImpl: async (url) => (url === KEV_URL ? { ok: false, status: 503, json: async () => ({}) } : fetchImpl(url)) });
+  assert.equal(noKev.kevError, "CISA KEV list unavailable (HTTP 503)");
+  assert.equal(noKev.vulnerable[0].severity, "HIGH", "a KEV failure keeps the severities read");
+});
+
+test("annotated: KEV always; dev-only never (unless KEV); HIGH / CRITICAL / unrated yes; LOW / MODERATE no; all = every version", () => {
+  const cases = [
+    [{ severity: "CRITICAL" }, true], [{ severity: "HIGH" }, true], [{}, true], [{ severity: "MODERATE" }, false], [{ severity: "LOW" }, false],
+    [{ severity: "CRITICAL", dev: true }, false], [{ severity: "LOW", kev: ["CVE-1"] }, true], [{ dev: true, kev: ["CVE-1"] }, true],
+  ];
+  for (const [v, want] of cases) assert.equal(annotated(v), want, JSON.stringify(v));
+  for (const [v] of cases) assert.equal(annotated(v, { all: true }), true);
+});
+
+test("depsOutput default: a MODERATE and a dev-only version are listed and counted, not annotated; `all` annotates them", () => {
+  const r = { vulnerable: [
+    { name: "minimist", version: "1.2.0", ids: ["GHSA-a"], severity: "CRITICAL" },
+    { name: "qs", version: "6.5.1", ids: ["GHSA-b"], severity: "MODERATE" },
+    { name: "jest", version: "26.0.0", ids: ["GHSA-c"], severity: "HIGH", dev: true },
+  ], checked: 40, skipped: 0 };
+  const out = depsOutput("package-lock.json", r);
+  assert.equal(out.notices.length, 1);
+  assert.match(out.notices[0], /minimist@1\.2\.0 has 1 published advisory \(CRITICAL\): GHSA-a/);
+  assert.match(out.lines[0], /3 of 40 version\(s\) this PR adds have published advisories \(OSV\)\. Warnings only, never blocking\. 2 of them below HIGH or dev-only: listed here, not annotated/);
+  assert.deepEqual(out.lines.slice(1), ["    - minimist@1.2.0  GHSA-a  CRITICAL", "    - qs@6.5.1  GHSA-b  MODERATE", "    - jest@26.0.0 (dev)  GHSA-c  HIGH"]);
+  const all = depsOutput("package-lock.json", r, { all: true });
+  assert.equal(all.notices.length, 3);
+  assert.match(all.notices[2], /jest@26\.0\.0 \(dev\) has 1 published advisory \(HIGH\)/);
+  assert.doesNotMatch(all.lines[0], /not annotated/);
 });

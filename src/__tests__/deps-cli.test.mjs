@@ -10,9 +10,9 @@ import { main } from "../../isolation-gate.mjs";
 
 const sh = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" });
 const VERDICT = { gateEntitled: false, gateLevel: "none", packBlocking: 0, pattern: "none", conformancePct: null, hardLeaks: 0, reliable: true, leaks: [] };
-const lock = (v) => JSON.stringify({ lockfileVersion: 3, packages: { "": { name: "app" }, "node_modules/lodash": { version: v, resolved: `https://registry.npmjs.org/lodash/-/lodash-${v}.tgz` } } }, null, 2);
+const lock = (v, dev = false) => JSON.stringify({ lockfileVersion: 3, packages: { "": { name: "app" }, "node_modules/lodash": { version: v, resolved: `https://registry.npmjs.org/lodash/-/lodash-${v}.tgz`, ...(dev ? { dev: true } : {}) } } }, null, 2);
 
-function prRepo(changeLock) {
+function prRepo(changeLock, dev = false) {
   const dir = mkdtempSync(join(tmpdir(), "fw-deps-cli-"));
   sh(dir, "init", "-q", "-b", "main");
   sh(dir, "config", "user.email", "t@example.com"); sh(dir, "config", "user.name", "t"); sh(dir, "config", "core.autocrlf", "false");
@@ -20,7 +20,7 @@ function prRepo(changeLock) {
   writeFileSync(join(dir, "index.js"), "module.exports = 1;\n");
   sh(dir, "add", "."); sh(dir, "commit", "-qm", "base");
   const base = sh(dir, "rev-parse", "HEAD").trim();
-  if (changeLock) writeFileSync(join(dir, "package-lock.json"), lock("4.17.15"));
+  if (changeLock) writeFileSync(join(dir, "package-lock.json"), lock("4.17.15", dev));
   writeFileSync(join(dir, "index.js"), "module.exports = 2;\n");
   sh(dir, "commit", "-qam", "change");
   const head = sh(dir, "rev-parse", "HEAD").trim();
@@ -29,8 +29,8 @@ function prRepo(changeLock) {
   return { dir, ev, head };
 }
 
-async function run({ flag = true, changeLock = true, event = "pull_request" } = {}) {
-  const { dir, ev, head } = prRepo(changeLock);
+async function run({ flag = true, changeLock = true, event = "pull_request", dev = false, severity = null, extra = [] } = {}) {
+  const { dir, ev, head } = prRepo(changeLock, dev);
   const env = { GITHUB_ACTIONS: "true", ACTIONS_ID_TOKEN_REQUEST_URL: "https://oidc.example/token?api-version=2", ACTIONS_ID_TOKEN_REQUEST_TOKEN: "rt",
     GITHUB_SHA: head, GITHUB_WORKSPACE: dir, GITHUB_EVENT_NAME: event, GITHUB_EVENT_PATH: ev };
   const realFetch = globalThis.fetch, realLog = console.log;
@@ -43,12 +43,13 @@ async function run({ flag = true, changeLock = true, event = "pull_request" } = 
       osv.push(q);
       return { ok: true, status: 200, json: async () => ({ results: q.map((x) => (x.package.name === "lodash" && x.version === "4.17.15" ? { vulns: [{ id: "GHSA-35jh-r3h4-6jhm" }] } : {})) }) };
     }
+    if (severity && u === "https://api.osv.dev/v1/vulns/GHSA-35jh-r3h4-6jhm") return { ok: true, status: 200, json: async () => ({ id: "GHSA-35jh-r3h4-6jhm", aliases: [], database_specific: { severity } }) };
     if (u.endsWith("/api/ci/pro-extractors")) return { ok: false, status: 402, json: async () => ({ error: "plan-required" }) };
     return { ok: true, status: 200, json: async () => VERDICT };
   };
   console.log = (...a) => out.push(a.join(" "));
   try {
-    const code = await main(flag ? ["--dependency-scan"] : [], env);
+    const code = await main(flag ? ["--dependency-scan", ...extra] : [], env);
     return { code, osv, text: out.join("\n") };
   } finally {
     globalThis.fetch = realFetch; console.log = realLog;
@@ -78,4 +79,16 @@ test("controls: option off → no OSV call ; a PR that changes no lockfile → n
   const b = await run({ changeLock: false });
   assert.deepEqual(b.osv, []);
   assert.doesNotMatch(b.text, /dependency scan/);
+});
+
+test("default filter end to end: a dev-only MODERATE version is listed in the log, not annotated; --dependency-scan-all annotates it", async () => {
+  const quiet = await run({ dev: true, severity: "MODERATE" });
+  assert.equal(quiet.code, 0);
+  assert.doesNotMatch(quiet.text, /::warning file=package-lock\.json/);
+  assert.match(quiet.text, /1 of them below HIGH or dev-only: listed here, not annotated/);
+  assert.match(quiet.text, /- lodash@4\.17\.15 \(dev\)  GHSA-35jh-r3h4-6jhm  MODERATE/);
+  const loud = await run({ dev: true, severity: "MODERATE", extra: ["--dependency-scan-all"] });
+  assert.match(loud.text, /::warning file=package-lock\.json,line=1,title=slopGrade dependency scan::lodash@4\.17\.15 \(dev\) has 1 published advisory \(MODERATE\)/);
+  // not dev, HIGH: annotated by default
+  assert.match((await run({ severity: "HIGH" })).text, /::warning file=package-lock\.json.*lodash@4\.17\.15 has 1 published advisory \(HIGH\)/);
 });

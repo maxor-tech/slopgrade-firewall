@@ -308,7 +308,7 @@ export async function main(argv = [], env = process.env) {
       : monitor ? repoLockfiles(gitDeps, readDeps, ctx) : [];
     for (const { path, deps } of sets) {
       if (!deps.length) continue;
-      const out = depsOutput(path, await addKev(await queryOsv(deps)), { scope: prs ? "pr" : "repo" });
+      const out = depsOutput(path, await addKev(await queryOsv(deps)), { scope: prs ? "pr" : "repo", all: argv.includes("--dependency-scan-all") });
       for (const n of out.notices) console.log(n);
       for (const l of out.lines) line(l);
       if (out.warn) ghWarn(out.lines[0]);

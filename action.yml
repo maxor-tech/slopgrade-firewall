@@ -51,6 +51,10 @@ inputs:
     description: "Default true. On a pull request, the package versions it ADDS to a lockfile (npm package-lock, pnpm, yarn; go.sum; Gemfile.lock; poetry, uv, Pipfile; Cargo; composer) are checked against OSV (osv.dev) from your runner; on a schedule / push / manual run, every pinned version is (the monitor). Versions on the CISA Known Exploited Vulnerabilities list come first. Only {ecosystem, name, version} of public packages is sent to api.osv.dev, never to slopGrade, never source; company-registry, git, tarball and local-path packages, other indexes, and own-owner Go modules and npm scopes are never sent (public npm mirrors are kept). Warnings, never blocking. Measured on slopGrade's release run, advisories already published at PR time: 363 of 1,750 package-lock PRs (20.7 %), 246 of 990 go.sum PRs (24.8 %), 119 of 562 yarn.lock PRs (21.2 %), 103 of 545 pnpm-lock PRs (18.9 %), 26 of 729 Gemfile.lock PRs (3.6 %). \"false\" turns it off."
     required: false
     default: "true"
+  dependency-severity:
+    description: "Default high. Which dependency advisories are ANNOTATED on the lockfile: \"high\" = a version on the CISA KEV list, or one that is not dev-only and whose advisories are HIGH / CRITICAL or unrated; the others are listed in the run log and counted, not annotated. \"all\" annotates every version with an advisory. Measured on slopGrade's release run: of 920 warned lockfile changes, 578 (63 %) carry HIGH or CRITICAL, and where dev packages are recorded about half the warnings are dev-only."
+    required: false
+    default: "high"
   deep-scan-block:
     description: "OPT-IN (default false; needs deep-scan: \"true\" and firewall-mode: gate). A NEW deep-scan finding — one no detector pack reported — BLOCKS the check instead of annotating a warning. Measured block precision of the taint engine: ~94% on labeled benchmark code, but at least 78% (25 of 32) on real-world CVE code (about 1 false block in 4-5, mostly project-specific validators it does not recognise); on 52,534 ordinary open-source pull requests it blocked 143, 43 of them for a real flaw — so it stays off unless you choose it."
     required: false
@@ -120,6 +124,7 @@ runs:
         FW_AI_REVIEW_MODEL: ${{ inputs.ai-review-model }}
         FW_AI_REVIEW: ${{ inputs.ai-review }}
         FW_DEPENDENCY_SCAN: ${{ inputs.dependency-scan }}
+        FW_DEPENDENCY_SEVERITY: ${{ inputs.dependency-severity }}
         # The caller's OWN GITHUB_TOKEN, used for two consumer-side surfaces, both posting to the caller's OWN repo and
         # never reaching slopGrade: the inline PR comment feed (`permissions: pull-requests: write`) and the Code
         # Scanning SARIF upload (`permissions: security-events: write`). Missing either permission = that surface
@@ -153,4 +158,5 @@ runs:
         [ "${FW_FIX}" = "off" ] && ARGS+=(--no-fix)
         [ "${FW_AI_REVIEW}" = "true" ] && ARGS+=(--ai-review)
         [ "${FW_DEPENDENCY_SCAN}" != "false" ] && ARGS+=(--dependency-scan)
+        [ "${FW_DEPENDENCY_SEVERITY}" = "all" ] && ARGS+=(--dependency-scan-all)
         node "$FW_CLI" "${ARGS[@]}"

@@ -219,14 +219,20 @@ export function aiReviewOutput(r, requestedModel = AI_REVIEW_DEFAULT_MODEL) {
   const model = r.model || requestedModel;
   const used = r.usage ? ` · ${r.usage.input.toLocaleString("en-US")} input + ${r.usage.output.toLocaleString("en-US")} output tokens billed to your key` : "";
   const egress = r.hosted ? ` · ${r.sent.length} hunk(s) sent to slopGrade, forwarded to the model provider and dropped` : "";
-  lines.push(`slopGrade Firewall — ${pass} (${who}, ${model}, triage): ${r.flags.length} of ${r.sent.length} PR hunk(s) flagged${notSent}${used}${egress}. Notices only, never blocking.`);
+  // The first pass is measured at confidence >= AI_FIRST_PASS_CUT: only those flags are notices; the others are listed in
+  // the log and counted (the entry-point pass is already cut at its own measured AI_FOCUS_MIN_CONFIDENCE).
+  const shown = r.focused ? r.flags : r.flags.filter((f) => f.confidence >= AI_FIRST_PASS_CUT);
+  const below = r.flags.length - shown.length;
+  const belowNote = below ? ` ${below} more flag(s) below confidence ${AI_FIRST_PASS_CUT}, the cut it is measured at: listed here, not annotated.` : "";
+  lines.push(`slopGrade Firewall — ${pass} (${who}, ${model}, triage): ${shown.length} of ${r.sent.length} PR hunk(s) flagged${notSent}${used}${egress}. Notices only, never blocking.${belowNote}`);
   lines.push(r.focused
     ? `  This PR adds an entry point and the first pass flagged nothing, so a second pass checked authentication, ownership, input bounds and rate. Measured on 150 fresh AI-written commits like this: 17 of 19 real flaws caught, 61 % of flags real (confidence >= ${AI_FOCUS_MIN_CONFIDENCE}).`
     : MEASURED_LINE[model] || `  ${model} is not measured by slopGrade; ${AI_REVIEW_DEFAULT_MODEL} flagged 88 of 100 real CVE changes and 15 of 600 ordinary commits on slopGrade's sets.`);
   const title = r.focused ? "slopGrade AI review (entry point, triage)" : "slopGrade AI review (triage)";
   for (const f of r.flags) {
-    notices.push(`::notice file=${ghProp(f.path)},line=${f.newStart},title=${title}::${ghMsg(`${f.class} (confidence ${f.confidence.toFixed(2)}) — ${f.why}`)}`);
-    lines.push(`    - ${f.path}:${f.newStart}  ${f.class}  confidence=${f.confidence.toFixed(2)}`);
+    const on = shown.includes(f);
+    if (on) notices.push(`::notice file=${ghProp(f.path)},line=${f.newStart},title=${title}::${ghMsg(`${f.class} (confidence ${f.confidence.toFixed(2)}) — ${f.why}`)}`);
+    lines.push(`    - ${f.path}:${f.newStart}  ${f.class}  confidence=${f.confidence.toFixed(2)}${on ? "" : "  (below the cut, not annotated)"}`);
   }
   return { lines, notices, warn: false };
 }

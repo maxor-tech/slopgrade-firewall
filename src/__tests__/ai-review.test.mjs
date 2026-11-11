@@ -203,3 +203,16 @@ test("prAllHunks reads every hunk with no 64-hunk selection, and is null off a p
   assert.equal(prAllHunks({ GITHUB_EVENT_NAME: "push" }, ev, () => diff), null);
   assert.equal(prAllHunks({ GITHUB_EVENT_NAME: "pull_request" }, ev, () => { throw new Error("git"); }), null);
 });
+
+test("aiReviewOutput: a first-pass flag below 0.5 (the measured cut) is listed and counted, not a notice; the entry-point pass keeps its own cut", async () => {
+  const { aiReviewOutput } = await import("../ai-review.mjs");
+  const flags = [{ path: "a.py", newStart: 3, class: "XSS", confidence: 0.9, why: "raw" }, { path: "b.py", newStart: 7, class: "SSRF", confidence: 0.49, why: "url" }];
+  const out = aiReviewOutput({ flags, sent: [1, 2], skipped: 0, model: "claude-opus-5-5" });
+  assert.equal(out.notices.length, 1);
+  assert.match(out.notices[0], /a\.py,line=3.*XSS \(confidence 0\.90\)/);
+  assert.match(out.lines[0], /: 1 of 2 PR hunk\(s\) flagged\. Notices only, never blocking\. 1 more flag\(s\) below confidence 0\.5, the cut it is measured at: listed here, not annotated\./);
+  assert.ok(out.lines.includes("    - b.py:7  SSRF  confidence=0.49  (below the cut, not annotated)"));
+  const focused = aiReviewOutput({ flags: [{ ...flags[1], confidence: 0.35 }], sent: [1], skipped: 0, focused: true, model: "claude-opus-5-5" });
+  assert.equal(focused.notices.length, 1, "the entry-point pass is cut at 0.3 upstream, not again here");
+  assert.doesNotMatch(focused.lines[0], /below confidence/);
+});
