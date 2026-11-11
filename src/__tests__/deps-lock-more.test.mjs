@@ -33,6 +33,24 @@ test("pnpm v6 (/name@v(peer)) and v5.4 (/name/v_peer, /@scope/name/v) keys, `dev
   assert.deepEqual(ids(parsePnpmLock(v5)), ["npm:@babel/core@7.18.6", "npm:babel-loader@8.2.5"]);
 });
 
+test("pnpm reformatted with 4 spaces (prettier) reads the same packages; a block-style tarball resolution is still skipped", () => {
+  const lock = [
+    "lockfileVersion: '9.0'", "", "settings:", "    autoInstallPeers: true", "", "packages:",
+    "    '@babel/code-frame@7.29.7':", "        resolution: {integrity: sha512-a==}", "        engines: {node: '>=6.9.0'}", "",
+    "    lodash@4.17.15:", "        resolution:", "            integrity: sha512-b==", "        dev: true", "",
+    "    tar-dep@1.0.0:", "        resolution:", "            tarball: https://codeload.github.com/x/y/tar.gz/abc", "",
+    "snapshots:", "    ghost@9.9.9: {}",
+  ].join("\n");
+  assert.deepEqual(ids(parsePnpmLock(lock)), ["npm:@babel/code-frame@7.29.7", "npm:lodash@4.17.15:dev"]);
+  assert.deepEqual(ids(parsePnpmLock(lock.replace(/\n/g, "\r\n"))), ["npm:@babel/code-frame@7.29.7", "npm:lodash@4.17.15:dev"], "CRLF too");
+});
+
+test("yarn v1: a bare `name:` header (old yarn, `*` range) is a package ; CRLF line endings read the same", () => {
+  const lock = ["# yarn lockfile v1", "", "redux-thunk:", "  version \"2.2.0\"", "  resolved \"https://registry.yarnpkg.com/redux-thunk/-/redux-thunk-2.2.0.tgz#e6\"", "",
+    "tslint-config-standard@^4.0.0:", "  version \"4.0.0\"", ""].join("\r\n");
+  assert.deepEqual(ids(parseYarnLock(lock)), ["npm:redux-thunk@2.2.0", "npm:tslint-config-standard@4.0.0"]);
+});
+
 test("yarn v1: first spec names the block, npm alias resolved to the real name, a private `resolved` URL is never kept", () => {
   const lock = [
     "# yarn lockfile v1", "",

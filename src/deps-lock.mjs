@@ -121,7 +121,8 @@ const isOwn = (own, name) => own !== null && name.toLowerCase().startsWith(own);
 // `_peer` (v5) is not part of the version.
 const PNPM_AT = /^(@[^/]+\/[^/@]+|[^/@]+)@([^/]+)$/;
 const PNPM_SLASH = /^(@[^/]+\/[^/]+|[^/@]+)\/([^/]+)$/;
-const PNPM_KEY = /^ {2}(?:'([^']+)'|"([^"]+)"|([^\s'"#][^\s]*?)):(?:\s+\{\})?\s*$/;
+// The key indent is read from the file (pnpm writes 2 spaces; a formatter may have rewritten it with 4).
+const PNPM_KEY = /^(?:'([^']+)'|"([^"]+)"|([^\s'"#][^\s]*?)):(?:\s+\{\})?\s*$/;
 // a resolution that is not a registry integrity: a tarball URL, a git commit, a local directory
 const PNPM_NOT_REGISTRY = /\b(?:tarball|type|directory|repo|commit|path):/;
 
@@ -129,7 +130,9 @@ const PNPM_NOT_REGISTRY = /\b(?:tarball|type|directory|repo|commit|path):/;
 export function parsePnpmLock(text, ctx = {}) {
   const own = ownScope(ctx);
   const { out, push } = collector("npm", VERSION);
-  let inPackages = false, cur = null;
+  // keyIndent: indent of the package keys in this `packages:` section ; cur.field: indent of that package's fields ;
+  // cur.inRes: inside a block-style `resolution:` mapping (a reformatted file), whose keys are read like the flow style
+  let inPackages = false, cur = null, keyIndent = null;
   const flush = () => {
     if (!cur || cur.skip) { cur = null; return; }
     let key = cur.key.replace(/^\//, "");
@@ -144,13 +147,23 @@ export function parsePnpmLock(text, ctx = {}) {
   for (const raw of String(text ?? "").split(/\r?\n/)) {
     const line = raw.replace(/\s+$/, "");
     if (!line || /^\s*#/.test(line)) continue;
-    if (/^\S/.test(line)) { flush(); inPackages = line === "packages:"; continue; }
+    if (/^\S/.test(line)) { flush(); inPackages = line === "packages:"; keyIndent = null; continue; }
     if (!inPackages) continue;
-    const k = PNPM_KEY.exec(line);
-    if (k) { flush(); cur = { key: k[1] ?? k[2] ?? k[3], skip: false, dev: false }; continue; }
+    const indent = line.length - line.trimStart().length, body = line.trimStart();
+    if (keyIndent === null) keyIndent = indent;
+    if (indent <= keyIndent) {
+      flush();
+      const k = indent === keyIndent ? PNPM_KEY.exec(body) : null;
+      if (k) cur = { key: k[1] ?? k[2] ?? k[3], skip: false, dev: false, field: null, inRes: false };
+      continue;
+    }
     if (!cur) continue;
-    if (/^ {4}resolution:/.test(line) && PNPM_NOT_REGISTRY.test(line)) cur.skip = true;
-    else if (/^ {4}dev: true$/.test(line)) cur.dev = true;
+    if (cur.field === null) cur.field = indent;
+    if (indent === cur.field) {
+      cur.inRes = body === "resolution:";
+      if (/^resolution:/.test(body) && PNPM_NOT_REGISTRY.test(body)) cur.skip = true;
+      else if (body === "dev: true") cur.dev = true;
+    } else if (cur.inRes && PNPM_NOT_REGISTRY.test(body)) cur.skip = true;
   }
   flush();
   return out;
@@ -170,7 +183,7 @@ export function parseYarnLock(text, ctx = {}) {
   if (lines.some((l) => l === "__metadata:")) {
     const own = ownScope(ctx);
     for (const line of lines) {
-      const m = /^ {2}resolution: (.+)$/.exec(line);
+      const m = /^ +resolution: (.+)$/.exec(line);
       if (!m) continue;
       const res = unquote(m[1]);
       const at = res.indexOf("@npm:", 1);
@@ -188,12 +201,12 @@ export function parseYarnLock(text, ctx = {}) {
   for (const line of lines) {
     if (/^[^\s#].*:$/.test(line)) {
       flush();
-      // the name ends at the first "@" after a leading scope "@": "@scope/name@^1.0.0", "name@git+ssh://git@host/x"
+      // the name ends at the first "@" after a leading scope "@": "@scope/name@^1.0.0", "name@git+ssh://git@host/x" ;
+      // an old yarn v1 writes a bare `name:` (no range) for a `*` dependency
       const spec = unquote(line.slice(0, -1).split(/,\s*/)[0]);
       const at = spec.indexOf("@", 1);
-      if (at <= 0) { cur = {}; continue; }
-      let name = spec.slice(0, at);
-      const range = spec.slice(at + 1);
+      let name = at > 0 ? spec.slice(0, at) : spec;
+      const range = at > 0 ? spec.slice(at + 1) : "";
       if (range.startsWith("npm:")) {               // an alias: "my-alias@npm:real-name@^1.0.0"
         const real = range.slice(4), ra = real.indexOf("@", 1);
         name = ra > 0 ? real.slice(0, ra) : real;
