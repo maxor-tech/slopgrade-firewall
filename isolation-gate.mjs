@@ -229,9 +229,18 @@ Usage: node isolation-gate.mjs [--gate] [--strict] [--print-payload] [--sarif <p
                    model reads EVERY PR hunk and lists the changes that introduce a flaw. Notices, never blocking.
                    With FW_AI_REVIEW_KEY: your runner → your provider, nothing passes through slopGrade. Without a key, on
                    a PAID slot: the hunks go to slopGrade, which runs the default model with its key and drops them.
+  --dependency-scan  the Action default: the package versions a pull request adds to a lockfile (on a schedule / push /
+                   manual run: every pinned version) are checked against OSV from the runner. Warnings, never blocking.
+  --dependency-scan-all  with --dependency-scan: annotate every version that has an advisory (Action input
+                   dependency-severity: "all"). Default: only KEV-listed, or non-dev with HIGH / CRITICAL or unrated.
+  --library-mode-auto  with --library-mode: the Action default ("auto"). An application repo is not told that library
+                   mode does not apply to it.
+  --change-review-auto  with --change-review: the Action default ("auto"). A push run or a free repo is not told that
+                   nothing was reviewed.
+  --no-fix         do not post the one-click « Commit suggestion » fixes (Action input fix: "off").
   --help           show this help
 Exit codes: 1 only on a gate-blocked verdict (or --strict with no verdict); 0 otherwise (fail open).`;
-const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-auto", "--deep-scan-block", "--block-confidence", "--library-mode", "--library-mode-auto", "--change-review", "--change-review-auto", "--no-fix", "--ai-review"]);
+const KNOWN_FLAGS = new Set(["--gate", "--strict", "--print-payload", "--help", "--sarif", "--deep-scan", "--deep-scan-auto", "--deep-scan-block", "--block-confidence", "--library-mode", "--library-mode-auto", "--change-review", "--change-review-auto", "--no-fix", "--ai-review", "--dependency-scan", "--dependency-scan-all"]);
 
 export async function main(argv = [], env = process.env) {
   if (argv.includes("--help")) { console.log(HELP); return 0; }

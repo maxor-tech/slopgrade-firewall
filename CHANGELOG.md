@@ -13,6 +13,12 @@ All notable changes to the open-source slopGrade Firewall client are documented 
   requests that added a Go module version with a published advisory, own code imported an affected package in 32
   (13.9 %).
 
+### Fixed
+- **No « unknown flag --dependency-scan » warning on every run.** The Action passes `--dependency-scan` by default (and
+  `--dependency-scan-all` with `dependency-severity: "all"`), but the CLI did not list them as known flags, so each run
+  of 0.18.0 printed a warning annotation (the scan itself ran). The flags are now known, `--help` describes every flag
+  the Action passes, and a test reads the flags from `action.yml`.
+
 ## [0.18.0] — 2026-11-10
 
 ### Added
