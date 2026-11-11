@@ -10,9 +10,11 @@
 const VERSION = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]*)?$/;
 
 // Only packages from the PUBLIC npm registry are ever matched (and so ever sent to an advisory database): a package
-// resolved from a private registry, a git URL or a tarball elsewhere may carry an internal name.
-const PUBLIC = /^https:\/\/registry\.npmjs\.org\//;
-const isPublic = (resolved) => resolved === undefined || (typeof resolved === "string" && PUBLIC.test(resolved));
+// resolved from a private registry, a git URL or a tarball elsewhere may carry an internal name. The well-known public
+// mirrors of that registry (Yarn, npmmirror / taobao, cnpm, Tencent) serve the same packages under the same names; a
+// company registry (Nexus, Artifactory, an `-inc` host) is never on this list.
+const NPM_PUBLIC = /^https?:\/\/(?:registry\.npmjs\.org|registry\.yarnpkg\.com|registry\.npmmirror\.com|registry\.npm\.taobao\.org|r\.cnpmjs\.org|mirrors\.(?:cloud\.)?tencent\.com\/npm)\//;
+const isPublic = (resolved) => resolved === undefined || (typeof resolved === "string" && NPM_PUBLIC.test(resolved));
 
 const add = (out, seen, name, version, dev, resolved) => {
   if (typeof name !== "string" || !name || typeof version !== "string" || !VERSION.test(version) || !isPublic(resolved)) return;
@@ -169,7 +171,6 @@ export function parsePnpmLock(text, ctx = {}) {
   return out;
 }
 
-const YARN_PUBLIC = /^https:\/\/registry\.(?:yarnpkg\.com|npmjs\.org)\//;
 const unquote = (s) => s.trim().replace(/^"(.*)"$/, "$1");
 
 /**
@@ -195,7 +196,7 @@ export function parseYarnLock(text, ctx = {}) {
   }
   let cur = null;
   const flush = () => {
-    if (cur && cur.name && (cur.resolved === undefined || YARN_PUBLIC.test(cur.resolved))) push(cur.name, cur.version);
+    if (cur && cur.name && isPublic(cur.resolved)) push(cur.name, cur.version);
     cur = null;
   };
   for (const line of lines) {
