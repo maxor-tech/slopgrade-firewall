@@ -9,7 +9,7 @@
 // exploited (CISA KEV), or HIGH+ (or unrated) and not dev-only, is annotated; the others are counted in the run log.
 // Warnings to triage, never blocking; any failure prints one warning and the gate goes on (fail open, everything shown).
 
-import { affectedGoPaths } from "./deps-reach.mjs";
+import { affectedGoImports } from "./deps-reach.mjs";
 
 export const OSV_URL = "https://api.osv.dev/v1/querybatch";
 export const OSV_BATCH = 1000;          // OSV's querybatch limit
@@ -83,8 +83,12 @@ export async function addKev(r, { fetchImpl = fetch, timeoutMs = OSV_TIMEOUT_MS 
   } catch { /* records are best effort: a version without a severity is shown */ }
   const rated = r.vulnerable.map((v) => {
     const s = Math.max(0, ...v.ids.map((id) => rank.get(id) || 0));
-    const goPaths = v.eco === "Go" ? [...new Set(v.ids.flatMap((id) => affectedGoPaths(goRec.get(id), v.name)))] : [];
-    return { ...v, ...(s ? { severity: RANK_NAME[s] } : {}), ...(goPaths.length ? { goPaths } : {}) };
+    const goImps = v.eco === "Go" ? v.ids.flatMap((id) => affectedGoImports(goRec.get(id), v.name)) : [];
+    const goPaths = [...new Set(goImps.map((i) => i.path))];
+    const goSymbols = {};
+    for (const i of goImps) if (i.symbols.length) goSymbols[i.path] = [...new Set([...(goSymbols[i.path] || []), ...i.symbols])];
+    return { ...v, ...(s ? { severity: RANK_NAME[s] } : {}), ...(goPaths.length ? { goPaths } : {}),
+      ...(Object.keys(goSymbols).length ? { goSymbols } : {}) };
   });
   try {
     const kev = await get(KEV_URL);
@@ -128,14 +132,16 @@ export function depsOutput(lockPath, r, { scope = "pr", all = false } = {}) {
   for (const v of r.vulnerable) {
     const n = v.ids.length;
     const sev = v.severity ? ` (${v.severity})` : "";
-    const imp = v.imported?.length ? ` — your code imports ${v.imported.join(", ")}` : "";
+    const imp = v.imported?.length
+      ? ` — your code imports ${v.imported.join(", ")}${v.named?.length ? ` and references ${v.named.join(", ")}` : ""}` : "";
     if (annotated(v, { all })) {
       const title = v.kev ? "slopGrade dependency scan — actively exploited (CISA KEV)"
+        : v.named?.length ? "slopGrade dependency scan — affected symbol referenced by your code"
         : imp ? "slopGrade dependency scan — imported by your code" : "slopGrade dependency scan";
       const kev = v.kev ? ` — exploited in the wild: ${v.kev.join(", ")}` : "";
       notices.push(`::warning file=${ghProp(lockPath)},line=1,title=${title}::${ghMsg(`${v.name}@${v.version}${v.dev ? " (dev)" : ""} has ${n} published advisor${n === 1 ? "y" : "ies"}${sev}: ${v.ids.join(", ")}${kev}${imp} — https://osv.dev/vulnerability/${v.ids[0]}`)}`);
     }
-    lines.push(`    - ${v.name}@${v.version}${v.dev ? " (dev)" : ""}  ${v.ids.join(" ")}${v.severity ? `  ${v.severity}` : ""}${v.kev ? `  KEV ${v.kev.join(" ")}` : ""}${v.imported?.length ? `  imported: ${v.imported.join(" ")}` : ""}`);
+    lines.push(`    - ${v.name}@${v.version}${v.dev ? " (dev)" : ""}  ${v.ids.join(" ")}${v.severity ? `  ${v.severity}` : ""}${v.kev ? `  KEV ${v.kev.join(" ")}` : ""}${v.imported?.length ? `  imported: ${v.imported.join(" ")}` : ""}${v.named?.length ? `  references: ${v.named.join("; ")}` : ""}`);
   }
   return { lines, notices, warn: false };
 }

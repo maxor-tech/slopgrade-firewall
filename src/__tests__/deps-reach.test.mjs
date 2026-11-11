@@ -6,7 +6,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { goImports, affectedGoPaths, markGoImported, isOwnGoFile } from "../deps-reach.mjs";
+import { goImports, goImportSpecs, goDefaultName, affectedGoImports, affectedGoPaths, markGoImported, isOwnGoFile } from "../deps-reach.mjs";
 import { annotated, depsOutput } from "../deps-osv.mjs";
 import { main } from "../../isolation-gate.mjs";
 
@@ -63,6 +63,51 @@ test("depsOutput: an imported version gets its own title and says which package 
   assert.match(out.lines[1], /imported: golang\.org\/x\/net\/http2$/);
 });
 
+test("goDefaultName: last element without /vN, gopkg.in .vN, go- prefix, -go/.go suffix", () => {
+  assert.deepEqual(["golang.org/x/net/http2", "gopkg.in/yaml.v2", "github.com/go-redis/redis/v8", "github.com/mattn/go-sqlite3",
+    "github.com/a/client-go", "github.com/a/b.go", "v2"].map(goDefaultName), ["http2", "yaml", "redis", "sqlite3", "client", "b", "v2"]);
+});
+
+test("goImportSpecs: the alias is kept (named, dot, blank) or null", () => {
+  assert.deepEqual(goImportSpecs('import (\n\th2 "golang.org/x/net/http2"\n\t. "strings"\n\t"fmt"\n)\nimport _ "net/http/pprof"\n'),
+    [["h2", "golang.org/x/net/http2"], [".", "strings"], [null, "fmt"], ["_", "net/http/pprof"]]);
+});
+
+test("affectedGoImports: symbols per path, invalid symbol strings dropped, no symbols = []", () => {
+  const rec = { affected: [{ package: { ecosystem: "Go", name: "m" }, ecosystem_specific: { imports: [
+    { path: "m/a", symbols: ["Parse", "Server.ServeConn", "bad(", 3] }, { path: "m/b" }] } }] };
+  assert.deepEqual(affectedGoImports(rec, "m"), [{ path: "m/a", symbols: ["Parse", "Server.ServeConn"] }, { path: "m/b", symbols: [] }]);
+  assert.deepEqual(affectedGoPaths(rec, "m"), ["m/a", "m/b"]);
+});
+
+test("markGoImported, call level: name.Func / name.Type with the alias in use; dot import and other names stay import level", () => {
+  const mk = () => ({ vulnerable: [
+    { eco: "Go", name: "golang.org/x/net", version: "v1", ids: ["GO-2"], goPaths: ["golang.org/x/net/http2"], goSymbols: { "golang.org/x/net/http2": ["Server.ServeConn", "ConfigureTransport"] } },
+    { eco: "Go", name: "golang.org/x/text", version: "v2", ids: ["GO-1"], goPaths: ["golang.org/x/text/language"], goSymbols: { "golang.org/x/text/language": ["Parse"] } },
+  ], checked: 2, skipped: 0 });
+  const run = (files) => markGoImported(mk(), () => Object.keys(files), (p) => files[p]).vulnerable.map((v) => [v.name, v.imported ?? null, v.named ?? null]);
+  // aliased import: h2.Server names Server.ServeConn; « language.Parse » is not named (it says lang.Parse)
+  assert.deepEqual(run({ "a.go": 'import (\n\th2 "golang.org/x/net/http2"\n\tlang "golang.org/x/text/language"\n)\nvar s h2.Server\nvar _ = lang.Make("x")\n' }),
+    [["golang.org/x/net", ["golang.org/x/net/http2"], ["http2.Server (affected: Server.ServeConn)"]], ["golang.org/x/text", ["golang.org/x/text/language"], null]]);
+  // default name; « http2.ServerX » and « xhttp2.Server » are not « http2.Server »; named sorts first
+  assert.deepEqual(run({ "a.go": 'import "golang.org/x/net/http2"\nimport "golang.org/x/text/language"\nvar _ = http2.ServerX\nvar _ = xhttp2.Server\nvar _ = language.Parse\n' }),
+    [["golang.org/x/text", ["golang.org/x/text/language"], ["language.Parse"]], ["golang.org/x/net", ["golang.org/x/net/http2"], null]]);
+  // a dot import gives no qualified name: import level only
+  assert.deepEqual(run({ "a.go": 'import . "golang.org/x/text/language"\nvar _ = Parse\n' }).find((x) => x[0] === "golang.org/x/text"),
+    ["golang.org/x/text", ["golang.org/x/text/language"], null]);
+  // a name in a file that does NOT import the package does not count
+  assert.deepEqual(run({ "a.go": 'import "golang.org/x/text/language"\n', "b.go": "var _ = http2.Server{}\n" }).find((x) => x[0] === "golang.org/x/net"),
+    ["golang.org/x/net", null, null]);
+});
+
+test("depsOutput: a named version gets the call-level title and says which function", () => {
+  const out = depsOutput("go.sum", { vulnerable: [{ eco: "Go", name: "golang.org/x/net", version: "v1", ids: ["GO-2"], severity: "LOW",
+    imported: ["golang.org/x/net/http2"], named: ["http2.Server (affected: Server.ServeConn)", "http2.ConfigureServer"] }], checked: 1, skipped: 0 });
+  assert.equal(out.notices.length, 1);
+  assert.match(out.notices[0], /title=slopGrade dependency scan — affected symbol referenced by your code::golang\.org\/x\/net@v1 has 1 published advisory \(LOW\): GO-2 — your code imports golang\.org\/x\/net\/http2 and references http2\.Server \(affected: Server\.ServeConn\), http2\.ConfigureServer — https/);
+  assert.match(out.lines[1], /imported: golang\.org\/x\/net\/http2  references: http2\.Server \(affected: Server\.ServeConn\); http2\.ConfigureServer$/);
+});
+
 const sh = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" });
 test("end to end: a PR that bumps x/net in go.sum, with main.go importing the affected package → the imported label", async () => {
   const dir = mkdtempSync(join(tmpdir(), "fw-go-reach-"));
@@ -95,7 +140,8 @@ test("end to end: a PR that bumps x/net in go.sum, with main.go importing the af
     const code = await main(["--dependency-scan"], env);
     const text = out.join("\n");
     assert.equal(code, 0);
-    assert.match(text, /::warning file=go\.sum,line=1,title=slopGrade dependency scan — imported by your code::golang\.org\/x\/net@v0\.0\.0-20230101000000-abcdefabcdef has 1 published advisory: GO-2023-2102 — your code imports golang\.org\/x\/net\/http2/);
+    assert.match(text, /::warning file=go\.sum,line=1,title=slopGrade dependency scan — affected symbol referenced by your code::golang\.org\/x\/net@v0\.0\.0-20230101000000-abcdefabcdef has 1 published advisory: GO-2023-2102 — your code imports golang\.org\/x\/net\/http2 and references http2\.Server \(affected: Server\.ServeConn\)/);
+    assert.match(text, /references: http2\.Server \(affected: Server\.ServeConn\)/);
   } finally {
     globalThis.fetch = realFetch; console.log = realLog;
     rmSync(dir, { recursive: true, force: true });

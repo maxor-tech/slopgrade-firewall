@@ -12,6 +12,12 @@ All notable changes to the open-source slopGrade Firewall client are documented 
   a warning, never hides one: a call through another module is not seen. Measured (PREREG / READ-DEPS-6): of 231 pull
   requests that added a Go module version with a published advisory, own code imported an affected package in 32
   (13.9 %).
+- **Dependency scan: « affected symbol referenced by your code » (Go).** OSV Go advisories also list the affected
+  functions and methods. When a file that imports the affected package writes `name.Func`, the version gets this
+  title, shows what was matched and sorts right after the KEV ones, before « imported ». For a method only the type name
+  is matched, and the message says so (`http2.Server (affected: Server.ServeConn)`). A name match, not a call graph; it
+  only raises a warning. Measured (PREREG / READ-DEPS-7): 19 of the same 231 pull requests (8.2 %, 95 % interval 5.3 to
+  12.5); the shipped matcher agreed with an independent reference on 231 of 231.
 
 ### Fixed
 - **No « unknown flag --dependency-scan » warning on every run.** The Action passes `--dependency-scan` by default (and

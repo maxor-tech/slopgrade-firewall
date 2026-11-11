@@ -344,6 +344,14 @@ package, is always annotated and comes right after the KEV ones. This only raise
 another module is not seen, so a version without the label is not « unreachable ». On the release run, own code imported
 an affected package in 32 of 231 pull requests that added a vulnerable Go module version (13.9 %).
 
+**Affected symbol referenced by your code (Go, client ≥ 0.19.0)**: OSV also lists the affected functions and methods.
+When a file that imports the affected package writes `name.Func`, the version is titled « affected symbol referenced by
+your code », shows what was matched and comes right after the KEV ones, before « imported ». For a method, only the type
+name is matched and the message says so: `http2.Server (affected: Server.ServeConn)`. This is a name match, not a call
+graph: a method reached through an interface or another module is not seen, and the label never hides a warning. On the
+release run it fired on 19 of the same 231 pull requests (8.2 %, 95 % interval 5.3 to 12.5), which is 19 of the 32 that
+import an affected package; the shipped matcher agreed with an independent reference on all 231.
+
 **Lockfiles**:
 
 | Ecosystem | Lockfiles | Kept (everything else is never matched or sent) |
