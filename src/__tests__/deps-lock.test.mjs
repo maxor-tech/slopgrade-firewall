@@ -81,7 +81,8 @@ test("parseLockfile dispatches on the file name; an unknown name gives []", () =
   assert.equal(parseLockfile("a/go.sum", "github.com/x/y v1.0.0 h1:a=", {})[0].eco, "Go");
   assert.equal(parseLockfile("Gemfile.lock", "GEM\n  remote: https://rubygems.org/\n  specs:\n    rack (2.0.7)\n", {})[0].eco, "RubyGems");
   assert.equal(parseLockfile("web/package-lock.json", JSON.stringify({ packages: { "node_modules/a": { version: "1.0.0" } } }), {})[0].eco, "npm");
-  assert.deepEqual(parseLockfile("yarn.lock", "x", {}), []);
+  assert.deepEqual(parseLockfile("Podfile.lock", "PODS:\n  - Alamofire (5.0.0)\n", {}), [], "CocoaPods is not read");
+  assert.deepEqual(parseLockfile("yarn.lock", "x", {}), [], "a supported name with garbage content: []");
 });
 
 test("repoLockfiles: every tracked supported lockfile with all its pinned versions (the scheduled monitor)", () => {

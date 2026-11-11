@@ -330,9 +330,19 @@ the advisory ids and a link. A version whose advisory is on the CISA **Known Exp
 in the wild) gets its own title, « actively exploited (CISA KEV) », and comes first. Warnings only, never blocking; an
 OSV or KEV error prints one warning and the gate goes on. `dependency-scan: "false"` turns it off.
 
-**Lockfiles**: npm `package-lock.json` (v1, v2, v3), Go `go.sum` (module versions that are built; a `/go.mod`-only
-line is graph resolution and is skipped), Ruby `Gemfile.lock` (top-level specs from rubygems.org). pnpm, yarn, Python
-and others follow.
+**Lockfiles**:
+
+| Ecosystem | Lockfiles | Kept (everything else is never matched or sent) |
+|---|---|---|
+| npm | `package-lock.json` (v1, v2, v3), `pnpm-lock.yaml` (v5, v6, v9), `yarn.lock` (v1 and Berry) | public npm registry; Berry: `npm:` resolutions only |
+| Go | `go.sum` | module versions that are built (a `/go.mod`-only line is graph resolution) |
+| Ruby | `Gemfile.lock` | top-level specs from rubygems.org |
+| Python | `poetry.lock`, `uv.lock`, `Pipfile.lock` | packages from pypi.org |
+| Rust | `Cargo.lock` | crates.io packages |
+| PHP | `composer.lock` | packagist.org packages |
+
+`pnpm-lock.yaml` and a Berry `yarn.lock` do not record the registry, so a package under your repository owner's own npm
+scope (`@<owner>/…`) is never sent: it is most often private.
 
 **Monitor between pull requests**: on a `schedule`, `push` or `workflow_dispatch` run, the client checks **every**
 version the lockfiles pin, so an advisory published after a merge is found on the next run. Add a schedule to the
@@ -346,7 +356,9 @@ on:
 
 - **What is sent**: `{ecosystem, name, version}` of public packages, from your runner to `api.osv.dev` — never to
   slopGrade, never source. npm packages from a private registry, a git URL or another tarball host, Ruby gems from a
-  source other than rubygems.org, and Go modules under your repository's own GitHub owner are never sent. The KEV list
+  source other than rubygems.org, Python packages from another index, a git URL or a local path, crates from a git URL
+  or another registry, composer packages not published on packagist.org, npm packages under your owner's own scope (pnpm,
+  Berry), and Go modules under your repository's own GitHub owner are never sent. The KEV list
   is downloaded from cisa.gov; advisory records are read from osv.dev by id. Nothing about the repository is sent.
 - **Measured** on slopGrade's release run (61,661 repositories, 52,534 replayed pull requests), counting only
   advisories **already published when the PR was made**:
@@ -358,7 +370,9 @@ on:
   | `Gemfile.lock` | 729 | 26 (3.6 %) |
 
   The parsers matched an independent parse on every entry (1,227,202 npm; 160,872 Go and Ruby). For comparison, the
-  deterministic gate blocked 7 pull requests for a real flaw on that run.
+  deterministic gate blocked 7 pull requests for a real flaw on that run. The pnpm, yarn, Python, Rust and PHP parsers
+  matched an independent parse (real YAML, TOML and JSON libraries) on 15,121 of 15,121 entries of 21 public lockfiles;
+  their rate on the release run is not measured yet.
 
 ## Excluding paths — `.slopgradeignore`
 

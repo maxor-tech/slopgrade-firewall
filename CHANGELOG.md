@@ -17,6 +17,11 @@ All notable changes to the open-source slopGrade Firewall client are documented 
   is skipped), modules under the repository's own GitHub owner never sent. Ruby: top-level specs from rubygems.org only.
   Measured (READ-DEPS-2b): 246 of 990 go.sum PRs (24.8 %) and 26 of 729 Gemfile.lock PRs (3.6 %) added a version with an
   advisory published at PR time; parsers = independent parse on 160,872 of 160,872 entries.
+- **Dependency scan: pnpm, yarn, Python, Rust and PHP lockfiles.** `pnpm-lock.yaml` (v5, v6, v9), `yarn.lock` (v1 and
+  Berry), `poetry.lock`, `uv.lock`, `Pipfile.lock`, `Cargo.lock` and `composer.lock`. Only public-registry packages are
+  kept (pypi.org, crates.io, packagist.org, the npm registry); pnpm and Berry do not record the registry, so the
+  repository owner's own npm scope is never sent. The parsers matched an independent parse on 15,121 of 15,121 entries
+  of 21 public lockfiles.
 - **Actively exploited first (CISA KEV).** A version whose advisory (or its CVE alias) is on the CISA Known Exploited
   Vulnerabilities list gets the title « actively exploited (CISA KEV) » and leads the list. A KEV or alias lookup
   failure keeps every finding and says the priority is missing.
