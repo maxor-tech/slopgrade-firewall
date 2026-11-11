@@ -5,6 +5,14 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+### Added
+- **Dependency scan: « imported by your code » (Go).** OSV Go advisories name the affected packages; when the
+  repository's own Go code (not `vendor/`, `testdata/` or `_test.go`) imports one of them, the version gets the title
+  « imported by your code », says which package, is always annotated and comes right after the KEV ones. It only raises
+  a warning, never hides one: a call through another module is not seen. Measured (PREREG / READ-DEPS-6): of 231 pull
+  requests that added a Go module version with a published advisory, own code imported an affected package in 32
+  (13.9 %).
+
 ## [0.18.0] — 2026-11-10
 
 ### Added

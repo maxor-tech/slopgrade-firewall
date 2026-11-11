@@ -17,7 +17,7 @@ test("queryOsv batches, sends only {name, ecosystem, version}, maps advisories b
   const r = await queryOsv(deps, { fetchImpl });
   assert.equal(sent.length, 2, "1,001 queries go in two batches");
   assert.deepEqual(sent[0][0], { package: { name: "lodash", ecosystem: "npm" }, version: "4.17.15" });
-  assert.deepEqual(r.vulnerable, [{ name: "lodash", version: "4.17.15", ids: ["GHSA-35jh-r3h4-6jhm"] }]);
+  assert.deepEqual(r.vulnerable, [{ eco: "npm", name: "lodash", version: "4.17.15", ids: ["GHSA-35jh-r3h4-6jhm"] }]);
   assert.equal(r.checked, OSV_BATCH + 1);
 });
 
