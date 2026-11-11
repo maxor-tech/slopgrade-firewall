@@ -26,11 +26,20 @@ All notable changes to the open-source slopGrade Firewall client are documented 
   PRs (21.2 %), `pnpm-lock.yaml` 103 of 545 (18.9 %), `poetry.lock` 12 of 52, `uv.lock` 22 of 208, `Cargo.lock` 9 of 67,
   `composer.lock` 20 of 331, `Pipfile.lock` 0 of 8 added a version with an advisory published at PR time; the parsers
   matched an independent parse (PyYAML, tomllib, json) on 1,317,288 of 1,317,288 entries.
+- **Dependency annotations by severity (`dependency-severity`, default `high`).** Each advisory's GitHub severity is
+  read from its OSV record. Annotated: a KEV version, or a version that is not dev-only and is HIGH / CRITICAL or
+  unrated. LOW, MODERATE and dev-only versions are listed and counted in the run log. Measured (READ-DEPS-5): 571 of 920
+  warned lockfile changes keep an annotation, 2,826 of 6,916 versions, 42 of 42 KEV. `"all"` annotates every version.
 - **Actively exploited first (CISA KEV).** A version whose advisory (or its CVE alias) is on the CISA Known Exploited
   Vulnerabilities list gets the title « actively exploited (CISA KEV) » and leads the list. A KEV or alias lookup
   failure keeps every finding and says the priority is missing.
 - **Dependency monitor between pull requests.** On a `schedule`, `push` or `workflow_dispatch` run the scan checks every
   version the lockfiles pin, so an advisory published after a merge shows up on the next run.
+
+### Changed
+- **AI review: first-pass notices at confidence ≥ 0.5 only.** Every published figure of the first pass is measured at
+  0.5; a lower flag is now listed in the run log and counted, not annotated. The entry-point pass keeps its own
+  measured cut (0.3).
 
 ## [0.17.0] — 2026-11-10
 

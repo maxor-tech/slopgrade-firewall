@@ -288,8 +288,9 @@ or logic bugs that no taint engine or pattern sees; this is the part of the gate
   Measured with `claude-opus-5-5` at list price ($4 / $20 per million tokens) on 8,165 AI-written public commits:
   median **$0.027** per PR, mean $0.044, 9 in 10 under **$0.11**, the largest $0.38. (On 90 CVE commits, which are
   smaller: median $0.016.)
-- **Notices, never a block.** Each flag is a notice on its file and line, with the class, the model's confidence and
-  one sentence. It never changes the verdict. A missing key, a provider error, a refusal, a timeout (180 s) or a
+- **Notices, never a block.** Each flag at confidence ≥ 0.5 (the cut every figure below is measured at) is a notice on
+  its file and line, with the class, the model's confidence and one sentence; a flag below 0.5 is listed in the run log
+  and counted, not annotated. It never changes the verdict. A missing key, a provider error, a refusal, a timeout (180 s) or a
   malformed answer prints one warning and the run goes on.
 - **The hunk text is data, not instructions.** The prompt says so; a comment in the PR that tells the reviewer to
   approve or to report nothing is not followed (20 of 20 planted comments did not suppress a flag).
@@ -325,10 +326,17 @@ or logic bugs that no taint engine or pattern sees; this is the part of the gate
 
 On a pull request that adds or changes a lockfile, the client lists the package versions the PR **adds** (a bump or a
 new package, never one it removes) and checks them against [OSV](https://osv.dev), the open advisory database behind
-the GitHub, npm, Go, RubyGems, PyPI, crates.io and Packagist advisories. Each version with a published advisory is a warning on the lockfile, with
-the advisory ids and a link. A version whose advisory is on the CISA **Known Exploited Vulnerabilities** list (attacked
-in the wild) gets its own title, « actively exploited (CISA KEV) », and comes first. Warnings only, never blocking; an
-OSV or KEV error prints one warning and the gate goes on. `dependency-scan: "false"` turns it off.
+the GitHub, npm, Go, RubyGems, PyPI, crates.io and Packagist advisories. Every version with a published advisory is
+listed in the run log with its advisory ids and GitHub severity. A version whose advisory is on the CISA **Known
+Exploited Vulnerabilities** list (attacked in the wild) gets its own title, « actively exploited (CISA KEV) », and
+comes first. Warnings only, never blocking; an OSV or KEV error prints one warning and the gate goes on.
+`dependency-scan: "false"` turns it off.
+
+**Which versions are annotated** (`dependency-severity`, default `high`): a version on the KEV list, or one that is not
+dev-only and whose advisories are HIGH or CRITICAL, or carry no GitHub severity (an unrated advisory is never hidden).
+A LOW or MODERATE version, or a dev-only one, is counted in the run log, not annotated. On the release run below this
+keeps 571 of the 920 warned lockfile changes (2,826 of 6,916 versions) and all 42 KEV versions.
+`dependency-severity: "all"` annotates every version.
 
 **Lockfiles**:
 
