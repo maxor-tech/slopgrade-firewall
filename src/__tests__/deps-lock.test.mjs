@@ -49,6 +49,22 @@ test("only public-registry packages are kept: a private registry, git or other t
   assert.deepEqual(keys(parsePackageLock(lock)), ["lodash@4.17.15", "noresolved@2.0.0"]);
 });
 
+test("public npm mirrors (yarn, npmmirror, taobao http, cnpm, Tencent /npm/) are kept; company registries are not", () => {
+  const e = (url) => ({ version: "1.0.0", resolved: url });
+  const lock = JSON.stringify({ lockfileVersion: 3, packages: {
+    "node_modules/a": e("https://registry.yarnpkg.com/a/-/a-1.0.0.tgz"),
+    "node_modules/b": e("https://registry.npmmirror.com/b/-/b-1.0.0.tgz"),
+    "node_modules/c": e("http://registry.npm.taobao.org/c/download/c-1.0.0.tgz"),
+    "node_modules/d": e("http://registry.npmjs.org/d/-/d-1.0.0.tgz"),
+    "node_modules/f": e("https://mirrors.tencent.com/npm/f/-/f-1.0.0.tgz"),
+    "node_modules/g": e("https://mirrors.tencent.com/pypi/g-1.0.0.tgz"),
+    "node_modules/h": e("http://nexus.acme.corp/repository/npm/h/-/h-1.0.0.tgz"),
+    "node_modules/i": e("https://registry.npm.alibaba-inc.com/i/-/i-1.0.0.tgz"),
+    "node_modules/j": e("https://registry.npmjs.org.evil.example/j/-/j-1.0.0.tgz"),
+  } });
+  assert.deepEqual(keys(parsePackageLock(lock)), ["a@1.0.0", "b@1.0.0", "c@1.0.0", "d@1.0.0", "f@1.0.0"]);
+});
+
 test("go.sum: built module versions only (a /go.mod-only line is graph resolution, never built), own-owner modules never sent", () => {
   const sum = [
     "github.com/gin-gonic/gin v1.6.0 h1:abc=",
@@ -81,7 +97,8 @@ test("parseLockfile dispatches on the file name; an unknown name gives []", () =
   assert.equal(parseLockfile("a/go.sum", "github.com/x/y v1.0.0 h1:a=", {})[0].eco, "Go");
   assert.equal(parseLockfile("Gemfile.lock", "GEM\n  remote: https://rubygems.org/\n  specs:\n    rack (2.0.7)\n", {})[0].eco, "RubyGems");
   assert.equal(parseLockfile("web/package-lock.json", JSON.stringify({ packages: { "node_modules/a": { version: "1.0.0" } } }), {})[0].eco, "npm");
-  assert.deepEqual(parseLockfile("yarn.lock", "x", {}), []);
+  assert.deepEqual(parseLockfile("Podfile.lock", "PODS:\n  - Alamofire (5.0.0)\n", {}), [], "CocoaPods is not read");
+  assert.deepEqual(parseLockfile("yarn.lock", "x", {}), [], "a supported name with garbage content: []");
 });
 
 test("repoLockfiles: every tracked supported lockfile with all its pinned versions (the scheduled monitor)", () => {

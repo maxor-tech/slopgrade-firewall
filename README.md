@@ -325,14 +325,24 @@ or logic bugs that no taint engine or pattern sees; this is the part of the gate
 
 On a pull request that adds or changes a lockfile, the client lists the package versions the PR **adds** (a bump or a
 new package, never one it removes) and checks them against [OSV](https://osv.dev), the open advisory database behind
-the GitHub, npm, Go and RubyGems advisories. Each version with a published advisory is a warning on the lockfile, with
+the GitHub, npm, Go, RubyGems, PyPI, crates.io and Packagist advisories. Each version with a published advisory is a warning on the lockfile, with
 the advisory ids and a link. A version whose advisory is on the CISA **Known Exploited Vulnerabilities** list (attacked
 in the wild) gets its own title, « actively exploited (CISA KEV) », and comes first. Warnings only, never blocking; an
 OSV or KEV error prints one warning and the gate goes on. `dependency-scan: "false"` turns it off.
 
-**Lockfiles**: npm `package-lock.json` (v1, v2, v3), Go `go.sum` (module versions that are built; a `/go.mod`-only
-line is graph resolution and is skipped), Ruby `Gemfile.lock` (top-level specs from rubygems.org). pnpm, yarn, Python
-and others follow.
+**Lockfiles**:
+
+| Ecosystem | Lockfiles | Kept (everything else is never matched or sent) |
+|---|---|---|
+| npm | `package-lock.json` (v1, v2, v3), `pnpm-lock.yaml` (v5, v6, v9), `yarn.lock` (v1 and Berry) | the public npm registry and its public mirrors (Yarn, npmmirror / taobao, cnpm, Tencent); Berry: `npm:` resolutions only |
+| Go | `go.sum` | module versions that are built (a `/go.mod`-only line is graph resolution) |
+| Ruby | `Gemfile.lock` | top-level specs from rubygems.org |
+| Python | `poetry.lock`, `uv.lock`, `Pipfile.lock` | packages from pypi.org |
+| Rust | `Cargo.lock` | crates.io packages |
+| PHP | `composer.lock` | packagist.org packages |
+
+`pnpm-lock.yaml` and a Berry `yarn.lock` do not record the registry, so a package under your repository owner's own npm
+scope (`@<owner>/…`) is never sent: it is most often private.
 
 **Monitor between pull requests**: on a `schedule`, `push` or `workflow_dispatch` run, the client checks **every**
 version the lockfiles pin, so an advisory published after a merge is found on the next run. Add a schedule to the
@@ -346,19 +356,31 @@ on:
 
 - **What is sent**: `{ecosystem, name, version}` of public packages, from your runner to `api.osv.dev` — never to
   slopGrade, never source. npm packages from a private registry, a git URL or another tarball host, Ruby gems from a
-  source other than rubygems.org, and Go modules under your repository's own GitHub owner are never sent. The KEV list
+  source other than rubygems.org, Python packages from another index, a git URL or a local path, crates from a git URL
+  or another registry, composer packages not published on packagist.org, npm packages under your owner's own scope (pnpm,
+  Berry), and Go modules under your repository's own GitHub owner are never sent. The KEV list
   is downloaded from cisa.gov; advisory records are read from osv.dev by id. Nothing about the repository is sent.
 - **Measured** on slopGrade's release run (61,661 repositories, 52,534 replayed pull requests), counting only
   advisories **already published when the PR was made**:
 
   | Lockfile | PRs that changed it | Added a version with a published advisory |
   |---|---:|---:|
-  | `package-lock.json` | 1,750 | **366 (20.9 %)** |
+  | `package-lock.json` | 1,750 | **363 (20.7 %)** |
   | `go.sum` | 990 | **246 (24.8 %)** |
+  | `yarn.lock` | 562 | **119 (21.2 %)** |
+  | `pnpm-lock.yaml` | 545 | **103 (18.9 %)** |
+  | `composer.lock` | 331 | 20 (6.0 %) |
+  | `uv.lock` | 208 | 22 (10.6 %) |
   | `Gemfile.lock` | 729 | 26 (3.6 %) |
+  | `Cargo.lock` | 67 | 9 (13.4 %) |
+  | `poetry.lock` | 52 | 12 (23.1 %) |
+  | `Pipfile.lock` | 8 | 0 |
 
-  The parsers matched an independent parse on every entry (1,227,202 npm; 160,872 Go and Ruby). For comparison, the
-  deterministic gate blocked 7 pull requests for a real flaw on that run.
+  Of the 920 warned lockfile changes, 578 (63 %) carry a GitHub severity of HIGH or CRITICAL, and 42 (4.6 %) a CISA KEV
+  entry. Where the lockfile records dev packages (`package-lock.json`, pnpm v5 / v6, `Pipfile.lock`, `composer.lock`),
+  about half of the warnings (201 of 383) come only from dev packages. Every parser matched an independent parse (real
+  YAML, TOML and JSON libraries) on every entry: 1,220,423 npm `package-lock.json`, 1,317,288 for the other seven formats,
+  160,872 Go and Ruby. For comparison, the deterministic gate blocked 7 pull requests for a real flaw on that run.
 
 ## Excluding paths — `.slopgradeignore`
 
