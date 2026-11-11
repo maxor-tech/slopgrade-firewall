@@ -5,6 +5,8 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-11-10
+
 ### Added
 - **Dependency scan, on by default.** On a pull request that adds or changes a `package-lock.json` (v1, v2, v3), the
   package versions the PR adds are checked against OSV from the runner; each one with a published advisory is a
