@@ -338,6 +338,12 @@ A LOW or MODERATE version, or a dev-only one, is counted in the run log, not ann
 keeps 571 of the 920 warned lockfile changes (2,826 of 6,916 versions) and all 42 KEV versions.
 `dependency-severity: "all"` annotates every version.
 
+**Imported by your code (Go, client ≥ 0.19.0)**: OSV Go advisories list the affected packages. When your own Go code
+(not `vendor/`, `testdata/` or `_test.go`) imports one of them, the version is titled « imported by your code », names the
+package, is always annotated and comes right after the KEV ones. This only raises a warning: a call that goes through
+another module is not seen, so a version without the label is not « unreachable ». On the release run, own code imported
+an affected package in 32 of 231 pull requests that added a vulnerable Go module version (13.9 %).
+
 **Lockfiles**:
 
 | Ecosystem | Lockfiles | Kept (everything else is never matched or sent) |

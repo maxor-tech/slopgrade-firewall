@@ -71,6 +71,7 @@ import { aiReview, aiReviewOutput, prAllHunks, requestHostedReview, AI_REVIEW_DE
 import { surfaceDelta } from "./src/surface-delta.mjs";
 import { prLockfileChanges, repoLockfiles } from "./src/deps-lock.mjs";
 import { queryOsv, depsOutput, addKev } from "./src/deps-osv.mjs";
+import { markGoImported } from "./src/deps-reach.mjs";
 import { IGNORE_FILE, parseIgnore, ignoreMatcher, readIgnoreText } from "./src/ignore.mjs";
 import { EXCEPTIONS_FILE, parseExceptions, exceptionFor, readExceptionsText } from "./src/exceptions.mjs";
 import { decidePurpose, purposeAdvisoryLine } from "./src/repo-purpose.mjs";
@@ -308,7 +309,10 @@ export async function main(argv = [], env = process.env) {
       : monitor ? repoLockfiles(gitDeps, readDeps, ctx) : [];
     for (const { path, deps } of sets) {
       if (!deps.length) continue;
-      const out = depsOutput(path, await addKev(await queryOsv(deps)), { scope: prs ? "pr" : "repo", all: argv.includes("--dependency-scan-all") });
+      // Go: does the repository's own code import an affected package? (src/deps-reach.mjs, READ-DEPS-6; a raise, never a hide)
+      const listGo = () => gitDeps(["ls-files", "-z", "--", "*.go"]).split("\0").filter(Boolean);
+      const r = markGoImported(await addKev(await queryOsv(deps)), listGo, readDeps);
+      const out = depsOutput(path, r, { scope: prs ? "pr" : "repo", all: argv.includes("--dependency-scan-all") });
       for (const n of out.notices) console.log(n);
       for (const l of out.lines) line(l);
       if (out.warn) ghWarn(out.lines[0]);
