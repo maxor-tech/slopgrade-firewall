@@ -39,11 +39,39 @@ test("buildReviewPrompt sends source hunks before test and generated padding, so
   const { hunkTier } = await import("../ai-review.mjs");
   const pad = (p) => ({ path: p, newStart: 1, text: "+" + "y".repeat(AI_REVIEW_MAX_CHARS / 2) });
   const src = { path: "src/auth.js", newStart: 5, text: "-  if (!isAdmin(u)) return deny()" };
-  const { sent, skipped } = buildReviewPrompt([pad("tests/a.test.js"), pad("dist/bundle.min.js"), pad("docs/x.md"), src]);
+  const { sent, skipped, tests } = buildReviewPrompt([pad("tests/a.test.js"), pad("dist/bundle.min.js"), pad("docs/x.md"), src]);
   assert.equal(sent[0], src);
   assert.equal(sent.length, 2);
-  assert.equal(skipped, 2);
+  assert.equal(skipped, 1);   // docs/x.md, past the budget
+  assert.equal(tests, 1);     // tests/a.test.js, not sent at all (see the next test)
   assert.deepEqual(["src/a.py", "pkg/x_test.go", "tests/test_x.py", "yarn.lock", "vendor/a/b.go", "README.md"].map(hunkTier), [0, 1, 1, 2, 2, 2]);
+});
+
+test("buildReviewPrompt leaves test-file hunks out of the prompt and counts them: 17.5 % of the input, 0 named flaws (research READ-TEST-TIER-COST)", () => {
+  const src = { path: "src/auth.js", newStart: 5, text: "-  if (!isAdmin(u)) return deny()" };
+  const t1 = { path: "src/__tests__/auth.test.js", newStart: 1, text: "+it('denies', () => {})" };
+  const t2 = { path: "pkg/auth_test.go", newStart: 1, text: "+func TestDeny(t *testing.T) {}" };
+  const { prompt, sent, skipped, tests } = buildReviewPrompt([t1, src, t2]);
+  assert.deepEqual(sent, [src]);
+  assert.equal(skipped, 0);
+  assert.equal(tests, 2);
+  assert.doesNotMatch(prompt, /auth\.test\.js|auth_test\.go/);
+  assert.match(prompt, /^# pull request — 1 hunks\n/);
+  // a pull request that changes only tests sends nothing
+  const only = buildReviewPrompt([t1, t2]);
+  assert.equal(only.sent.length, 0);
+  assert.equal(only.tests, 2);
+});
+
+test("aiReview carries the test-hunk count, and the run log says the test files were not reviewed", async () => {
+  const { aiReviewOutput } = await import("../ai-review.mjs");
+  const t1 = { path: "src/__tests__/auth.test.js", newStart: 1, text: "+it('denies', () => {})" };
+  const src = { path: "src/auth.js", newStart: 5, text: "-  if (!isAdmin(u)) return deny()" };
+  const r = await aiReview({ key: "k", hunks: [t1, src], fetchImpl: fakeFetch(answer({ flags: [] })) });
+  assert.equal(r.tests, 1);
+  assert.match(aiReviewOutput(r).lines[0], / · 1 test-file hunk\(s\) not sent \(tests are not reviewed\)\. Notices only/);
+  const none = await aiReview({ key: "k", hunks: [src], fetchImpl: fakeFetch(answer({ flags: [] })) });
+  assert.doesNotMatch(aiReviewOutput(none).lines[0], /test-file/);
 });
 
 test("aiReview sends the measured prompt, the schema and the caller's key to the Messages API", async () => {
@@ -215,4 +243,25 @@ test("aiReviewOutput: a first-pass flag below 0.5 (the measured cut) is listed a
   const focused = aiReviewOutput({ flags: [{ ...flags[1], confidence: 0.35 }], sent: [1], skipped: 0, focused: true, model: "claude-opus-5-5" });
   assert.equal(focused.notices.length, 1, "the entry-point pass is cut at 0.3 upstream, not again here");
   assert.doesNotMatch(focused.lines[0], /below confidence/);
+});
+
+test("rate-only flags of the entry-point pass are hardening notes: listed, not annotated; a rate limit WITH another weakness stays a notice", async () => {
+  const { aiReviewOutput, isRateOnlyClass } = await import("../ai-review.mjs");
+  // the predicate: a class that names only a missing rate limit / quota / cost
+  for (const c of ["missing-rate-limit", "missing_rate_limit", "rate_cost", "rate-limit", "cost", "missing_rate_limit_upstream_cost", "Missing rate limiting", "brute-force"])
+    assert.equal(isRateOnlyClass(c), true, c);
+  for (const c of ["missing-rate-limit/input-bounds", "missing-auth-rate-limit-paid-call", "missing-rate-limit / unbounded-input-to-model", "missing-authentication", "input-bounds", "SSRF", "", "rate-limit bypass via missing authentication"])
+    assert.equal(isRateOnlyClass(c), false, c);
+  const flags = [
+    { path: "app/api/x/route.ts", newStart: 4, class: "missing-rate-limit", confidence: 0.35, why: "no limiter" },
+    { path: "app/api/y/route.ts", newStart: 9, class: "missing-rate-limit/input-bounds", confidence: 0.4, why: "unbounded body" },
+  ];
+  const out = aiReviewOutput({ flags, sent: [1, 2], skipped: 0, focused: true, model: "claude-opus-5-5" });
+  assert.equal(out.notices.length, 1);
+  assert.match(out.notices[0], /app\/api\/y\/route\.ts,line=9.*missing-rate-limit\/input-bounds/);
+  assert.match(out.lines[0], /: 1 of 2 PR hunk\(s\) flagged\. Notices only, never blocking\. 1 rate-limit hardening note\(s\): listed here, not annotated\./);
+  assert.ok(out.lines.includes("    - app/api/x/route.ts:4  missing-rate-limit  confidence=0.35  (rate-limit hardening note, not annotated)"));
+  // the first pass is untouched: its cut already decides
+  const first = aiReviewOutput({ flags: [{ ...flags[0], confidence: 0.9 }], sent: [1], skipped: 0, model: "claude-opus-5-5" });
+  assert.equal(first.notices.length, 1);
 });

@@ -149,7 +149,12 @@ export function buildReviewPrompt(hunks) {
   const sent = [];
   const parts = [];
   let size = 0;
-  const ordered = (hunks || []).map((h, i) => [hunkTier(h.path), i, h]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((x) => x[2]);
+  // Test-file hunks are not sent (`tests` counts them). Measured on 222 labeled AI-written entry-point pull requests
+  // (research ledger READ-TEST-TIER-COST): they are 17.5 % of the prompt input and no named flaw rests on one.
+  const all = hunks || [];
+  const kept = all.filter((h) => hunkTier(h.path) !== 1);
+  const tests = all.length - kept.length;
+  const ordered = kept.map((h, i) => [hunkTier(h.path), i, h]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((x) => x[2]);
   for (const h of ordered) {
     const part = `\n## hunk ${sent.length} — ${h.path}\n\`\`\`diff\n${h.text}\n\`\`\`\n`;
     if (size + part.length > AI_REVIEW_MAX_CHARS) break;
@@ -157,8 +162,8 @@ export function buildReviewPrompt(hunks) {
     sent.push(h);
     size += part.length;
   }
-  const skipped = (hunks || []).length - sent.length;
-  return { prompt: `# pull request — ${sent.length} hunks\n${parts.join("")}`, sent, skipped };
+  const skipped = kept.length - sent.length;
+  return { prompt: `# pull request — ${sent.length} hunks\n${parts.join("")}`, sent, skipped, tests };
 }
 
 /**
@@ -203,13 +208,26 @@ const ghProp = (s) => String(s).replace(/[\r\n]/g, " ").replace(/%/g, "%25").rep
 const ghMsg = (s) => String(s).replace(/%/g, "%25").replace(/[\r\n]+/g, " ");
 
 /**
+ * A flag class that names ONLY a missing rate limit, quota or cost bound (« missing-rate-limit », « rate_cost »,
+ * « brute-force »), with no other weakness. PURE.
+ * Measured on 203 labeled AI-written entry-point commits (research ledger READ-RATE-ONLY-NOTE, development data): the
+ * entry-point pass raised such a class on 7 of the 13 clean commits it flagged, and no labeled flaw it named rested on
+ * one (17 of 28 named either way). A rate limit is absent from almost every new route; alone it is a hardening note.
+ */
+export function isRateOnlyClass(cls) {
+  const s = String(cls ?? "").toLowerCase();
+  if (!/rate|limit|quota|cost|throttl|brute|spam|abuse/.test(s)) return false;
+  return !s.replace(/missing|rate|limit(?:ing)?|throttl\w*|quota|upstream|cost|abuse|brute[- _]?force|spam|\band\b|\bno\b|lack\w*|[-_/ ()]/g, "").trim();
+}
+
+/**
  * aiReview's result -> the run-log lines and the `::notice` workflow commands. Pure, so the exact wording is tested.
  * The measurement line names the model it was measured on; any other model is said to be unmeasured.
  */
 export function aiReviewOutput(r, requestedModel = AI_REVIEW_DEFAULT_MODEL) {
   const lines = [];
   const notices = [];
-  const notSent = r.skipped ? ` · ${r.skipped} hunk(s) over the ${AI_REVIEW_MAX_CHARS.toLocaleString("en-US")}-character budget, not reviewed` : "";
+  const notSent = (r.skipped ? ` · ${r.skipped} hunk(s) over the ${AI_REVIEW_MAX_CHARS.toLocaleString("en-US")}-character budget, not reviewed` : "") + (r.tests ? ` · ${r.tests} test-file hunk(s) not sent (tests are not reviewed)` : "");
   const who = r.hosted ? "slopGrade-hosted" : "your key";
   const pass = r.focused ? "AI review, entry-point pass" : "AI review";
   if (r.error) {
@@ -221,10 +239,14 @@ export function aiReviewOutput(r, requestedModel = AI_REVIEW_DEFAULT_MODEL) {
   const egress = r.hosted ? ` · ${r.sent.length} hunk(s) sent to slopGrade, forwarded to the model provider and dropped` : "";
   // The first pass is measured at confidence >= AI_FIRST_PASS_CUT: only those flags are notices; the others are listed in
   // the log and counted (the entry-point pass is already cut at its own measured AI_FOCUS_MIN_CONFIDENCE).
-  const shown = r.focused ? r.flags : r.flags.filter((f) => f.confidence >= AI_FIRST_PASS_CUT);
-  const below = r.flags.length - shown.length;
+  // The entry-point pass: a flag whose class names only a missing rate limit is a hardening note (isRateOnlyClass).
+  const rateNote = (f) => r.focused && isRateOnlyClass(f.class);
+  const shown = r.focused ? r.flags.filter((f) => !rateNote(f)) : r.flags.filter((f) => f.confidence >= AI_FIRST_PASS_CUT);
+  const notes = r.flags.filter(rateNote).length;
+  const below = r.flags.length - shown.length - notes;
   const belowNote = below ? ` ${below} more flag(s) below confidence ${AI_FIRST_PASS_CUT}, the cut it is measured at: listed here, not annotated.` : "";
-  lines.push(`slopGrade Firewall — ${pass} (${who}, ${model}, triage): ${shown.length} of ${r.sent.length} PR hunk(s) flagged${notSent}${used}${egress}. Notices only, never blocking.${belowNote}`);
+  const rateLine = notes ? ` ${notes} rate-limit hardening note(s): listed here, not annotated.` : "";
+  lines.push(`slopGrade Firewall — ${pass} (${who}, ${model}, triage): ${shown.length} of ${r.sent.length} PR hunk(s) flagged${notSent}${used}${egress}. Notices only, never blocking.${belowNote}${rateLine}`);
   lines.push(r.focused
     ? `  This PR adds an entry point and the first pass flagged nothing, so a second pass checked authentication, ownership, input bounds and rate. Measured on 150 fresh AI-written commits like this: 17 of 19 real flaws caught, 61 % of flags real (confidence >= ${AI_FOCUS_MIN_CONFIDENCE}).`
     : MEASURED_LINE[model] || `  ${model} is not measured by slopGrade; ${AI_REVIEW_DEFAULT_MODEL} flagged 88 of 100 real CVE changes and 15 of 600 ordinary commits on slopGrade's sets.`);
@@ -232,7 +254,7 @@ export function aiReviewOutput(r, requestedModel = AI_REVIEW_DEFAULT_MODEL) {
   for (const f of r.flags) {
     const on = shown.includes(f);
     if (on) notices.push(`::notice file=${ghProp(f.path)},line=${f.newStart},title=${title}::${ghMsg(`${f.class} (confidence ${f.confidence.toFixed(2)}) — ${f.why}`)}`);
-    lines.push(`    - ${f.path}:${f.newStart}  ${f.class}  confidence=${f.confidence.toFixed(2)}${on ? "" : "  (below the cut, not annotated)"}`);
+    lines.push(`    - ${f.path}:${f.newStart}  ${f.class}  confidence=${f.confidence.toFixed(2)}${on ? "" : rateNote(f) ? "  (rate-limit hardening note, not annotated)" : "  (below the cut, not annotated)"}`);
   }
   return { lines, notices, warn: false };
 }
@@ -260,9 +282,9 @@ export function hostedRefusal(status, body) {
  * Returns the aiReview shape plus `hosted: true`. Never throws.
  */
 export async function requestHostedReview(post, origin, oidcToken, sha, hunks, pass = null) {
-  const { sent, skipped } = buildReviewPrompt(hunks);
+  const { sent, skipped, tests } = buildReviewPrompt(hunks);
   const fail = (error) => ({ error, sent: [], skipped: (hunks || []).length, hosted: true });
-  if (!sent.length) return { flags: [], sent, skipped, model: AI_REVIEW_DEFAULT_MODEL, usage: null, hosted: true };
+  if (!sent.length) return { flags: [], sent, skipped, tests, model: AI_REVIEW_DEFAULT_MODEL, usage: null, hosted: true };
   try {
     // pass "focus" (0.17.0): the entry-point pass of this run; the server re-checks the condition and the surface itself.
     const payload = { oidcToken, sha, hunks: sent.map((h) => ({ path: h.path, newStart: h.newStart, text: h.text })), ...(pass ? { pass } : {}) };
@@ -277,7 +299,7 @@ export async function requestHostedReview(post, origin, oidcToken, sha, hunks, p
       if (!known.has(`${f?.path}\u0000${f?.newStart}`) || !Number.isFinite(c) || c < 0 || c > 1) return fail("malformed answer from slopGrade");
       flags.push({ path: f.path, newStart: f.newStart, class: String(f.class || "").slice(0, 80), confidence: c, why: String(f.why || "").slice(0, 400) });
     }
-    return { flags, sent, skipped, model: typeof body.model === "string" ? body.model : AI_REVIEW_DEFAULT_MODEL, usage: null, hosted: true };
+    return { flags, sent, skipped, tests, model: typeof body.model === "string" ? body.model : AI_REVIEW_DEFAULT_MODEL, usage: null, hosted: true };
   } catch (e) {
     return fail(e?.name === "TimeoutError" ? "slopGrade did not answer in time" : `call failed (${e?.message || e})`);
   }
@@ -294,9 +316,9 @@ export function readUsage(u) {
  * { error, sent, skipped } — it never throws, so the gate always goes on (fail open).
  */
 export async function aiReview({ key, model = AI_REVIEW_DEFAULT_MODEL, hunks, fetchImpl = fetch, timeoutMs = AI_REVIEW_TIMEOUT_MS, system = AI_REVIEW_SYSTEM }) {
-  const { prompt, sent, skipped } = buildReviewPrompt(hunks);
+  const { prompt, sent, skipped, tests } = buildReviewPrompt(hunks);
   if (!key) return { error: "no API key (set the ai-review-key input from a repository secret)", sent: [], skipped: (hunks || []).length };
-  if (!sent.length) return { flags: [], sent, skipped, model };
+  if (!sent.length) return { flags: [], sent, skipped, tests, model };
   try {
     const res = await fetchImpl(API_URL, {
       method: "POST",
@@ -321,7 +343,7 @@ export async function aiReview({ key, model = AI_REVIEW_DEFAULT_MODEL, hunks, fe
     if (body?.stop_reason === "refusal") return { error: `the model declined (${body?.stop_details?.category ?? "no category"})`, sent, skipped };
     if (body?.stop_reason === "max_tokens") return { error: "the answer was cut at max_tokens", sent, skipped };
     const text = (body?.content || []).filter((b) => b?.type === "text").map((b) => b.text).join("");
-    return { flags: parseFlags(text, sent), sent, skipped, model: body?.model || model, usage: readUsage(body?.usage) };
+    return { flags: parseFlags(text, sent), sent, skipped, tests, model: body?.model || model, usage: readUsage(body?.usage) };
   } catch (e) {
     const msg = e?.name === "TimeoutError" ? `no answer within ${Math.round(timeoutMs / 1000)} s` : `call failed (${e?.message || e})`;
     return { error: msg, sent, skipped };
