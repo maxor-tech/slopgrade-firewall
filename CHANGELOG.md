@@ -5,7 +5,15 @@ All notable changes to the open-source slopGrade Firewall client are documented 
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-11-19
+
 ### Added
+- **AI review: a « missing rate limit » alone is a hardening note.** A flag of the entry-point pass whose class names
+  only a missing rate limit, quota or cost bound is listed in the run log as a rate-limit hardening note and is no
+  longer annotated on the pull request. A rate limit named together with another weakness (unbounded input, missing
+  authentication) stays a notice; the first pass is unchanged. On 203 labeled AI-written entry-point commits the
+  review's security claims on clean commits fall from 13 to 6 of 163, with the same labeled flaws named (17 of 28).
+  Development numbers: the rule was chosen on that data.
 - **Dependency scan: « imported by your code » (Go).** OSV Go advisories name the affected packages; when the
   repository's own Go code (not `vendor/`, `testdata/` or `_test.go`) imports one of them, the version gets the title
   « imported by your code », says which package, is always annotated and comes right after the KEV ones. It only raises
@@ -18,6 +26,13 @@ All notable changes to the open-source slopGrade Firewall client are documented 
   is matched, and the message says so (`http2.Server (affected: Server.ServeConn)`). A name match, not a call graph; it
   only raises a warning. Measured (PREREG / READ-DEPS-7): 19 of the same 231 pull requests (8.2 %, 95 % interval 5.3 to
   12.5); the shipped matcher agreed with an independent reference on 231 of 231.
+
+### Changed
+- **AI review: test files are not sent to the model.** Test-file hunks are left out of the prompt and counted; the run
+  log says « N test-file hunk(s) not sent (tests are not reviewed) ». On 222 labeled AI-written entry-point pull
+  requests they were 17.5 % of the prompt input and no labeled flaw rested on one, so a review with your key costs
+  about 16 % less there. A test fixture whose extension is otherwise low-priority (`tests/fixtures/x.txt`) is a test
+  file too.
 
 ### Fixed
 - **No « unknown flag --dependency-scan » warning on every run.** The Action passes `--dependency-scan` by default (and
