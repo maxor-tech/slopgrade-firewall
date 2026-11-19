@@ -152,7 +152,8 @@ export function buildReviewPrompt(hunks) {
   // Test-file hunks are not sent (`tests` counts them). Measured on 222 labeled AI-written entry-point pull requests
   // (research ledger READ-TEST-TIER-COST): they are 17.5 % of the prompt input and no named flaw rests on one.
   const all = hunks || [];
-  const kept = all.filter((h) => hunkTier(h.path) !== 1);
+  // on the test PATH itself, not hunkTier: hunkTier puts a test fixture « tests/fixtures/x.txt » in the low tier (2)
+  const kept = all.filter((h) => !TEST_TIER.test(h.path));
   const tests = all.length - kept.length;
   const ordered = kept.map((h, i) => [hunkTier(h.path), i, h]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((x) => x[2]);
   for (const h of ordered) {
