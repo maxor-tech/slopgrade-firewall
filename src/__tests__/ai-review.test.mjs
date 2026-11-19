@@ -57,6 +57,13 @@ test("buildReviewPrompt leaves test-file hunks out of the prompt and counts them
   assert.equal(tests, 2);
   assert.doesNotMatch(prompt, /auth\.test\.js|auth_test\.go/);
   assert.match(prompt, /^# pull request — 1 hunks\n/);
+  // a test path that the low tier also matches (a fixture .txt, a snapshot) is still a test: left out and counted;
+  // a production .txt keeps its low-tier treatment (sent, last)
+  const fx = { path: "tests/fixtures/request.txt", newStart: 1, text: "+GET /x" };
+  const prodTxt = { path: "docs/notes.txt", newStart: 1, text: "+note" };
+  const mixed = buildReviewPrompt([fx, src, prodTxt]);
+  assert.deepEqual(mixed.sent, [src, prodTxt]);
+  assert.equal(mixed.tests, 1);
   // a pull request that changes only tests sends nothing
   const only = buildReviewPrompt([t1, t2]);
   assert.equal(only.sent.length, 0);
